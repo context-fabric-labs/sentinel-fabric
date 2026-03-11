@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::state::pod_registry::PodRegistry;
+use crate::state::session_map::SessionMap;
 use crate::admission::AdmissionController;
 
 /// Shared application state
@@ -7,6 +8,7 @@ use crate::admission::AdmissionController;
 pub struct AppState {
     pub config: Config,
     pub pod_registry: PodRegistry,
+    pub session_map: SessionMap,
     pub admission_controller: AdmissionController,
 }
 
@@ -25,9 +27,13 @@ impl AppState {
             &pod_ids,
         );
         
+        // Create session map with 1 hour TTL
+        let session_map = SessionMap::new(3600);
+        
         Self {
             config,
             pod_registry,
+            session_map,
             admission_controller,
         }
     }

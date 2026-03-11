@@ -85,6 +85,23 @@ pub struct RoutingDecision {
     pub reason: String,
     /// Request shape that was routed
     pub request_shape: RequestShape,
+    /// Sticky routing information (if session_id was provided)
+    pub sticky_info: Option<StickyRoutingInfo>,
+}
+
+/// Information about sticky routing decision
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StickyRoutingInfo {
+    /// Session ID from request
+    pub session_id: String,
+    /// Preferred pod from HRW
+    pub hrw_preferred_pod: String,
+    /// Was the preferred pod selected?
+    pub sticky_hit: bool,
+    /// If not selected, why?
+    pub fallback_reason: Option<String>,
+    /// HRW rank of the chosen pod (0 = best, 1 = 2nd choice, etc.)
+    pub chosen_pod_hrw_rank: usize,
 }
 
 #[cfg(test)]
