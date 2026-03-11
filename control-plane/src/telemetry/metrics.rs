@@ -33,10 +33,21 @@ pub fn register_metrics() {
         counter!("routing_decisions_total");
         counter!("routing_sticky_hits_total");
         counter!("routing_sticky_misses_total");
+        counter!("routing_sticky_fallback_unhealthy_total");
+        counter!("routing_sticky_fallback_capacity_total");
+
+        // Session metrics
+        gauge!("sessions_active_total").set(0);
 
         // Per-pod inflight
         gauge!("pod_inflight_count");
     });
+}
+
+/// Update pod health metrics
+pub fn update_pod_health_metrics(healthy: usize, unhealthy: usize) {
+    gauge!("pods_healthy_total").set(healthy as f64);
+    gauge!("pods_unhealthy_total").set(unhealthy as f64);
 }
 
 /// Record admission decision
@@ -78,22 +89,26 @@ pub fn update_admission_metrics(metrics: &crate::admission::AdmissionMetrics) {
     }
 }
 
-/// Update pod health metrics
-pub fn update_pod_health_metrics(healthy: usize, unhealthy: usize) {
-    gauge!("pods_healthy_total").set(healthy as f64);
-    gauge!("pods_unhealthy_total").set(unhealthy as f64);
+/// Record a routing decision
+pub fn record_routing_decision(_chosen: bool, sticky_hit: bool, sticky_fallback_reason: Option<&str>) {
+    counter!("routing_decisions_total").increment(1);
+    
+    if sticky_hit {
+        counter!("routing_sticky_hits_total").increment(1);
+    } else if let Some(reason) = sticky_fallback_reason {
+        match reason {
+            "unhealthy" => counter!("routing_sticky_fallback_unhealthy_total").increment(1),
+            "capacity" => counter!("routing_sticky_fallback_capacity_total").increment(1),
+            _ => counter!("routing_sticky_misses_total").increment(1),
+        }
+    } else {
+        counter!("routing_sticky_misses_total").increment(1);
+    }
 }
 
-/// Record a routing decision
-pub fn record_routing_decision(chosen: bool, sticky_hit: bool) {
-    counter!("routing_decisions_total").increment(1);
-    if chosen {
-        if sticky_hit {
-            counter!("routing_sticky_hits_total").increment(1);
-        } else {
-            counter!("routing_sticky_misses_total").increment(1);
-        }
-    }
+/// Update session metrics
+pub fn update_session_metrics(active_count: usize) {
+    gauge!("sessions_active_total").set(active_count as f64);
 }
 
 /// Record request admission/rejection
