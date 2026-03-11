@@ -1,3 +1,4 @@
+mod admission;
 mod api;
 mod app_state;
 mod config;
@@ -5,7 +6,7 @@ mod scheduler;
 mod state;
 mod telemetry;
 
-use api::{create_debug_router, create_health_router};
+use api::{create_admission_router, create_debug_router, create_health_router};
 use app_state::AppState;
 use config::Config;
 use std::net::SocketAddr;
@@ -40,6 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create shared state
     let state = AppState::new(config.clone());
 
+    // Build admission router
+    let admission_router = create_admission_router()
+        .with_state(state.clone());
+
     // Build debug router
     let debug_router = create_debug_router()
         .with_state(state.clone());
@@ -49,7 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(state.clone());
 
     // Merge routers
-    let app = debug_router
+    let app = admission_router
+        .merge(debug_router)
         .merge(health_router)
         .layer(TraceLayer::new_for_http());
 
