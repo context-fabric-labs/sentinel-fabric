@@ -1,0 +1,57 @@
+use metrics::{counter, gauge};
+use std::sync::Once;
+
+static REGISTER: Once = Once::new();
+
+/// Register Prometheus metrics
+pub fn register_metrics() {
+    REGISTER.call_once(|| {
+        // Pod health metrics
+        gauge!("pods_healthy_total").set(0);
+        gauge!("pods_unhealthy_total").set(0);
+
+        // Request metrics
+        counter!("requests_total");
+        counter!("requests_admitted_total");
+        counter!("requests_rejected_total");
+
+        // Scoring metrics
+        gauge!("scoring_inflight_avg").set(0.0);
+        gauge!("scoring_gpu_headroom_avg").set(0.0);
+        gauge!("scoring_latency_avg").set(0.0);
+        gauge!("scoring_error_rate_avg").set(0.0);
+
+        // Routing decision metrics
+        counter!("routing_decisions_total");
+        counter!("routing_sticky_hits_total");
+        counter!("routing_sticky_misses_total");
+    });
+}
+
+/// Update pod health metrics
+pub fn update_pod_health_metrics(healthy: usize, unhealthy: usize) {
+    gauge!("pods_healthy_total").set(healthy as f64);
+    gauge!("pods_unhealthy_total").set(unhealthy as f64);
+}
+
+/// Record a routing decision
+pub fn record_routing_decision(chosen: bool, sticky_hit: bool) {
+    counter!("routing_decisions_total").increment(1);
+    if chosen {
+        if sticky_hit {
+            counter!("routing_sticky_hits_total").increment(1);
+        } else {
+            counter!("routing_sticky_misses_total").increment(1);
+        }
+    }
+}
+
+/// Record request admission/rejection
+pub fn record_request_admission(admitted: bool) {
+    counter!("requests_total").increment(1);
+    if admitted {
+        counter!("requests_admitted_total").increment(1);
+    } else {
+        counter!("requests_rejected_total").increment(1);
+    }
+}
