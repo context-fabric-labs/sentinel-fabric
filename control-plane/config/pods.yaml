@@ -1,0 +1,38 @@
+# Sentinel Control Plane - Pod Configuration
+# This file defines the backend LLM inference pods
+
+pods:
+  - id: pod-1
+    address: http://localhost:8001
+    name: "GPU Pod 1"
+    model_id: llama-8b
+    gpu_memory_mb: 80000
+    num_layers: 32
+    hidden_size: 4096
+    weight: 1.0
+
+  - id: pod-2
+    address: http://localhost:8002
+    name: "GPU Pod 2"
+    model_id: llama-8b
+    gpu_memory_mb: 80000
+    num_layers: 32
+    hidden_size: 4096
+    weight: 1.0
+
+  - id: pod-3
+    address: http://localhost:8003
+    name: "GPU Pod 3"
+    model_id: llama-8b
+    gpu_memory_mb: 80000
+    num_layers: 32
+    hidden_size: 4096
+    weight: 1.0
+
+# Health check settings
+health_check_interval_secs: 5
+health_check_timeout_secs: 3
+
+# Server ports
+metrics_port: 9090
+api_port: 8080
