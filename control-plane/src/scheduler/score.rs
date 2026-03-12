@@ -1,4 +1,5 @@
 use crate::scheduler::types::{PodScore, RequestShape};
+use crate::scheduler::kv_estimator::{KvPressureEstimator, ModelConfig};
 use crate::state::pod_registry::PodState;
 
 /// Scoring weights (configurable in future)
@@ -26,15 +27,34 @@ pub struct PodScorer {
     weights: ScoringWeights,
     /// Max inflight threshold (pods at or above this get score 0 for inflight)
     max_inflight: u32,
+    /// Optional KV pressure estimator
+    kv_estimator: Option<KvPressureEstimator>,
 }
 
 impl PodScorer {
     pub fn new(weights: ScoringWeights, max_inflight: u32) -> Self {
-        Self { weights, max_inflight }
+        Self {
+            weights,
+            max_inflight,
+            kv_estimator: None,
+        }
+    }
+
+    /// Create scorer with KV pressure estimation
+    pub fn with_kv_pressure(
+        weights: ScoringWeights,
+        max_inflight: u32,
+        model_config: ModelConfig,
+    ) -> Self {
+        Self {
+            weights,
+            max_inflight,
+            kv_estimator: Some(KvPressureEstimator::new(model_config)),
+        }
     }
 
     /// Score a single pod based on its state and request shape
-    pub fn score_pod(&self, pod: &PodState, _request: &RequestShape) -> PodScore {
+    pub fn score_pod(&self, pod: &PodState, request: &RequestShape) -> PodScore {
         let mut score = PodScore::new(pod.config.id.clone());
 
         // Filter: unhealthy pods are excluded
@@ -59,6 +79,17 @@ impl PodScorer {
         // Component 4: Error rate score (0.0 to 1.0)
         // Lower error rate = higher score
         score.score_error_rate = self.calculate_error_rate_score(&pod.snapshot);
+
+        // Component 5: KV pressure score (0.0 to 1.0) - if enabled
+        if let Some(ref estimator) = self.kv_estimator {
+            score.score_kv_pressure = self.calculate_kv_pressure_score(
+                pod,
+                request,
+                estimator,
+            );
+        } else {
+            score.score_kv_pressure = 1.0; // No penalty if not enabled
+        }
 
         // Apply configured weight
         score.weight_multiplier = pod.config.weight;
@@ -104,6 +135,26 @@ impl PodScorer {
         1.0 - snapshot.error_rate.min(1.0)
     }
 
+    /// Calculate KV pressure component score
+    fn calculate_kv_pressure_score(
+        &self,
+        pod: &PodState,
+        request: &RequestShape,
+        estimator: &KvPressureEstimator,
+    ) -> f64 {
+        // Estimate KV pressure for this pod
+        let avg_seq_len = request.prompt_tokens_est + request.max_tokens;
+        let pressure = estimator.estimate_pod_pressure(
+            &pod.config.id,
+            pod.snapshot.inflight_count,
+            avg_seq_len,
+            pod.config.gpu_memory_mb,
+        );
+
+        // Use pressure level to determine score multiplier
+        pressure.pressure_level().score_multiplier()
+    }
+
     /// Score all pods and return sorted candidates (best first)
     pub fn score_all_candidates(
         &self,
@@ -133,7 +184,6 @@ impl PodScorer {
 mod tests {
     use super::*;
     use crate::config::PodConfig;
-    use crate::state::pod_registry::PodHealthSnapshot;
 
     fn create_test_pod(id: &str, gpu_used_mb: u64, inflight: u32) -> PodState {
         let config = PodConfig {
@@ -240,5 +290,72 @@ mod tests {
         // Scores should be descending
         assert!(scores[0].total_score >= scores[1].total_score);
         assert!(scores[1].total_score >= scores[2].total_score);
+    }
+
+    #[test]
+    fn test_kv_pressure_scoring() {
+        // Create model config for Llama 8B
+        let model_config = ModelConfig::new("llama-8b", 32, 4096);
+        
+        // Create scorer with KV pressure enabled
+        let scorer = PodScorer::with_kv_pressure(
+            ScoringWeights::default(),
+            100,
+            model_config,
+        );
+
+        let request = RequestShape {
+            model_id: "llama-8b".to_string(),
+            prompt_tokens_est: 4096,
+            max_tokens: 1024,
+            session_id: None,
+            priority: 0,
+        };
+
+        // Pod with low KV pressure (low inflight, lots of GPU memory)
+        let low_pressure_pod = create_test_pod("pod-1", 10000, 5);
+        
+        // Pod with high KV pressure (high inflight, less GPU memory)
+        let high_pressure_pod = create_test_pod("pod-2", 70000, 80);
+
+        let low_score = scorer.score_pod(&low_pressure_pod, &request);
+        let high_score = scorer.score_pod(&high_pressure_pod, &request);
+
+        // Low pressure pod should have better KV score
+        assert!(low_score.score_kv_pressure > high_score.score_kv_pressure);
+    }
+
+    #[test]
+    fn test_kv_pressure_with_heavier_request() {
+        let model_config = ModelConfig::new("llama-8b", 32, 4096);
+        let scorer = PodScorer::with_kv_pressure(
+            ScoringWeights::default(),
+            100,
+            model_config,
+        );
+
+        let light_request = RequestShape {
+            model_id: "llama-8b".to_string(),
+            prompt_tokens_est: 100,
+            max_tokens: 100,
+            session_id: None,
+            priority: 0,
+        };
+
+        let heavy_request = RequestShape {
+            model_id: "llama-8b".to_string(),
+            prompt_tokens_est: 8000,
+            max_tokens: 2000,
+            session_id: None,
+            priority: 0,
+        };
+
+        let pod = create_test_pod("pod-1", 40000, 50);
+
+        let light_score = scorer.score_pod(&pod, &light_request);
+        let heavy_score = scorer.score_pod(&pod, &heavy_request);
+
+        // Heavy request should result in lower KV score due to higher pressure
+        assert!(light_score.score_kv_pressure >= heavy_score.score_kv_pressure);
     }
 }
