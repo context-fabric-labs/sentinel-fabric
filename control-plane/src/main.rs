@@ -1,12 +1,13 @@
 mod admission;
 mod api;
 mod app_state;
+mod backends;
 mod config;
 mod scheduler;
 mod state;
 mod telemetry;
 
-use api::{create_admission_router, create_debug_router, create_health_router};
+use api::{create_admission_router, create_debug_router, create_health_router, create_proxy_router};
 use app_state::AppState;
 use config::Config;
 use std::net::SocketAddr;
@@ -41,6 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create shared state
     let state = AppState::new(config.clone());
 
+    // Build proxy router (vLLM forwarding)
+    let proxy_router = create_proxy_router()
+        .with_state(state.clone());
+
     // Build admission router
     let admission_router = create_admission_router()
         .with_state(state.clone());
@@ -53,8 +58,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_router = create_health_router()
         .with_state(state.clone());
 
-    // Merge routers
-    let app = admission_router
+    // Merge routers - proxy routes take precedence
+    let app = proxy_router
+        .merge(admission_router)
         .merge(debug_router)
         .merge(health_router)
         .layer(TraceLayer::new_for_http());

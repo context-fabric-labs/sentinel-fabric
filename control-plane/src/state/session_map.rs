@@ -123,7 +123,7 @@ mod tests {
         let map = SessionMap::new(3600);
         
         // Create mapping
-        let mapping1 = map.get_or_create("session-123", "pod-1").await;
+        let _mapping1 = map.get_or_create("session-123", "pod-1").await;
         
         // Get existing mapping
         let mapping2 = map.get("session-123").await;
