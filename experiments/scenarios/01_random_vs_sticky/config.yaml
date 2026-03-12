@@ -1,0 +1,193 @@
+# Experiment 01: Random Routing vs Sticky Routing
+
+## Hypothesis
+
+Sticky routing (session-aware) will show:
+- **Lower latency** for follow-up requests (KV cache reuse)
+- **Higher throughput** (less KV recomputation)
+- **Better GPU utilization** (predictable load distribution)
+
+## Configuration
+
+```yaml
+experiment:
+  name: "random_vs_sticky"
+  duration_seconds: 300
+  warmup_seconds: 30
+
+workload:
+  requests_per_second: 100
+  session_count: 1000
+  requests_per_session: 50
+  prompt_tokens: 512
+  max_tokens: 256
+
+routing_strategies:
+  - name: "random"
+    description: "Random pod selection"
+  - name: "sticky"
+    description: "HRW-based sticky routing"
+
+pods:
+  - id: "pod-1"
+    address: "http://localhost:8001"
+  - id: "pod-2"
+    address: "http://localhost:8002"
+  - id: "pod-3"
+    address: "http://localhost:8003"
+```
+
+## Run Script
+
+```bash
+#!/bin/bash
+set -e
+
+echo "=== Experiment 01: Random vs Sticky Routing ==="
+
+# Start control plane
+cd ../../control-plane
+cargo run --release &
+CONTROL_PLANE_PID=$!
+sleep 5
+
+# Run random routing test
+echo "Testing random routing..."
+python3 ../experiments/scripts/load_generator.py \
+  --strategy random \
+  --rps 100 \
+  --duration 300 \
+  --sessions 1000 \
+  --output ../experiments/results/01_random_vs_sticky/random.json
+
+# Run sticky routing test
+echo "Testing sticky routing..."
+python3 ../experiments/scripts/load_generator.py \
+  --strategy sticky \
+  --rps 100 \
+  --duration 300 \
+  --sessions 1000 \
+  --output ../experiments/results/01_random_vs_sticky/sticky.json
+
+# Stop control plane
+kill $CONTROL_PLANE_PID
+
+echo "Experiment complete!"
+```
+
+## Metrics to Collect
+
+### Primary Metrics
+- **p50 latency** - median request latency
+- **p95 latency** - tail latency
+- **p99 latency** - extreme tail latency
+- **throughput** - requests/second
+- **KV cache hit rate** - % requests routed to same pod
+
+### Secondary Metrics
+- **GPU memory usage** - per pod
+- **KV pressure** - per pod
+- **Rejection rate** - % requests rejected
+- **Error rate** - % requests failing
+
+## Expected Results
+
+### Random Routing
+```json
+{
+  "strategy": "random",
+  "p50_latency_ms": 450,
+  "p95_latency_ms": 890,
+  "p99_latency_ms": 1200,
+  "throughput_rps": 95,
+  "kv_cache_hit_rate": 0.33,
+  "rejection_rate": 0.02,
+  "error_rate": 0.01
+}
+```
+
+### Sticky Routing
+```json
+{
+  "strategy": "sticky",
+  "p50_latency_ms": 320,
+  "p95_latency_ms": 650,
+  "p99_latency_ms": 890,
+  "throughput_rps": 98,
+  "kv_cache_hit_rate": 0.95,
+  "rejection_rate": 0.01,
+  "error_rate": 0.005
+}
+```
+
+### Expected Improvement
+- **~30% lower p50 latency** (KV cache reuse)
+- **~27% lower p95 latency** (predictable routing)
+- **~25% lower p99 latency** (reduced tail)
+- **~3% higher throughput** (less recomputation)
+- **~3x KV cache hit rate** (0.33 → 0.95)
+
+## Analysis Template
+
+```markdown
+# Experiment 01 Analysis
+
+## Results Summary
+
+| Metric | Random | Sticky | Improvement |
+|--------|--------|--------|-------------|
+| p50 Latency | ___ ms | ___ ms | __% |
+| p95 Latency | ___ ms | ___ ms | __% |
+| p99 Latency | ___ ms | ___ ms | __% |
+| Throughput | ___ rps | ___ rps | __% |
+| KV Hit Rate | __% | __% | __x |
+
+## Observations
+
+1. **Latency**: Sticky routing shows __% lower p50 latency because...
+
+2. **Tail Latency**: P95/P99 improvements indicate...
+
+3. **Throughput**: The __% improvement is due to...
+
+4. **KV Cache**: Hit rate increased from __% to __%...
+
+## Interview Talking Points
+
+- "Sticky routing reduced latency by __% through KV cache reuse"
+- "HRW hashing ensures even distribution while maintaining stickiness"
+- "The improvement is most visible in tail latency (p95/p99)"
+
+## Graphs to Generate
+
+1. Latency distribution comparison (histogram)
+2. CDF comparison (random vs sticky)
+3. Throughput over time
+4. KV cache hit rate over time
+```
+
+## Grafana Queries
+
+```promql
+# Latency comparison
+histogram_quantile(0.50, rate(backend_latency_ms_bucket[5m]))
+
+# P95 comparison
+histogram_quantile(0.95, rate(backend_latency_ms_bucket[5m]))
+
+# Throughput
+rate(backend_requests_total{status="success"}[5m])
+
+# KV hit rate (sticky)
+rate(routing_decisions_total{sticky="hit"}[5m]) / rate(routing_decisions_total[5m])
+```
+
+## Acceptance Criteria
+
+✅ Experiment runs for 5 minutes (300 seconds)  
+✅ 1000 sessions with 50 requests each  
+✅ Both random and sticky strategies tested  
+✅ Metrics collected: p50, p95, p99, throughput, KV hit rate  
+✅ Results saved to JSON  
+✅ Analysis documented in markdown  
+✅ Graphs generated for interview deck  

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::app_state::AppState;
-use crate::scheduler::{PodScorer, RequestShape, RoutingDecision, ScoringWeights, StickyRoutingInfo, hrw_select_pods, SelectionPolicy, PodSelector, PodTelemetry};
+use crate::scheduler::{PodScorer, RequestShape, RoutingDecision, ScoringWeights, StickyRoutingInfo, hrw_select_pods, SelectionPolicy, PodSelector, PodTelemetry, ScoreBreakdown, PolicyWeights};
 use crate::admission::AdmissionDecision;
 use crate::telemetry;
 
@@ -30,6 +30,8 @@ pub struct RouteDebugResponse {
     pub admission: Option<AdmissionDecision>,
     pub decision: Option<RoutingDecision>,
     pub error: Option<String>,
+    /// Detailed score breakdown for all candidates
+    pub score_breakdown: Option<Vec<ScoreBreakdown>>,
 }
 
 /// Create the debug router
@@ -72,6 +74,7 @@ pub async fn route_debug_handler(
                 admission: Some(admission),
                 decision: None,
                 error: Some("Request rejected by admission controller".to_string()),
+                score_breakdown: None,
             }));
         }
 
@@ -108,6 +111,7 @@ async fn route_with_sticky(
             admission: None,
             decision: None,
             error: Some("No pods available".to_string()),
+            score_breakdown: None,
         }));
     }
 
@@ -230,6 +234,7 @@ async fn route_with_sticky(
         admission: None, // Already handled in caller
         decision: Some(decision),
         error: None,
+        score_breakdown: None, // TODO: Add score breakdown from policy
     }))
 }
 

@@ -1,0 +1,183 @@
+# Experiment 05: Unhealthy/Failing Pod Behavior
+
+## Hypothesis
+
+Health-aware routing with circuit breaker will:
+- **Detect unhealthy pods** quickly
+- **Route around failures** automatically
+- **Maintain low error rate** despite pod failures
+
+## Configuration
+
+```yaml
+experiment:
+  name: "unhealthy_pod"
+  duration_seconds: 300
+  phases:
+    - name: "healthy"
+      duration_seconds: 60
+      all_pods_healthy: true
+    - name: "pod_failure"
+      duration_seconds: 120
+      failed_pods:
+        - pod-2
+    - name: "recovery"
+      duration_seconds: 120
+      all_pods_healthy: true
+
+health_check:
+  interval_seconds: 5
+  timeout_seconds: 3
+  unhealthy_threshold: 2
+
+pods:
+  - id: "pod-1"
+    address: "http://localhost:8001"
+  - id: "pod-2"
+    address: "http://localhost:8002"
+  - id: "pod-3"
+    address: "http://localhost:8003"
+```
+
+## Expected Results
+
+### Healthy Phase
+```json
+{
+  "phase": "healthy",
+  "healthy_pods": 3,
+  "requests_per_pod": {
+    "pod-1": 1000,
+    "pod-2": 1000,
+    "pod-3": 1000
+  },
+  "error_rate": 0.01,
+  "avg_latency_ms": 350
+}
+```
+
+### Pod Failure Phase
+```json
+{
+  "phase": "pod_failure",
+  "healthy_pods": 2,
+  "requests_per_pod": {
+    "pod-1": 1500,
+    "pod-2": 0,
+    "pod-3": 1500
+  },
+  "error_rate": 0.05,
+  "avg_latency_ms": 380,
+  "detection_time_seconds": 8
+}
+```
+
+### Recovery Phase
+```json
+{
+  "phase": "recovery",
+  "healthy_pods": 3,
+  "requests_per_pod": {
+    "pod-1": 1000,
+    "pod-2": 1000,
+    "pod-3": 1000
+  },
+  "error_rate": 0.01,
+  "avg_latency_ms": 350,
+  "recovery_time_seconds": 10
+}
+```
+
+## Metrics to Collect
+
+### Primary Metrics
+- **Healthy pod count** - over time
+- **Requests per pod** - distribution
+- **Error rate** - during each phase
+- **Detection time** - time to detect failure
+- **Recovery time** - time to resume routing to recovered pod
+
+### Secondary Metrics
+- **Health check duration** - per pod
+- **Consecutive failures** - per pod
+- **Circuit breaker state** - open/closed/half-open
+
+## Analysis Template
+
+```markdown
+# Experiment 05 Analysis
+
+## Phase Results
+
+### Healthy Phase
+| Metric | Value |
+|--------|-------|
+| Healthy Pods | __ |
+| Requests/Pod | ___ |
+| Error Rate | __% |
+| Avg Latency | ___ ms |
+
+### Pod Failure Phase
+| Metric | Value |
+|--------|-------|
+| Healthy Pods | __ |
+| Requests/Pod | ___ |
+| Error Rate | __% |
+| Detection Time | ___ seconds |
+
+### Recovery Phase
+| Metric | Value |
+|--------|-------|
+| Healthy Pods | __ |
+| Requests/Pod | ___ |
+| Recovery Time | ___ seconds |
+
+## Key Findings
+
+1. **Failure Detection**: Pod-2 failure detected in __ seconds
+
+2. **Traffic Shift**: Requests shifted from pod-2 to pod-1/pod-3 (__ each)
+
+3. **Error Rate**: Only __% error rate during failure (vs __% without health checks)
+
+4. **Recovery**: Pod-2 resumed receiving traffic in __ seconds
+
+## Interview Points
+
+- "Health checks detected pod failure in __ seconds"
+- "Traffic automatically shifted to healthy pods"
+- "Error rate remained low (__%) despite pod failure"
+- "Full recovery in __ seconds after pod healed"
+
+## Graphs
+
+1. Healthy pod count over time
+2. Requests per pod over time (showing shift)
+3. Error rate over time
+4. Health check duration over time
+```
+
+## Grafana Queries
+
+```promql
+# Healthy pods
+sum(pod_healthy)
+
+# Requests per pod
+rate(backend_requests_total{status="success"}[5m]) by (pod_id)
+
+# Error rate
+rate(backend_requests_total{status="error"}[5m])
+
+# Health check duration
+histogram_quantile(0.95, rate(health_check_duration_ms_bucket[5m]))
+```
+
+## Acceptance Criteria
+
+✅ Three phases: healthy, pod failure, recovery  
+✅ Pod-2 simulated failure during phase 2  
+✅ Metrics: healthy count, requests/pod, error rate, detection/recovery time  
+✅ Results show automatic traffic shift away from failed pod  
+✅ Error rate remains low despite failure  
+✅ Analysis documents failure detection and recovery  
