@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::app_state::AppState;
-use crate::scheduler::{PodScorer, RequestShape, RoutingDecision, ScoringWeights, StickyRoutingInfo, hrw_select_pods};
+use crate::scheduler::{PodScorer, RequestShape, RoutingDecision, ScoringWeights, StickyRoutingInfo, hrw_select_pods, SelectionPolicy, PodSelector, PodTelemetry};
 use crate::admission::AdmissionDecision;
 use crate::telemetry;
 
