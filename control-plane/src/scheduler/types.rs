@@ -39,6 +39,8 @@ pub struct PodScore {
     pub score_latency: f64,
     /// Score from error rate
     pub score_error_rate: f64,
+    /// Score from KV pressure (Story 4)
+    pub score_kv_pressure: f64,
     /// Configured weight multiplier
     pub weight_multiplier: f64,
     /// Is this pod healthy (filter criterion)
@@ -56,6 +58,7 @@ impl PodScore {
             score_gpu_headroom: 0.0,
             score_latency: 0.0,
             score_error_rate: 0.0,
+            score_kv_pressure: 1.0, // Default to no penalty
             weight_multiplier: 1.0,
             is_healthy: true,
             exclusion_reason: None,
@@ -67,7 +70,8 @@ impl PodScore {
         self.total_score = (self.score_inflight
             + self.score_gpu_headroom
             + self.score_latency
-            + self.score_error_rate)
+            + self.score_error_rate
+            + self.score_kv_pressure)
             * self.weight_multiplier;
     }
 }
@@ -127,10 +131,11 @@ mod tests {
         score.score_gpu_headroom = 0.6;
         score.score_latency = 0.9;
         score.score_error_rate = 1.0;
+        score.score_kv_pressure = 1.0; // Default (no penalty)
         score.weight_multiplier = 1.5;
         score.calculate_total();
 
-        let expected = (0.8 + 0.6 + 0.9 + 1.0) * 1.5;
+        let expected = (0.8 + 0.6 + 0.9 + 1.0 + 1.0) * 1.5;
         assert!((score.total_score - expected).abs() < 0.001);
     }
 }
