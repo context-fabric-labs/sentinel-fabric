@@ -34,6 +34,7 @@ set(PM_NIXL_SOURCES
     src/transfer.cpp
     src/transfer_engine.cpp
     src/benchmark.cpp
+    src/kv_page.cpp
 )
 
 # Create static library
