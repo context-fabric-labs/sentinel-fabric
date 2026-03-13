@@ -87,7 +87,7 @@ int main() {
 }
 ```
 
-## Current Status (Story 2.2)
+## Current Status (Story 2.3)
 
 ✅ Buffer descriptor types  
 ✅ Memory kind classification (HostPinned, HostPageable, CudaDevice)  
@@ -97,11 +97,14 @@ int main() {
 ✅ CUDA stream management  
 ✅ Event-based completion  
 ✅ H2D and D2H transfers  
+✅ **Transfer benchmark harness**  
+✅ **Size sweep benchmarks**  
+✅ **Pinned vs pageable comparison**  
+✅ **CSV/JSON output**  
 ✅ Unit tests  
 
 ## Next Steps
 
-- Story 2.3: Transfer queue with batching
 - Story 2.4: KV page copy primitives
 - Story 2.5: Page gather/compact operations
 

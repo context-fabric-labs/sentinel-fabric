@@ -33,6 +33,7 @@ set(PM_NIXL_SOURCES
     src/error.cpp
     src/transfer.cpp
     src/transfer_engine.cpp
+    src/benchmark.cpp
 )
 
 # Create static library
@@ -66,6 +67,10 @@ if(BUILD_BENCHMARKS)
     else()
         message(WARNING "Google Benchmark not found - benchmarks will not be built")
     endif()
+    
+    # Transfer benchmark (standalone, no Google Benchmark required)
+    add_executable(bench_transfer bench/bench_transfer.cpp)
+    target_link_libraries(bench_transfer pm_nixl)
 endif()
 
 # Installation
