@@ -35,6 +35,8 @@ set(PM_NIXL_SOURCES
     src/transfer_engine.cpp
     src/benchmark.cpp
     src/kv_page.cpp
+    src/page_gather_engine.cpp
+    src/cuda/page_gather.cu
 )
 
 # Create static library
@@ -72,6 +74,10 @@ if(BUILD_BENCHMARKS)
     # Transfer benchmark (standalone, no Google Benchmark required)
     add_executable(bench_transfer bench/bench_transfer.cpp)
     target_link_libraries(bench_transfer pm_nixl)
+    
+    # KV page gather benchmark
+    add_executable(bench_kv_gather bench/bench_kv_gather.cpp)
+    target_link_libraries(bench_kv_gather pm_nixl)
 endif()
 
 # Installation
