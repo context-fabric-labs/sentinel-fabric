@@ -87,19 +87,21 @@ int main() {
 }
 ```
 
-## Current Status (Story 2.1)
+## Current Status (Story 2.2)
 
 ✅ Buffer descriptor types  
 ✅ Memory kind classification (HostPinned, HostPageable, CudaDevice)  
 ✅ Buffer registration metadata  
 ✅ RAII-oriented ownership  
-✅ Basic validation helpers  
+✅ Async transfer engine  
+✅ CUDA stream management  
+✅ Event-based completion  
+✅ H2D and D2H transfers  
 ✅ Unit tests  
 
 ## Next Steps
 
-- Story 2.2: Async copy engine with CUDA streams
-- Story 2.3: Transfer queue and completion handling
+- Story 2.3: Transfer queue with batching
 - Story 2.4: KV page copy primitives
 - Story 2.5: Page gather/compact operations
 

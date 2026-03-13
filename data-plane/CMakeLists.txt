@@ -31,6 +31,8 @@ set(PM_NIXL_SOURCES
     src/buffer.cpp
     src/descriptor.cpp
     src/error.cpp
+    src/transfer.cpp
+    src/transfer_engine.cpp
 )
 
 # Create static library
