@@ -29,6 +29,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 set(KERNEL_SOURCES
     src/kernels/page_copy_naive.cu
     src/kernels/page_copy_coalesced.cu
+    src/kernels/page_copy_shared_mem.cu
 )
 
 # Benchmark sources
@@ -52,7 +53,7 @@ if(BUILD_TESTS)
     if(GTest_FOUND)
         enable_testing()
         
-        add_executable(test_kernels tests/test_kernels.cu tests/test_coalesced.cu)
+        add_executable(test_kernels tests/test_kernels.cu tests/test_coalesced.cu tests/test_shared_mem.cu)
         target_link_libraries(test_kernels kernels GTest::gtest_main CUDA::cudart)
         add_test(NAME KernelTests COMMAND test_kernels)
     else()
