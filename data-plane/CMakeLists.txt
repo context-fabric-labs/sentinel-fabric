@@ -40,6 +40,7 @@ set(PM_NIXL_SOURCES
     src/completion_queue.cpp
     src/cuda/p2p_copy.cu
     src/multi_gpu_transfer.cpp
+    src/transport_adapter.cpp
 )
 
 # Create static library
