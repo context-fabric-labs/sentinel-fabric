@@ -53,7 +53,12 @@ if(BUILD_TESTS)
     if(GTest_FOUND)
         enable_testing()
         
-        add_executable(test_kernels tests/test_kernels.cu tests/test_coalesced.cu tests/test_shared_mem.cu)
+        add_executable(test_kernels 
+            tests/test_kernels.cu 
+            tests/test_coalesced.cu 
+            tests/test_shared_mem.cu
+            tests/test_comprehensive.cu
+        )
         target_link_libraries(test_kernels kernels GTest::gtest_main CUDA::cudart)
         add_test(NAME KernelTests COMMAND test_kernels)
     else()
@@ -66,6 +71,16 @@ install(TARGETS kernels bench_page_copy
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
+)
+
+# Install Nsight scripts
+install(PROGRAMS
+    nsight/scripts/profile_page_copy.sh
+    nsight/scripts/profile_multi_stream.sh
+    nsight/scripts/profile_comparison.sh
+    nsight/scripts/profile_ncu.sh
+    nsight/scripts/compare_kernels.sh
+    DESTINATION bin
 )
 
 # Print configuration summary
