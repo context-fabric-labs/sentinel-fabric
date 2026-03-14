@@ -78,6 +78,8 @@ install(PROGRAMS
     nsight/scripts/profile_page_copy.sh
     nsight/scripts/profile_multi_stream.sh
     nsight/scripts/profile_comparison.sh
+    nsight/scripts/profile_ncu.sh
+    nsight/scripts/compare_kernels.sh
     DESTINATION bin
 )
 
