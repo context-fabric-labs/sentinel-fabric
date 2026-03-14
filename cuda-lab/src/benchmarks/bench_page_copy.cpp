@@ -72,6 +72,8 @@ struct BenchmarkConfig {
                 if (i + 1 < argc) {
                     kernel_variant = argv[++i];
                 }
+            } else if (arg == "-m" || arg == "--matrix") {
+                run_shape_matrix = true;
             } else if (arg == "-j" || arg == "--json") {
                 if (i + 1 < argc) {
                     output_json = true;
