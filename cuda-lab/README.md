@@ -57,9 +57,12 @@ make -j$(nproc)
 ctest --output-on-failure
 ```
 
-## Current Status (Story 3.1)
+## Current Status (Story 3.2)
 
 ✅ Baseline naive page copy kernel  
+✅ **Coalesced optimized kernel**  
+✅ **Vectorized 16-byte copies**  
+✅ **Benchmark comparison**  
 ✅ Correctness tests  
 ✅ Benchmark harness  
 ✅ Input/output descriptor model  
@@ -67,15 +70,15 @@ ctest --output-on-failure
 
 ## Kernel Progression
 
-| Story | Kernel | Optimization Focus |
-|-------|--------|-------------------|
-| 3.1 | `page_copy_naive` | Baseline (no optimization) |
-| 3.2 | `page_copy_coalesced` | Memory coalescing |
-| 3.3 | `page_copy_occupancy` | Occupancy/register optimization |
-| 3.4 | `page_copy_tiled` | Shared memory/tiling |
-| 3.5 | `page_copy_multi_stream` | Stream overlap |
-| 3.6 | PyTorch extension | Framework integration |
-| 3.7 | Analysis | Comprehensive write-up |
+| Story | Kernel | Optimization Focus | Status |
+|-------|--------|-------------------|--------|
+| 3.1 | `page_copy_naive` | Baseline (no optimization) | ✅ Complete |
+| 3.2 | `page_copy_coalesced` | Memory coalescing + vectorization | ✅ Complete |
+| 3.3 | `page_copy_occupancy` | Occupancy/register optimization | Pending |
+| 3.4 | `page_copy_tiled` | Shared memory/tiling | Pending |
+| 3.5 | `page_copy_multi_stream` | Stream overlap | Pending |
+| 3.6 | PyTorch extension | Framework integration | Pending |
+| 3.7 | Analysis | Comprehensive write-up | Pending |
 
 ## File Structure
 
