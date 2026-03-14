@@ -7,6 +7,7 @@
 #include <cuda_runtime.h>
 #include "kernels/page_copy_naive.cu"
 #include "kernels/page_copy_coalesced.cu"
+#include "kernels/page_copy_shared_mem.cu"
 #include "benchmarks/bench_utils.hpp"
 
 /**
@@ -19,12 +20,12 @@ struct BenchmarkConfig {
     size_t benchmark_iterations = 100;
     bool output_json = false;
     std::string output_file;
-    std::string kernel_variant = "all";  // "naive", "coalesced", "coalesced_scalar", "all"
+    std::string kernel_variant = "all";  // "naive", "coalesced", "coalesced_scalar", "shared_mem", "all"
     
     void print_usage(const char* program) {
         std::cout << "Usage: " << program << " [OPTIONS]" << std::endl;
         std::cout << std::endl;
-        std::cout << "Page Copy Benchmark (Naive Baseline + Coalesced Optimized)" << std::endl;
+        std::cout << "Page Copy Benchmark (Naive + Coalesced + Shared Memory Experiment)" << std::endl;
         std::cout << std::endl;
         std::cout << "Options:" << std::endl;
         std::cout << "  -h, --help              Show help" << std::endl;
@@ -32,8 +33,15 @@ struct BenchmarkConfig {
         std::cout << "  -n, --num-pages N       Number of pages (default: 100)" << std::endl;
         std::cout << "  -w, --warmup N          Warmup iterations (default: 10)" << std::endl;
         std::cout << "  -i, --iterations N      Benchmark iterations (default: 100)" << std::endl;
-        std::cout << "  -k, --kernel VARIANT    Kernel variant: naive, coalesced, coalesced_scalar, all (default: all)" << std::endl;
+        std::cout << "  -k, --kernel VARIANT    Kernel variant: naive, coalesced, coalesced_scalar, shared_mem, shared_mem_vec, all (default: all)" << std::endl;
         std::cout << "  -j, --json FILE         Output results to JSON file" << std::endl;
+        std::cout << std::endl;
+        std::cout << "Kernel variants:" << std::endl;
+        std::cout << "  naive            - Baseline (1 thread = 1 byte)" << std::endl;
+        std::cout << "  coalesced_scalar - Coalesced 4-byte copies" << std::endl;
+        std::cout << "  coalesced        - Coalesced 16-byte vectorized (BEST)" << std::endl;
+        std::cout << "  shared_mem       - Shared memory experiment (SLOWER)" << std::endl;
+        std::cout << "  shared_mem_vec   - Shared memory with float4 (still slower)" << std::endl;
         std::cout << std::endl;
     }
     
@@ -98,7 +106,13 @@ BenchmarkResult run_page_copy_benchmark(
     
     if (kernel_variant == "naive") {
         kernel_name = get_naive_kernel_name();
-        kernel_desc = get_naive_kernel_description();
+        kerif (kernel_variant == "shared_mem") {
+        kernel_name = get_shared_mem_kernel_name();
+        kernel_desc = get_shared_mem_kernel_description();
+    } else if (kernel_variant == "shared_mem_vec") {
+        kernel_name = get_shared_mem_vec_kernel_name();
+        kernel_desc = get_shared_mem_vec_kernel_description();
+    } else nel_desc = get_naive_kernel_description();
     } else if (kernel_variant == "coalesced") {
         kernel_name = get_coalesced_kernel_name();
         kernel_desc = get_coalesced_kernel_description();
