@@ -38,6 +38,8 @@ set(PM_NIXL_SOURCES
     src/page_gather_engine.cpp
     src/cuda/page_gather.cu
     src/completion_queue.cpp
+    src/cuda/p2p_copy.cu
+    src/multi_gpu_transfer.cpp
 )
 
 # Create static library
@@ -79,6 +81,10 @@ if(BUILD_BENCHMARKS)
     # KV page gather benchmark
     add_executable(bench_kv_gather bench/bench_kv_gather.cpp)
     target_link_libraries(bench_kv_gather pm_nixl)
+    
+    # Multi-GPU D2D benchmark
+    add_executable(bench_multi_gpu bench/bench_multi_gpu.cpp)
+    target_link_libraries(bench_multi_gpu pm_nixl)
 endif()
 
 # Installation
