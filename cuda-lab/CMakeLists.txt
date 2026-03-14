@@ -73,6 +73,14 @@ install(TARGETS kernels bench_page_copy
     RUNTIME DESTINATION bin
 )
 
+# Install Nsight scripts
+install(PROGRAMS
+    nsight/scripts/profile_page_copy.sh
+    nsight/scripts/profile_multi_stream.sh
+    nsight/scripts/profile_comparison.sh
+    DESTINATION bin
+)
+
 # Print configuration summary
 message(STATUS "")
 message(STATUS "CUDA Lab Configuration Summary:")
