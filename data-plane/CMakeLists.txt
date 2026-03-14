@@ -37,6 +37,7 @@ set(PM_NIXL_SOURCES
     src/kv_page.cpp
     src/page_gather_engine.cpp
     src/cuda/page_gather.cu
+    src/completion_queue.cpp
 )
 
 # Create static library
