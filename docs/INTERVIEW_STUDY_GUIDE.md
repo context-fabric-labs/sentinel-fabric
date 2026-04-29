@@ -382,6 +382,8 @@
 
 ## Phase 4: GPU & CUDA Optimization (Weeks 8-9)
 
+**Standalone deep dive:** See [GPU_CUDA_OPTIMIZATION_TRAINING_GUIDE.md](GPU_CUDA_OPTIMIZATION_TRAINING_GUIDE.md) for the full GPU/CUDA interview guide with architecture, profiling, production patterns, labs, and story-backed answers.
+
 ### **Priority: P0 - Critical**
 ### **Time Allocation: 60 hours**
 
