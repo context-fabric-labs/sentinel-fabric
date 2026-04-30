@@ -35,11 +35,12 @@
 21. [Module 20: Performance Tuning Recipes](#module-20-performance-tuning-recipes)
 22. [Module 21: Code Coverage & Quality](#module-21-code-coverage--quality)
 23. [Module 22: Troubleshooting Hands-On Labs](#module-22-troubleshooting-hands-on-labs)
+24. [Module 23: HPC Benchmarking — Cluster, System & Resource Validation](#module-23-hpc-benchmarking--cluster-system--resource-validation)
 
 ### Reference
-24. [Interview Question Bank](#interview-question-bank)
-25. [Resource Library](#resource-library)
-26. [Progress Tracker](#progress-tracker)
+25. [Interview Question Bank](#interview-question-bank)
+26. [Resource Library](#resource-library)
+27. [Progress Tracker](#progress-tracker)
 
 ---
 
@@ -104,6 +105,12 @@ By the end of this training, you will:
 - Familiarity with Linux/command-line
 - Basic knowledge of distributed systems
 - Basic Kubernetes familiarity (pods, deployments, services)
+
+---
+
+---
+
+# Part I: Application-Level Systems Engineering
 
 ---
 
@@ -6051,6 +6058,450 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 - 2-5× latency improvement
 - Complete troubleshooting documented with evidence
 - Reproducible methodology for future issues
+
+---
+
+## Module 23: HPC Benchmarking — Cluster, System & Resource Validation
+
+Benchmarking is the disciplined process of measuring system performance against known baselines to validate hardware, detect regressions, capacity-plan, and compare configurations. This module covers industry-standard tools and methodology for HPC-style workloads.
+
+---
+
+### 23.1 Benchmarking Methodology
+
+#### **Why Benchmark?**
+- **Acceptance testing:** Validate new hardware meets vendor specs before production
+- **Regression detection:** Catch firmware, driver, or config changes that degrade perf
+- **Capacity planning:** Know actual throughput limits to inform scheduling decisions
+- **Comparison:** Evaluate competing hardware, networks, or software stacks
+
+#### **The Benchmarking Process**
+
+```
+1. Define Goal         → What question are we answering?
+2. Isolate Variables   → Control environment (disable turbo? pin frequency?)
+3. Warm Up             → Run benchmark once to prime caches/JIT
+4. Measure (N runs)    → Collect min/median/p99/max + stddev
+5. Validate            → Check results against theoretical peak
+6. Document            → Record hardware, firmware, kernel, config
+7. Compare/Report      → Plot results, compute efficiency %
+```
+
+#### **Key Principles**
+- **Report efficiency (% of theoretical peak)** not just raw numbers
+- **Always report variance** — if stddev > 5%, something is wrong
+- **Disable frequency scaling** (`cpupower frequency-set -g performance`) for reproducibility
+- **Pin NUMA** — run on specific sockets/cores to eliminate topology noise
+- **Multiple iterations** — minimum 5 runs; discard first (warm-up)
+
+---
+
+### 23.2 Compute Benchmarking
+
+#### **Tool: HPL (High-Performance Linpack)**
+
+The industry-standard benchmark for measuring FLOPS. Used to rank the TOP500 supercomputers.
+
+**What it measures:** Dense linear algebra (DGEMM) — peak floating-point throughput.
+
+**Usage:**
+```bash
+# Intel optimized (via Intel oneAPI)
+source /opt/intel/oneapi/setvars.sh
+mpirun -np <num_procs> -ppn <procs_per_node> ./xhpl
+
+# Tuning parameters (HPL.dat):
+# N (problem size) — larger = higher efficiency, must fit in RAM
+# NB (block size) — typically 192-256 for modern CPUs
+# P×Q (process grid) — should match physical topology
+```
+
+**Target:** >80% of theoretical peak FLOPS for a well-tuned cluster.
+
+**Theoretical Peak Calculation:**
+```
+Peak GFLOPS = cores × frequency × FLOPs_per_cycle
+  e.g., 64 cores × 2.5 GHz × 32 (AVX-512 DP) = 5,120 GFLOPS
+```
+
+#### **Tool: HPL-MxP (Mixed-Precision Linpack)**
+
+Modern variant using FP16/TF32/FP64 mixed precision — relevant for AI/ML clusters with GPUs.
+
+```bash
+# NVIDIA HPC-X + HPL-MxP
+mpirun --map-by ppr:8:node ./hpl-mxp --dat hpl-mxp.dat
+```
+
+#### **Tool: HPCG (High-Performance Conjugate Gradient)**
+
+Complement to HPL — measures performance on sparse, irregular workloads (closer to real applications).
+
+**What it measures:** Sparse matrix-vector products, symmetric Gauss-Seidel, dot products.
+
+```bash
+mpirun -np 64 ./xhpcg --nx=256 --ny=256 --nz=256 --rt=1800
+```
+
+**Target:** Typically 1-5% of HPL FLOPS (expected — it's memory-bound).
+
+#### **Tool: STREAM (Memory Bandwidth)**
+
+Measures sustainable memory bandwidth (not cache).
+
+**What it measures:** Copy, Scale, Add, Triad operations on large arrays.
+
+```bash
+# Compile with OpenMP for multi-threaded
+gcc -O3 -fopenmp -DSTREAM_ARRAY_SIZE=100000000 stream.c -o stream
+OMP_NUM_THREADS=64 numactl --interleave=all ./stream
+```
+
+**Key Metrics:**
+| Operation | Formula | Bytes/Iter |
+|-----------|---------|------------|
+| Copy | a[i] = b[i] | 16 |
+| Scale | a[i] = q*b[i] | 16 |
+| Add | a[i] = b[i] + c[i] | 24 |
+| Triad | a[i] = b[i] + q*c[i] | 24 |
+
+**Target:** >85% of theoretical peak bandwidth per socket.
+
+#### **Tool: Intel MLC (Memory Latency Checker)**
+
+Measures memory latency and bandwidth with NUMA awareness.
+
+```bash
+# Idle latency
+./mlc --idle_latency
+
+# Bandwidth matrix (local vs remote NUMA)
+./mlc --bandwidth_matrix
+
+# Loaded latency curve
+./mlc --loaded_latency
+```
+
+**What to look for:**
+- Local NUMA latency: ~80-100 ns (typical DDR5)
+- Remote NUMA latency: ~140-180 ns (1-hop)
+- Bandwidth drop-off under load
+
+---
+
+### 23.3 Network & Interconnect Benchmarking
+
+#### **Tool: OSU Micro-Benchmarks (OMB)**
+
+The gold standard for MPI/RDMA latency and bandwidth measurement.
+
+**What it measures:** Point-to-point latency, bandwidth, collective operations.
+
+```bash
+# Point-to-point latency
+mpirun -np 2 --host node1,node2 ./osu_latency
+
+# Bi-directional bandwidth
+mpirun -np 2 --host node1,node2 ./osu_bibw
+
+# All-reduce (collective)
+mpirun -np 64 ./osu_allreduce -m 4194304
+
+# Multi-pair bandwidth (saturation test)
+mpirun -np 16 ./osu_mbw_mr
+```
+
+**Targets (InfiniBand HDR 200 Gb/s):**
+| Metric | Expected |
+|--------|----------|
+| Latency (0 byte) | < 1.5 µs |
+| Latency (4 KB) | < 3 µs |
+| Bandwidth (large msg) | > 23 GB/s (unidirectional) |
+| Bi-directional BW | > 40 GB/s |
+
+#### **Tool: ib_read_bw / ib_write_bw / ib_send_bw (perftest)**
+
+Low-level RDMA verbs benchmarks — bypasses MPI overhead.
+
+```bash
+# Server
+ib_write_bw -d mlx5_0 -s 65536 --report_gbits
+
+# Client
+ib_write_bw -d mlx5_0 -s 65536 --report_gbits <server_ip>
+
+# Latency
+ib_write_lat -d mlx5_0 -s 4
+```
+
+#### **Tool: iperf3 / nuttcp (TCP/UDP Ethernet)**
+
+For Ethernet-based clusters or overlay networks.
+
+```bash
+# Server
+iperf3 -s
+
+# Client — TCP throughput
+iperf3 -c <server> -t 30 -P 8    # 8 parallel streams
+
+# Client — UDP (measure jitter + loss)
+iperf3 -c <server> -u -b 100G -t 30
+```
+
+#### **Tool: NCCL Tests (GPU Collective Communication)**
+
+Benchmarks GPU-to-GPU communication via NVLink, NVSwitch, or RDMA.
+
+```bash
+# All-reduce across 8 GPUs
+mpirun -np 8 ./all_reduce_perf -b 1M -e 1G -f 2 -g 1
+
+# All-to-all
+mpirun -np 8 ./alltoall_perf -b 1M -e 512M -f 2 -g 1
+
+# Across nodes (multi-node)
+mpirun -np 16 --host node1:8,node2:8 ./all_reduce_perf -b 8M -e 2G -f 2 -g 1
+```
+
+**Targets (8× A100/H100 NVLink):**
+| Operation | Bus BW (expected) |
+|-----------|-------------------|
+| All-Reduce (intra-node) | > 250 GB/s (A100), > 400 GB/s (H100) |
+| All-Reduce (inter-node, IB) | > 20 GB/s per GPU |
+
+---
+
+### 23.4 Storage & I/O Benchmarking
+
+#### **Tool: FIO (Flexible I/O Tester)**
+
+The standard tool for block-level storage benchmarking.
+
+```bash
+# Sequential read (large-block throughput)
+fio --name=seq_read --ioengine=libaio --direct=1 --bs=1M \
+    --size=100G --numjobs=4 --iodepth=64 --rw=read
+
+# Random 4K read (IOPS)
+fio --name=rand_read --ioengine=libaio --direct=1 --bs=4k \
+    --size=10G --numjobs=16 --iodepth=128 --rw=randread
+
+# Mixed random R/W (70/30 — realistic)
+fio --name=mixed --ioengine=libaio --direct=1 --bs=4k \
+    --size=10G --numjobs=8 --iodepth=64 --rw=randrw --rwmixread=70
+```
+
+**Key Metrics:** IOPS, throughput (MB/s), latency (avg/p99/p999), tail latency.
+
+#### **Tool: IOR (Interleaved Or Random — Parallel I/O)**
+
+HPC parallel filesystem benchmark (Lustre, GPFS, BeeGFS).
+
+```bash
+# Shared-file sequential write
+mpirun -np 64 ./ior -a POSIX -t 1m -b 16g -F -w -r -C -e
+
+# Collective MPI-IO
+mpirun -np 64 ./ior -a MPIIO -t 1m -b 4g -c -w -r
+```
+
+**Targets:** Should approach aggregate link bandwidth of storage tier.
+
+#### **Tool: MDTest (Metadata Performance)**
+
+Measures file creation/stat/removal rates — critical for HPC workloads with many small files.
+
+```bash
+mpirun -np 64 ./mdtest -n 100000 -d /lustre/scratch -i 3
+```
+
+---
+
+### 23.5 GPU Compute Benchmarking
+
+#### **Tool: NVIDIA gpu-burn**
+
+Stress-tests GPUs to validate thermal throttling and sustained compute.
+
+```bash
+./gpu_burn -d 300    # 5-minute burn
+```
+
+**What to watch:** Clocks dropping (throttling), ECC errors, temperature.
+
+#### **Tool: NVIDIA DCGM Diagnostics**
+
+```bash
+# Level 3 (comprehensive — stress + memory + PCIe + NVLink)
+dcgmi diag -r 3
+
+# Specific GPU health
+dcgmi health -c -g 0
+```
+
+#### **Tool: nvidia-smi dmon + Custom GEMM Benchmarks**
+
+```bash
+# Monitor during benchmark
+nvidia-smi dmon -s pucvmet -d 1
+
+# cuBLAS GEMM benchmark (peak TFLOPS)
+./cublas_bench -m 8192 -n 8192 -k 8192 --dtype=fp16
+```
+
+**Targets:**
+| GPU | FP16 Tensor (TFLOPS) | HBM BW (TB/s) |
+|-----|---------------------|----------------|
+| A100 | ~312 | ~2.0 |
+| H100 | ~989 (FP8: ~1,979) | ~3.35 |
+
+#### **Tool: MLPerf Inference / Training**
+
+Industry-standard AI/ML benchmark suite for end-to-end workload validation.
+
+```bash
+# MLPerf Inference (e.g., BERT, ResNet, GPT-J)
+python run_mlperf.py --scenario Offline --model bert-large
+```
+
+---
+
+### 23.6 Full-Cluster Validation Workflow
+
+A structured process to validate a new HPC cluster or detect regressions.
+
+#### **Phase 1: Single-Node Validation**
+
+| Step | Tool | What to Validate |
+|------|------|------------------|
+| 1 | `dmidecode`, `lscpu`, `nvidia-smi` | Hardware matches spec |
+| 2 | STREAM | Memory BW ≥ 85% theoretical |
+| 3 | Intel MLC | NUMA latency within spec |
+| 4 | HPL (single node) | Compute ≥ 80% peak FLOPS |
+| 5 | FIO | Local NVMe meets spec (IOPS + BW) |
+| 6 | gpu-burn + DCGM diag | GPU health, no throttling |
+| 7 | `nvidia-smi nvlink -s` | NVLink BW matches spec |
+
+#### **Phase 2: Pair-wise Node Testing**
+
+| Step | Tool | What to Validate |
+|------|------|------------------|
+| 1 | ib_write_bw (perftest) | RDMA BW matches link rate |
+| 2 | ib_write_lat | Latency within spec |
+| 3 | OSU latency/bandwidth | MPI layer overhead acceptable |
+| 4 | NCCL all-reduce (2 nodes) | Multi-node GPU comms working |
+
+#### **Phase 3: Full-Cluster Scale-out**
+
+| Step | Tool | What to Validate |
+|------|------|------------------|
+| 1 | HPL (all nodes) | Cluster FLOPS ≥ 75% of sum |
+| 2 | HPCG (all nodes) | Realistic workload perf |
+| 3 | IOR (all nodes) | Parallel FS aggregate BW |
+| 4 | OSU all-reduce (all nodes) | Collective scaling |
+| 5 | NCCL all-reduce (all GPUs) | GPU collective at scale |
+| 6 | MLPerf Training (1 job) | End-to-end AI workload |
+
+#### **Phase 4: Stress & Soak Testing**
+
+```bash
+# Run for 24-72 hours:
+# - gpu-burn on all GPUs
+# - HPL on all CPUs
+# - IOR continuous I/O
+# - NCCL all-reduce in loop
+# Watch for: throttling, ECC errors, link flaps, node drops
+```
+
+---
+
+### 23.7 Interpreting Results & Reporting
+
+#### **Efficiency Calculation**
+
+```
+Efficiency (%) = (Measured / Theoretical Peak) × 100
+
+Examples:
+  HPL:    4,100 GFLOPS measured / 5,120 theoretical = 80.1% ✅
+  STREAM: 180 GB/s measured / 204.8 theoretical = 87.9% ✅
+  NCCL:   380 GB/s bus BW / 450 theoretical = 84.4% ✅
+```
+
+#### **Red Flags**
+
+| Symptom | Likely Cause |
+|---------|-------------|
+| Efficiency < 50% | Misconfiguration, thermal throttling, or faulty hardware |
+| High variance (stddev > 10%) | Noisy neighbor, frequency scaling, or background processes |
+| Asymmetric pair-wise BW | Bad cable, misconfigured port, or switch issue |
+| NVLink BW < 50% peak | NVLink disabled, topology mismatch, or driver issue |
+| Latency 2× expected | Wrong NUMA placement, congestion, or routing issue |
+
+#### **Benchmark Report Template**
+
+```markdown
+## Cluster Benchmark Report — <Date>
+
+**Hardware:** <Node count> × <CPU> + <GPU> + <Network>
+**Software:** <OS> + <Kernel> + <Driver> + <CUDA> + <MPI>
+
+### Summary
+| Benchmark | Result | Peak | Efficiency |
+|-----------|--------|------|------------|
+| HPL | X TFLOPS | Y TFLOPS | Z% |
+| STREAM | X GB/s | Y GB/s | Z% |
+| NCCL AR | X GB/s | Y GB/s | Z% |
+| FIO seq | X GB/s | Y GB/s | Z% |
+
+### Issues Found
+- ...
+
+### Recommendations
+- ...
+```
+
+---
+
+### 23.8 Tool Reference Summary
+
+| Category | Tool | What It Measures |
+|----------|------|------------------|
+| **Compute** | HPL | Peak FLOPS (dense LA) |
+| | HPCG | Realistic FLOPS (sparse) |
+| | STREAM | Memory bandwidth |
+| | Intel MLC | Memory latency + NUMA |
+| **Network** | OSU Micro-Benchmarks | MPI latency/BW/collectives |
+| | perftest (ib_*) | Raw RDMA verbs perf |
+| | iperf3 | TCP/UDP Ethernet |
+| | NCCL Tests | GPU collective comms |
+| **Storage** | FIO | Block I/O (IOPS, BW, latency) |
+| | IOR | Parallel filesystem |
+| | MDTest | Metadata operations |
+| **GPU** | gpu-burn | Sustained compute + thermal |
+| | DCGM diag | GPU health validation |
+| | cuBLAS bench | Peak TFLOPS |
+| | MLPerf | End-to-end AI workloads |
+
+---
+
+### 23.9 Interview-Ready Talking Points
+
+1. **"How do you validate a new GPU cluster?"**
+   → Phase 1-4 workflow above: single-node → pair-wise → full-cluster → soak.
+
+2. **"How do you know if your network is healthy?"**
+   → OSU latency < 1.5 µs, ib_write_bw matches link rate, NCCL AR bus BW > 80% theoretical.
+
+3. **"Your HPL efficiency is only 60%. What do you check?"**
+   → Frequency scaling disabled? NUMA-aware placement? Problem size (N) large enough? Block size (NB) tuned? Thermal throttling?
+
+4. **"Shared filesystem is slow. How do you diagnose?"**
+   → IOR for aggregate BW, MDTest for metadata, FIO for individual OST/OSS, check network (ib_write_bw) to storage servers.
+
+5. **"NCCL all-reduce is slower than expected across nodes."**
+   → Check: IB link up? Correct GID index? PCIe BW (GPU→NIC)? NCCL_DEBUG=INFO for topology? Sharp/NCCL tree vs ring?
 
 ---
 
