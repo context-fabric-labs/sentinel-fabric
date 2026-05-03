@@ -1,43 +1,48 @@
 # Full-Stack Systems Engineering Mastery Guide
+
 ## Comprehensive Training for Staff/Principal Engineer Interview Readiness
 
 **A One-Stop Guide to Production Systems Engineering, Zero-Copy Architectures, High-Performance Computing, and Platform Infrastructure for Low-Latency Services**
 
 ---
 
-## Table of Contents
+# Table of Contents
 
-### Part I: Application-Level Systems Engineering
+# Part I: Application-Level Systems Engineering
+
 1. [Training Overview](#training-overview)
-2. [Module 1: Memory & CPU Architecture](#module-1-memory--cpu-architecture)
-3. [Module 2: Concurrency & Parallelism](#module-2-concurrency--parallelism)
+2. [Module 1: Memory &amp; CPU Architecture](#module-1-memory--cpu-architecture)
+3. [Module 2: Concurrency &amp; Parallelism](#module-2-concurrency--parallelism)
 4. [Module 3: Zero-Copy Architectures](#module-3-zero-copy-architectures)
 5. [Module 4: Distributed Systems Patterns](#module-4-distributed-systems-patterns)
-6. [Module 5: System Design & Architecture](#module-5-system-design--architecture)
+6. [Module 5: System Design &amp; Architecture](#module-5-system-design--architecture)
 7. [Module 6: Performance Optimization](#module-6-performance-optimization)
 8. [Module 7: Hands-On Labs](#module-7-hands-on-labs)
 
-### Part II: Platform & Infrastructure Engineering
-9. [Module 8: Host & OS Tuning for HPC](#module-8-host--os-tuning-for-hpc)
-10. [Module 9: Kubernetes for Low-Latency Workloads](#module-9-kubernetes-for-low-latency-workloads)
+### Part II: Platform & Infrastructure Engineering (K8s on Bare Metal, On-Prem)
+
+9. [Module 8: Host-Side Tuning (Bare Metal Foundation)](#module-8-host-side-tuning-bare-metal-foundation)
+10. [Module 9: Kubernetes-Side Tuning (Orchestration Layer)](#module-9-kubernetes-side-tuning-orchestration-layer)
 11. [Module 10: Networking Infrastructure](#module-10-networking-infrastructure)
-12. [Module 11: GPU Infrastructure & Device Management](#module-11-gpu-infrastructure--device-management)
-13. [Module 12: Storage & Memory Infrastructure](#module-12-storage--memory-infrastructure)
-14. [Module 13: Observability & SRE for HPC](#module-13-observability--sre-for-hpc)
+12. [Module 11: GPU Infrastructure &amp; Device Management](#module-11-gpu-infrastructure--device-management)
+13. [Module 12: Storage &amp; Memory Infrastructure](#module-12-storage--memory-infrastructure)
+14. [Module 13: Observability &amp; SRE for HPC](#module-13-observability--sre-for-hpc)
 15. [Module 14: Platform Hands-On Labs](#module-14-platform-hands-on-labs)
 
 ### Part III: Performance Troubleshooting & Optimization
+
 16. [Module 15: Performance Analysis Methodology](#module-15-performance-analysis-methodology)
 17. [Module 16: Linux Performance Tools Mastery](#module-16-linux-performance-tools-mastery)
-18. [Module 17: Advanced Profiling & Tracing](#module-17-advanced-profiling--tracing)
-19. [Module 18: Memory & Leak Analysis](#module-18-memory--leak-analysis)
+18. [Module 17: Advanced Profiling &amp; Tracing](#module-17-advanced-profiling--tracing)
+19. [Module 18: Memory &amp; Leak Analysis](#module-18-memory--leak-analysis)
 20. [Module 19: Network Troubleshooting](#module-19-network-troubleshooting)
 21. [Module 20: Performance Tuning Recipes](#module-20-performance-tuning-recipes)
-22. [Module 21: Code Coverage & Quality](#module-21-code-coverage--quality)
+22. [Module 21: Code Coverage &amp; Quality](#module-21-code-coverage--quality)
 23. [Module 22: Troubleshooting Hands-On Labs](#module-22-troubleshooting-hands-on-labs)
-24. [Module 23: HPC Benchmarking — Cluster, System & Resource Validation](#module-23-hpc-benchmarking--cluster-system--resource-validation)
+24. [Module 23: HPC Benchmarking — Cluster, System &amp; Resource Validation](#module-23-hpc-benchmarking--cluster-system--resource-validation)
 
 ### Reference
+
 25. [Interview Question Bank](#interview-question-bank)
 26. [Resource Library](#resource-library)
 27. [Progress Tracker](#progress-tracker)
@@ -47,6 +52,7 @@
 ## Training Overview
 
 ### **Target Audience:**
+
 - **Full-Stack Systems Engineers** who write C++/Rust applications AND deploy them
 - Engineers with basic systems/platform engineering experience
 - Preparing for Staff/Principal AI Infrastructure / Platform Engineering roles
@@ -76,9 +82,11 @@ A NUMA-aware, lock-free C++ service is only as fast as the infrastructure it run
 **Key Insight:** If the platform engineer misconfigures CPU isolation or lets the kernel scheduler move threads across NUMA nodes, all the application-level NUMA optimizations (Module 1) are **completely wasted**.
 
 ### **Learning Objectives:**
+
 By the end of this training, you will:
 
 **Part I (Application):**
+
 - ✅ Understand **memory hierarchy** and CPU architecture at depth
 - ✅ Implement **lock-free data structures** (SPSC, MPMC queues)
 - ✅ Design **zero-copy architectures** (shared memory, Apache Arrow)
@@ -86,6 +94,7 @@ By the end of this training, you will:
 - ✅ Optimize **system performance** (cache locality, NUMA, SIMD)
 
 **Part II (Platform):**
+
 - ✅ Configure **host OS** for HPC workloads (CPU isolation, huge pages, kernel tuning)
 - ✅ Deploy on **Kubernetes** with topology-aware scheduling (CPU Manager, Topology Manager)
 - ✅ Architect **low-latency networking** (SR-IOV, DPDK, RDMA in containers)
@@ -95,11 +104,13 @@ By the end of this training, you will:
 - ✅ Answer **interview questions** with real-world examples from your 4 major projects
 
 ### **Training Duration:**
+
 - **Total Hours:** 70–80 hours
 - **Duration:** 8–10 weeks (part-time)
 - **Format:** 30% theory, 70% hands-on labs
 
 ### **Prerequisites:**
+
 - Basic understanding of operating systems
 - Some experience with C++ or Rust
 - Familiarity with Linux/command-line
@@ -135,6 +146,7 @@ Network (DC):     500 µs   (1,500,000 cycles)
 #### **Cache Lines and Coherence:**
 
 **Cache Line Structure (64 bytes on x86):**
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Cache Line (64 bytes)                                  │
@@ -145,6 +157,7 @@ Network (DC):     500 µs   (1,500,000 cycles)
 ```
 
 **False Sharing Problem:**
+
 ```cpp
 // BAD: False sharing - two threads write to different variables
 // on the same cache line, causing cache line bouncing
@@ -177,6 +190,7 @@ struct Counter {
 #### **What is NUMA?**
 
 **UMA (Uniform Memory Access):**
+
 ```
 ┌─────────────┐
 │    CPU 0    │
@@ -193,6 +207,7 @@ struct Counter {
 ```
 
 **NUMA (Non-Uniform Memory Access):**
+
 ```
 ┌──────────────┐     ┌──────────────┐
 │  CPU 0,1     │     │  CPU 2,3     │
@@ -212,6 +227,7 @@ struct Counter {
 ```
 
 **NUMA Optimization:**
+
 ```cpp
 // Linux: Pin thread to specific NUMA node
 #include <numa.h>
@@ -245,25 +261,25 @@ private:
     std::vector<uint8_t*> blocks;
     size_t block_size;
     size_t current_offset;
-    
+  
 public:
     ArenaAllocator(size_t block_size = 1024 * 1024) 
         : block_size(block_size), current_offset(0) {
         // Pre-allocate first block
         blocks.push_back(new uint8_t[block_size]);
     }
-    
+  
     ~ArenaAllocator() {
         for (auto* block : blocks) {
             delete[] block;
         }
     }
-    
+  
     void* allocate(size_t size, size_t alignment = 8) {
         // Align offset
         size_t aligned_offset = (current_offset + alignment - 1) 
                                & ~(alignment - 1);
-        
+      
         // Check if current block has space
         if (aligned_offset + size > block_size) {
             // Allocate new block
@@ -271,13 +287,13 @@ public:
             current_offset = 0;
             aligned_offset = 0;
         }
-        
+      
         // Allocate from current block
         void* ptr = blocks.back() + aligned_offset;
         current_offset = aligned_offset + size;
         return ptr;
     }
-    
+  
     void reset() {
         // Keep first block, reset offset
         current_offset = 0;
@@ -303,11 +319,12 @@ arena.reset();  // All objects freed at once
 ```
 
 **Performance Comparison:**
-| Allocator | Allocation Time | Deallocation | Fragmentation |
-|-----------|----------------|--------------|---------------|
-| malloc/free | 50 ns | 50 ns | Low |
-| Arena (per-request) | 5 ns | N/A | None |
-| Arena (bulk reset) | 5 ns | O(1) | None |
+
+| Allocator           | Allocation Time | Deallocation | Fragmentation |
+| ------------------- | --------------- | ------------ | ------------- |
+| malloc/free         | 50 ns           | 50 ns        | Low           |
+| Arena (per-request) | 5 ns            | N/A          | None          |
+| Arena (bulk reset)  | 5 ns            | O(1)         | None          |
 
 **Project Connection:** CapitalOne (per-core arena with bulk reset), Apple (shared memory arena)
 
@@ -354,61 +371,65 @@ void add_avx512(float* a, float* b, float* c, int n) {
 ### **1.5 Practice Questions: Memory & CPU**
 
 1. **Explain the cost of a cache miss vs. L1 cache hit. How does this affect your data structure design?**
-   
+
    **Answer:** L1 cache hit: ~1 ns (3-4 cycles). L3 cache miss (goes to RAM): ~100 ns (300-500 cycles). That's a **100× difference**. For data structures:
+
    - Use **arrays instead of linked lists** (contiguous memory)
    - **Structure of Arrays (SoA)** instead of Array of Structures (AoS) for SIMD
    - **Cache-aware algorithms** (block matrix multiplication)
    - **Align to cache lines** (64 bytes) to avoid false sharing
-
 2. **What is false sharing? How do you detect and prevent it?**
-   
+
    **Answer:** False sharing occurs when two threads write to different variables on the same cache line. The cache line bounces between cores, causing **10–100× slowdown**.
-   
+
    **Detection:**
+
    - `perf c2c` (cache-to-cache monitoring)
    - Intel VTune (memory access analysis)
    - High cache coherency traffic in profiling
-   
+
    **Prevention:**
+
    - `alignas(64)` for thread-local variables
    - Padding between frequently-written variables
    - Per-core data structures (no sharing)
-
 3. **When would you use an arena allocator vs. standard malloc/free?**
-   
+
    **Answer:** Use arena when:
+
    - **Many small allocations** of similar-sized objects
    - **Bulk deallocation** (all objects freed at once)
    - **Request-scoped memory** (reset per request)
    - **Low fragmentation** requirement
-   
+
    **Avoid when:**
+
    - Objects have different lifetimes
    - Need individual deallocation
    - Memory-constrained (arena may over-allocate)
-
 4. **How does NUMA affect multi-threaded performance? How do you optimize for it?**
-   
+
    **Answer:** Cross-NUMA memory access is **2–3× slower** than local access.
-   
+
    **Optimization:**
+
    - **Pin threads** to specific NUMA nodes
    - **Allocate memory** on same node as thread
    - **First-touch policy:** Touch memory on the node that will use it
    - **NUMA-aware data structures:** Partition data by node
-
 5. **What are huge pages? When should you use them?**
-   
+
    **Answer:** Huge pages (2MB, 1GB) reduce TLB misses for large memory regions.
-   
+
    **Use when:**
+
    - Large contiguous allocations (> 100MB)
    - Database buffer pools
    - ML model weights
    - Shared memory regions
-   
+
    **Avoid when:**
+
    - Small allocations (< 1MB)
    - Memory fragmentation concern
    - Security (huge pages harder to zero)
@@ -431,7 +452,7 @@ std::atomic<bool> ready{false};
 void writer() {
     data.store(42, std::memory_order_relaxed);  // No ordering guarantee
     ready.store(true, std::memory_order_release);  // All writes before this are visible
-    
+  
 // Thread 2 (Reader)
 void reader() {
     while (!ready.load(std::memory_order_acquire));  // All writes after this see writer's releases
@@ -440,6 +461,7 @@ void reader() {
 ```
 
 **Memory Ordering Hierarchy:**
+
 ```
 Strongest → Weakest
 seq_cst  (Sequential consistency - default, safest)
@@ -462,53 +484,53 @@ private:
     struct alignas(64) AlignedAtomic {
         std::atomic<size_t> value{0};
     };
-    
+  
     std::vector<T> buffer;
     size_t capacity;
     AlignedAtomic head;  // Consumer reads from head
     AlignedAtomic tail;  // Producer writes to tail
-    
+  
 public:
     SPSCQueue(size_t cap) : buffer(cap), capacity(cap) {}
-    
+  
     bool try_push(const T& item) {
         const size_t current_tail = tail.value.load(std::memory_order_relaxed);
         const size_t next_tail = (current_tail + 1) % capacity;
-        
+      
         // Check if queue is full
         if (next_tail == head.value.load(std::memory_order_acquire)) {
             return false;  // Queue full
         }
-        
+      
         // Write data
         buffer[current_tail] = item;
-        
+      
         // Update tail (release ensures data write is visible)
         tail.value.store(next_tail, std::memory_order_release);
         return true;
     }
-    
+  
     bool try_pop(T& item) {
         const size_t current_head = head.value.load(std::memory_order_relaxed);
-        
+      
         // Check if queue is empty
         if (current_head == tail.value.load(std::memory_order_acquire)) {
             return false;  // Queue empty
         }
-        
+      
         // Read data
         item = buffer[current_head];
-        
+      
         // Update head
         head.value.store((current_head + 1) % capacity, std::memory_order_release);
         return true;
     }
-    
+  
     bool empty() const {
         return head.value.load(std::memory_order_acquire) == 
                tail.value.load(std::memory_order_acquire);
     }
-    
+  
     size_t size() const {
         const size_t head_val = head.value.load(std::memory_order_acquire);
         const size_t tail_val = tail.value.load(std::memory_order_acquire);
@@ -535,55 +557,55 @@ private:
         std::thread thread;
         std::atomic<bool> stop{false};
     };
-    
+  
     std::vector<std::unique_ptr<Worker>> workers;
     std::atomic<size_t> next_worker{0};
-    
+  
 public:
     WorkStealingThreadPool(size_t num_threads) {
         for (size_t i = 0; i < num_threads; i++) {
             auto worker = std::make_unique<Worker>();
-            
+          
             worker->thread = std::thread([this, w = worker.get()]() {
                 while (true) {
                     std::function<void()> task;
-                    
+                  
                     // Try to get task from own queue
                     {
                         std::unique_lock<std::mutex> lock(w->mutex);
                         w->cv.wait(lock, [w]() {
                             return w->stop || !w->queue.empty();
                         });
-                        
+                      
                         if (w->stop && w->queue.empty()) {
                             return;
                         }
-                        
+                      
                         task = std::move(w->queue.front());
                         w->queue.pop_front();
                     }
-                    
+                  
                     // Execute task
                     task();
                 }
             });
-            
+          
             workers.push_back(std::move(worker));
         }
     }
-    
+  
     void submit(std::function<void()> task) {
         // Round-robin distribution
         size_t idx = next_worker.fetch_add(1) % workers.size();
         auto& worker = workers[idx];
-        
+      
         {
             std::lock_guard<std::mutex> lock(worker->mutex);
             worker->queue.push_back(std::move(task));
         }
         worker->cv.notify_one();
     }
-    
+  
     ~WorkStealingThreadPool() {
         for (auto& worker : workers) {
             worker->stop = true;
@@ -611,66 +633,71 @@ for (int i = 0; i < 1000000; i++) {
 ### **2.4 Practice Questions: Concurrency**
 
 1. **What are the different memory orderings in C++ atomics? When would you use `memory_order_relaxed` vs. `memory_order_seq_cst`?**
-   
+
    **Answer:**
+
    - **`seq_cst`:** Sequential consistency (default). All threads see same order. Safest but slowest.
    - **`acquire/release`:** Pair for producer-consumer. Release ensures prior writes visible, acquire sees them.
    - **`relaxed`:** No ordering guarantees. Only atomicity. Fastest, use for counters.
-   
+
    **Use `relaxed` when:**
+
    - Incrementing counters (no dependencies)
    - Statistics collection
    - Sequence numbers
-   
+
    **Use `seq_cst` when:**
+
    - Complex synchronization
    - Multiple variables with dependencies
    - Not sure which to use (safe default)
-
 2. **Implement a lock-free SPSC queue. What are the key challenges?**
-   
+
    **Answer:** See implementation above. Key challenges:
+
    - **Memory ordering:** Must use acquire/release correctly
    - **False sharing:** Head and tail must be on separate cache lines
    - **ABA problem:** Not an issue for SPSC (single producer/consumer)
    - **Capacity management:** Detect full/empty correctly
-
 3. **What is the ABA problem? How do you solve it?**
-   
+
    **Answer:** Thread 1 reads value A, gets preempted. Thread 2 changes A→B→A. Thread 1 resumes, sees A (unchanged), but state is different.
-   
+
    **Solutions:**
+
    - **Tagged pointers:** Add version counter to pointer
    - **Hazard pointers:** Track in-use pointers
    - **RCU (Read-Copy-Update):** Defer deallocation
    - **Garbage collection:** Automatic memory management
-
 4. **When would you use a spinlock vs. a mutex?**
-   
+
    **Answer:**
-   
+
    **Spinlock:**
+
    - **Short critical sections** (< 100 µs)
    - **Low contention** (rare locking)
    - **Kernel/low-level code** (can't sleep)
    - **Busy-wait acceptable** (CPU not needed for other work)
-   
+
    **Mutex:**
+
    - **Long critical sections** (> 100 µs)
    - **High contention** (many threads waiting)
    - **User-space applications**
    - **CPU better used elsewhere** (thread sleeps)
-
 5. **How does work stealing improve thread pool performance?**
-   
+
    **Answer:** Instead of idle threads waiting for work, they "steal" tasks from busy threads' queues.
-   
+
    **Benefits:**
+
    - **Better load balancing** (no idle threads)
    - **Cache locality** (work on same core)
    - **Scalability** (no central queue bottleneck)
-   
+
    **Implementation:**
+
    - Each thread has **double-ended queue (deque)**
    - Owner pushes/pops from **front** (LIFO, cache-friendly)
    - Thieves steal from **back** (FIFO, less contention)
@@ -717,6 +744,7 @@ shm_unlink(name);
 ```
 
 **Performance:**
+
 - **Shared memory:** 100 ns latency
 - **TCP sockets:** 10 µs latency (100× slower)
 - **Unix domain sockets:** 1 µs latency (10× slower)
@@ -749,6 +777,7 @@ df = table.to_pandas()  # No data copy!
 ```
 
 **Arrow C Data Interface:**
+
 ```cpp
 // C++ side: Access Python Arrow data without copying
 #include <arrow/c/abi.h>
@@ -777,13 +806,13 @@ const double* values = double_array->raw_values();  // No copy!
 
 ### **3.3 Serialization Comparison**
 
-| Format | Speed | Size | Zero-Copy | Schema | Language Support |
-|--------|-------|------|-----------|--------|------------------|
-| **JSON** | Slow | Large | No | No | Universal |
-| **Protobuf** | Fast | Small | No | Yes | C++, Java, Python |
-| **FlatBuffers** | Very Fast | Small | **Yes** | Yes | C++, Java, Python |
-| **Cap'n Proto** | Very Fast | Small | **Yes** | Yes | C++, Python |
-| **Arrow** | Very Fast | Medium | **Yes** | Yes | C++, Python, Java |
+| Format                | Speed     | Size   | Zero-Copy     | Schema | Language Support  |
+| --------------------- | --------- | ------ | ------------- | ------ | ----------------- |
+| **JSON**        | Slow      | Large  | No            | No     | Universal         |
+| **Protobuf**    | Fast      | Small  | No            | Yes    | C++, Java, Python |
+| **FlatBuffers** | Very Fast | Small  | **Yes** | Yes    | C++, Java, Python |
+| **Cap'n Proto** | Very Fast | Small  | **Yes** | Yes    | C++, Python       |
+| **Arrow**       | Very Fast | Medium | **Yes** | Yes    | C++, Python, Java |
 
 #### **FlatBuffers Example:**
 
@@ -817,6 +846,7 @@ std::cout << person->id();             // Direct memory access
 ```
 
 **Performance:**
+
 - **Protobuf:** 100 MB/s deserialize
 - **FlatBuffers:** 1 GB/s (10× faster, zero-copy)
 
@@ -827,6 +857,7 @@ std::cout << person->id();             // Direct memory access
 #### **What is RDMA?**
 
 **Traditional Network:**
+
 ```
 Application → Kernel TCP/IP → NIC Driver → NIC → Network
 → Context switches, CPU copies, interrupts
@@ -834,6 +865,7 @@ Application → Kernel TCP/IP → NIC Driver → NIC → Network
 ```
 
 **RDMA (Remote Direct Memory Access):**
+
 ```
 Application → NIC → Network
 → Zero-copy, no CPU involvement
@@ -841,6 +873,7 @@ Application → NIC → Network
 ```
 
 **RDMA Verbs Example:**
+
 ```cpp
 // Register memory region (pin pages)
 struct ibv_mr* mr = ibv_reg_mr(
@@ -876,64 +909,65 @@ ibv_poll_cq(cq, 1, &wc);
 ### **3.5 Practice Questions: Zero-Copy**
 
 1. **What is zero-copy? Give examples from your projects.**
-   
+
    **Answer:** Zero-copy eliminates unnecessary data copies between user/kernel space or between processes.
-   
+
    **Examples:**
+
    - **Broadcom:** Shared memory request context (eliminated 200ms serialization)
    - **Apple:** Shared memory arena for stage handoff (50–80ms → 5–10ms)
    - **CapitalOne:** Per-core arenas (no cross-core copies)
    - **Fiserv:** Apache Arrow for cross-tier data (2KB → 47 bytes copied)
-
 2. **How does Apache Arrow enable zero-copy data exchange?**
-   
+
    **Answer:** Arrow uses:
+
    - **Columnar format:** Contiguous memory per column
    - **C Data Interface:** Standard C struct for array/schema
    - **Immutable buffers:** No modification after creation
    - **Reference counting:** Safe sharing across languages
-   
-   **Result:** Python → C++ → Java without serialization/deserialization.
 
+   **Result:** Python → C++ → Java without serialization/deserialization.
 3. **Compare Protocol Buffers, FlatBuffers, and Cap'n Proto.**
-   
+
    **Answer:**
-   
-   | Feature | Protobuf | FlatBuffers | Cap'n Proto |
-   |---------|----------|-------------|-------------|
-   | Parsing | Yes | **No** (zero-copy) | **No** (zero-copy) |
-   | Speed | Fast | Very Fast | Very Fast |
-   | Size | Small | Small | Medium |
-   | Language Support | Excellent | Good | Good |
-   | Schema Evolution | Excellent | Good | Good |
-   
+
+   | Feature          | Protobuf  | FlatBuffers              | Cap'n Proto              |
+   | ---------------- | --------- | ------------------------ | ------------------------ |
+   | Parsing          | Yes       | **No** (zero-copy) | **No** (zero-copy) |
+   | Speed            | Fast      | Very Fast                | Very Fast                |
+   | Size             | Small     | Small                    | Medium                   |
+   | Language Support | Excellent | Good                     | Good                     |
+   | Schema Evolution | Excellent | Good                     | Good                     |
+
    **Use Protobuf:** Maximum language support, schema evolution
    **Use FlatBuffers:** Zero-copy, read-heavy workloads
    **Use Cap'n Proto:** RPC, capability-based security
-
 4. **What is RDMA? When would you use it?**
-   
+
    **Answer:** RDMA (Remote Direct Memory Access) allows direct memory access between machines without CPU involvement.
-   
+
    **Use when:**
+
    - **Low latency required** (< 10 µs)
    - **High throughput** (> 10 Gbps)
    - **CPU efficiency critical** (offload network to NIC)
    - **Data center networking** (RoCE, InfiniBand)
-   
+
    **Avoid when:**
+
    - **Commodity hardware** (requires special NICs)
    - **WAN/internet** (RDMA over WAN is complex)
    - **Small messages** (< 1KB, overhead dominates)
-
 5. **How does DPDK achieve kernel bypass?**
-   
+
    **Answer:** DPDK (Data Plane Development Kit):
+
    - **Userspace drivers:** NIC driver in userspace (no kernel context switches)
    - **Huge pages:** Pin memory, avoid TLB misses
    - **Poll mode:** No interrupts (busy-wait, lower latency)
    - **Batch processing:** Process packets in batches (amortize overhead)
-   
+
    **Result:** 10M+ packets/sec (vs. 1M/sec with kernel networking)
 
 ---
@@ -962,6 +996,7 @@ CA Systems: Traditional RDBMS (no partition tolerance)
 ```
 
 **PACELC Extension:**
+
 - **If Partition (P):** Choose Availability (A) or Consistency (C)
 - **Else (E):** Choose Latency (L) or Consistency (C)
 
@@ -979,11 +1014,11 @@ private:
     std::map<uint64_t, std::string> ring;
     std::vector<std::string> nodes;
     size_t virtual_nodes = 150;
-    
+  
     uint64_t hash(const std::string& key) {
         return std::hash<std::string>{}(key);
     }
-    
+  
 public:
     void add_node(const std::string& node) {
         nodes.push_back(node);
@@ -992,21 +1027,21 @@ public:
             ring[h] = node;
         }
     }
-    
+  
     std::string get_node(const std::string& key) {
         uint64_t h = hash(key);
         auto it = ring.lower_bound(h);
-        
+      
         if (it == ring.end()) {
             it = ring.begin();  // Wrap around
         }
-        
+      
         return it->second;
     }
-    
+  
     void remove_node(const std::string& node) {
         nodes.erase(std::remove(nodes.begin(), nodes.end(), node), nodes.end());
-        
+      
         for (size_t i = 0; i < virtual_nodes; i++) {
             uint64_t h = hash(node + "#" + std::to_string(i));
             ring.erase(h);
@@ -1035,15 +1070,15 @@ class CircuitBreaker {
 private:
     enum State { CLOSED, OPEN, HALF_OPEN };
     State state = CLOSED;
-    
+  
     std::chrono::milliseconds timeout{30000};
     int failure_threshold = 5;
     int success_threshold = 2;
-    
+  
     std::atomic<int> failures{0};
     std::atomic<int> successes{0};
     std::chrono::steady_clock::time_point last_failure_time;
-    
+  
 public:
     template<typename Func>
     auto execute(Func&& func) -> decltype(func()) {
@@ -1055,10 +1090,10 @@ public:
                 throw std::runtime_error("Circuit breaker is OPEN");
             }
         }
-        
+      
         try {
             auto result = func();
-            
+          
             if (state == HALF_OPEN) {
                 successes++;
                 if (successes >= success_threshold) {
@@ -1066,20 +1101,20 @@ public:
                     failures = 0;
                 }
             }
-            
+          
             return result;
         } catch (...) {
             failures++;
             last_failure_time = std::chrono::steady_clock::now();
-            
+          
             if (state == HALF_OPEN || failures >= failure_threshold) {
                 state = OPEN;
             }
-            
+          
             throw;
         }
     }
-    
+  
     State get_state() const { return state; }
 };
 
@@ -1103,80 +1138,86 @@ try {
 ### **4.4 Practice Questions: Distributed Systems**
 
 1. **Explain the CAP theorem. Can you have all three?**
-   
+
    **Answer:** No, you can only have 2 of 3:
+
    - **Consistency:** All nodes see same data at same time
    - **Availability:** Every request gets a response (success/failure)
    - **Partition Tolerance:** System works despite network partitions
-   
+
    **During partition (P):** Must choose A or C
+
    - **CP:** Reject requests (maintain consistency)
    - **AP:** Return stale data (maintain availability)
-   
-   **Real-world:** All distributed systems must handle partitions, so choice is CA vs. CP vs. AP.
 
+   **Real-world:** All distributed systems must handle partitions, so choice is CA vs. CP vs. AP.
 2. **What is consistent hashing? How does it help with load balancing?**
-   
+
    **Answer:** Consistent hashing maps keys and nodes to a circle (hash ring). Each key is assigned to the next node clockwise.
-   
+
    **Benefits:**
+
    - **Minimal remapping:** Adding/removing nodes affects only 1/N keys
    - **No central coordinator:** Each client can compute independently
    - **Virtual nodes:** Balance load across heterogeneous nodes
-   
+
    **Use cases:**
+
    - Session stickiness (Apple: 85% cache hit rate)
    - Distributed caching (Redis Cluster)
    - Sharded databases
-
 3. **How do circuit breakers work? When would you use one?**
-   
+
    **Answer:** Circuit breaker has 3 states:
+
    - **CLOSED:** Normal operation, requests pass through
    - **OPEN:** Failures exceeded threshold, reject all requests
    - **HALF_OPEN:** After timeout, allow test requests
-   
+
    **Use when:**
+
    - External service calls (database, API)
    - Cascading failure prevention
    - Graceful degradation
-   
-   **Example:** CapitalOne (circuit breakers with DCGM for GPU health monitoring)
 
+   **Example:** CapitalOne (circuit breakers with DCGM for GPU health monitoring)
 4. **What is the difference between at-least-once and exactly-once semantics?**
-   
+
    **Answer:**
-   
+
    **At-least-once:**
+
    - Message delivered ≥ 1 times
    - May have duplicates
    - **Idempotency required** on consumer
    - **Faster, simpler**
-   
+
    **Exactly-once:**
+
    - Message delivered exactly 1 time
    - No duplicates, no losses
    - **Two-phase commit, transactions**
    - **Slower, complex**
-   
-   **Use at-least-once + idempotency** for most cases (Kafka default).
 
+   **Use at-least-once + idempotency** for most cases (Kafka default).
 5. **How do you handle distributed transactions?**
-   
+
    **Answer:**
-   
+
    **Two-Phase Commit (2PC):**
+
    - Phase 1: Prepare (all nodes vote)
    - Phase 2: Commit/Rollback (based on votes)
    - **Blocking:** Coordinator failure = blocked
    - **Synchronous:** High latency
-   
+
    **Saga Pattern:**
+
    - Break transaction into local transactions
    - Each has compensating transaction (rollback)
    - **Non-blocking:** No coordinator
    - **Eventual consistency**
-   
+
    **Use Saga for:** Microservices, long-running transactions
 
 ---
@@ -1246,6 +1287,7 @@ Latency Numbers (for reference):
 ### **5.3 AI-Specific System Design: LLM Serving Platform**
 
 #### **Requirements:**
+
 - **Functional:** Serve LLM inference for chat, completion, embedding
 - **Non-functional:**
   - Latency: TTFT < 500ms, TPOT < 50ms/token
@@ -1290,16 +1332,17 @@ Latency Numbers (for reference):
 #### **Key Design Decisions:**
 
 1. **KV-Cache Management:**
+
    - Use **PagedAttention** (vLLM) for memory efficiency
    - **Session stickiness** for cache hits (70% target)
    - **LRU eviction** for memory pressure
-
 2. **Batching Strategy:**
+
    - **Continuous batching** (in-flight batching)
    - **Max batch size:** 256 sequences
    - **Max wait time:** 10ms
-
 3. **Multi-Tenancy:**
+
    - **GPU isolation:** MIG or time-slicing
    - **Rate limiting:** Per-token budgets
    - **Priority queues:** P0 (interactive), P1 (batch)
@@ -1353,6 +1396,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 ### **6.2 Optimization Checklist**
 
 #### **CPU Optimization:**
+
 - [ ] Profile before optimizing (find bottlenecks)
 - [ ] Reduce cache misses (data locality)
 - [ ] Use SIMD (AVX2, AVX-512, NEON)
@@ -1362,6 +1406,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 - [ ] Use arena allocators (reduce malloc overhead)
 
 #### **Memory Optimization:**
+
 - [ ] Profile memory usage (heap, stack)
 - [ ] Reduce allocations (reuse buffers)
 - [ ] Use huge pages (reduce TLB misses)
@@ -1370,6 +1415,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 - [ ] Use memory-mapped files (large files)
 
 #### **GPU Optimization:**
+
 - [ ] Maximize occupancy (threads per SM)
 - [ ] Use shared memory (reduce global memory access)
 - [ ] Coalesce memory access (aligned, contiguous)
@@ -1378,6 +1424,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 - [ ] Use CUDA Graphs (reduce launch overhead)
 
 #### **Network Optimization:**
+
 - [ ] Use zero-copy (sendfile, splice)
 - [ ] Batch small messages
 - [ ] Use compression (zstd, lz4)
@@ -1394,12 +1441,14 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 **Objective:** Implement and benchmark lock-free queue.
 
 **Steps:**
+
 1. Implement SPSCQueue class (see Section 2.2)
 2. Benchmark vs. mutex-based queue
 3. Measure throughput (ops/sec)
 4. Test with different workloads (producer/consumer on same/different cores)
 
 **Expected Results:**
+
 - Lock-free: 500M ops/sec
 - Mutex-based: 100M ops/sec
 - **5× speedup**
@@ -1411,12 +1460,14 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 **Objective:** Build arena allocator and compare with malloc.
 
 **Steps:**
+
 1. Implement ArenaAllocator class (see Section 1.3)
 2. Benchmark allocation/deallocation
 3. Measure fragmentation
 4. Test bulk reset performance
 
 **Expected Results:**
+
 - Arena allocation: 5 ns
 - malloc: 50 ns
 - **10× speedup**
@@ -1429,6 +1480,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 **Objective:** Build shared memory IPC between two processes.
 
 **Steps:**
+
 1. Create shared memory region (POSIX shm)
 2. Map into producer process
 3. Map into consumer process
@@ -1436,6 +1488,7 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 5. Benchmark latency vs. sockets
 
 **Expected Results:**
+
 - Shared memory: 100 ns latency
 - Unix domain sockets: 1 µs
 - TCP sockets: 10 µs
@@ -1445,17 +1498,57 @@ perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
 
 ---
 
-# Part II: Platform & Infrastructure Engineering
+# Part II: Platform & Infrastructure Engineering (K8s on Bare Metal, On-Prem)
+
+> **Deployment Assumption:** Production workloads run as **Kubernetes pods on bare-metal, on-premises servers**.
+> Host-side tuning prepares hardware, firmware, the Linux kernel, drivers, and node-level prerequisites.
+> Kubernetes-side tuning decides how pods consume those resources through kubelet policy, scheduler policy,
+> device plugins, operators, CRDs, pod specs, and resource requests.
+>
+> **Mental Model:** Configure the host once so Kubernetes can see clean, deterministic resources.
+> Configure Kubernetes so each pod receives the right CPUs, memory locality, devices, network interfaces,
+> storage, and isolation. Do not manually bind pod processes on the host unless you are debugging.
 
 ---
 
-## Module 8: Host & OS Tuning for HPC
+## Part II Mental Model
+
+### **Layer Ownership**
+
+| Layer | Primary Owner | What It Means |
+|-------|---------------|---------------|
+| **Host side** | Bare-metal node owner | BIOS/firmware, kernel boot args, drivers, sysctl, IRQs, NIC/GPU/NVMe readiness, huge page reservation |
+| **K8s side** | Platform/Kubernetes owner | Kubelet policies, scheduler placement, pod resources, CNI, device plugins, operators, PV/PVC, QoS, disruption policy |
+| **Application side** | Service owner | Thread model, memory allocation strategy, CUDA/RDMA usage, batching, queues, observability hooks |
+
+### **Host vs. K8s Responsibility Matrix**
+
+| Area | Host Side Tuning | K8s Side Tuning | Host-Side Redundant for Pods? |
+|------|------------------|-----------------|-------------------------------|
+| **Compute (CPU, Threads)** | BIOS power mode, SMT decision, kernel boot args (`isolcpus`, `nohz_full`, `rcu_nocbs`, `irqaffinity`), CPU governor | `cpuManagerPolicy: static`, `reservedSystemCPUs`, Guaranteed QoS, integer CPU requests, Topology Manager, pod anti-affinity | `taskset`, `numactl --cpunodebind`, manual cpuset cgroup edits, `systemd CPUAffinity` for pod workloads |
+| **Network** | NIC firmware, MTU, ring buffers, coalescing, RSS queues, IRQ affinity, SR-IOV enablement, RDMA/OFED drivers | CNI selection, Multus, SR-IOV Network Operator, RDMA device plugin, NetworkAttachmentDefinition, `hostNetwork` only when justified | Manual pod network namespace setup, manual CNI iptables edits, assigning VFs to containers by hand |
+| **Memory** | Huge page reservation, THP policy, `vm.swappiness`, overcommit policy, NUMA discovery, memory firmware/BIOS settings | Huge page requests/limits, Memory Manager, Topology Manager, `/dev/shm` via `emptyDir`, Guaranteed QoS, `IPC_LOCK` capability | `numactl --membind` for pods, manual `/dev/shm` host changes, direct `oom_score_adj` for pod processes |
+| **Storage** | Format/mount local NVMe, filesystem choice, I/O scheduler, GDS package/driver prerequisites, local path preparation | Local PV/PVC, StorageClass, CSI drivers, ephemeral volumes, model-cache lifecycle, node affinity | Direct hostPath shortcuts for app storage when PV/PVC exists, manually bind-mounting pod data paths |
+| **GPU** | Driver/toolkit readiness, persistence daemon, clocks/power limits, MIG mode enablement, fabric/NVLink health, DCGM host access | NVIDIA GPU Operator, device plugin, MIG Manager, GPU Feature Discovery, GPU resource requests, RuntimeClass | Manually setting `CUDA_VISIBLE_DEVICES`, manually assigning `/dev/nvidia*`, creating MIG instances by hand when MIG Manager owns them |
+| **Other Configuration** | Kernel modules, time sync, logging limits, ulimits, secure boot/IOMMU, node baseline validation | PriorityClass, PDB, taints/tolerations, node labels, NFD, admission policy, runtime security context, observability DaemonSets | Manual eviction protection, manual labels that conflict with NFD/operators, direct process priority changes for pods |
+
+### **Rule of Thumb**
+
+- **Host side prepares capacity.** It should make CPUs quiet, memory predictable, devices visible, storage mounted, and drivers healthy.
+- **K8s side allocates capacity.** It should pin pod CPUs, align NUMA resources, assign GPUs/NICs, mount memory/storage, and enforce lifecycle policy.
+- **Manual host binding is only for debugging or non-Kubernetes services.** Tools such as `numactl`, `taskset`, direct cgroup edits, and `systemd CPUAffinity` are useful to validate concepts, but they are not the production control plane for pod workloads.
+- **Discovery is not redundant.** Running `lscpu`, `numactl --hardware`, `lstopo`, `nvidia-smi topo -m`, `ethtool`, and `lsblk` on the host is still required to understand the node topology. Using those tools to launch or bind pod processes is the redundant part.
+
+---
+
+## Module 8: Host-Side Tuning (Bare Metal Foundation)
 
 ### **8.1 Why Platform Configuration Matters**
 
 #### **The Problem:**
 
 Your C++ service uses NUMA-aware allocations, CPU pinning, and huge pages. But the platform:
+
 - Doesn't expose NUMA topology to containers
 - Lets the kernel scheduler migrate threads freely
 - Doesn't pre-allocate huge pages
@@ -1465,25 +1558,37 @@ Your C++ service uses NUMA-aware allocations, CPU pinning, and huge pages. But t
 
 #### **Platform Engineer's Responsibility:**
 
-```
-Application Developer Says:          Platform Engineer Must Configure:
-─────────────────────────────────    ──────────────────────────────────────
-"I use NUMA-aware allocation"     →  Expose NUMA topology, pin to node
-"I use huge pages for KV-cache"   →  Pre-allocate huge pages on host
-"I use CPU pinning for threads"   →  Isolate CPUs from kernel scheduler
-"I use lock-free SPSC queues"     →  Ensure producer/consumer on same socket
-"I use SIMD (AVX-512)"           →  Verify CPU flags, disable power saving
-"I use RDMA for networking"       →  Configure SR-IOV, expose VFs to pods
-"I use shared memory IPC"         →  Configure IPC namespace, tmpfs sizing
-```
+| Application Needs | Host Must Prepare | Kubernetes Must Allocate |
+|-------------------|-------------------|--------------------------|
+| NUMA-aware allocation | Expose and verify NUMA topology; reserve clean CPUs and huge pages per NUMA node | Use CPU Manager, Memory Manager, and Topology Manager so the pod lands on one NUMA node |
+| Huge pages for KV-cache | Reserve 2Mi/1Gi huge pages at boot and keep THP policy predictable | Request `hugepages-2Mi` or `hugepages-1Gi` in pod resources |
+| CPU pinning for threads | Isolate CPUs from generic scheduler noise and IRQs | Give the pod exclusive integer CPUs via Guaranteed QoS and CPU Manager static policy |
+| Lock-free SPSC queues | Keep housekeeping, IRQs, and noisy services off performance CPUs | Co-locate producer/consumer containers in the same pod or same NUMA-aligned placement group |
+| SIMD/AVX-512 | Verify CPU flags, BIOS settings, frequency policy, and thermal headroom | Use NFD labels and node selectors so pods land only on capable nodes |
+| RDMA or SR-IOV networking | Load drivers, enable SR-IOV/RDMA, tune NIC queues, IRQs, and MTU | Assign VFs/RDMA devices through Multus, SR-IOV Network Operator, and device plugins |
+| Shared memory IPC | Provide memory capacity and kernel IPC limits | Configure `/dev/shm` with `emptyDir.medium: Memory` and pod-level IPC semantics |
 
 ---
 
-### **8.2 CPU Isolation & Pinning**
+### **8.2 Host Side Tuning Checklist**
+
+Host-side tuning is the **bare-metal foundation**. It should prepare the node so Kubernetes can make deterministic scheduling decisions, but it should not manually control individual pod processes.
+
+| Category | Required Host-Side Work | Avoid on Host for K8s Pods |
+|----------|--------------------------|----------------------------|
+| **Compute (CPU, Threads)** | BIOS performance profile, decide SMT/HyperThreading policy, set CPU governor, reserve housekeeping CPUs, configure `isolcpus`/`nohz_full`/`rcu_nocbs`, steer IRQs away from performance CPUs | `taskset` or `numactl` against pod PIDs, manual cpuset cgroup edits, `systemd CPUAffinity` for pod workloads |
+| **Network** | Update NIC firmware, configure MTU, ring buffers, coalescing, RSS queues, IRQ affinity, SR-IOV enablement, RDMA/OFED drivers | Creating pod network namespaces by hand, editing CNI-managed iptables/nftables rules, manually moving VFs into containers |
+| **Memory** | Reserve huge pages, set THP policy, tune `vm.swappiness`/overcommit, verify NUMA topology, validate memory bandwidth | `numactl --membind` for production pods, manually resizing pod `/dev/shm`, setting pod `oom_score_adj` directly |
+| **Storage** | Format and mount local NVMe, choose filesystem and I/O scheduler, prepare local PV paths, install GDS prerequisites | Bypassing PV/PVC with ad hoc hostPath mounts for app data |
+| **GPU** | Install/validate driver or allow GPU Operator to own it, enable persistence daemon, set clocks/power policy, enable MIG mode if needed, verify NVLink/PCIe topology | Manually setting pod GPU device files, manually assigning `CUDA_VISIBLE_DEVICES`, creating MIG layout by hand when MIG Manager owns it |
+| **Other Configuration** | Time sync, kernel modules, IOMMU/SR-IOV BIOS settings, ulimits, log limits, node baseline benchmarks | Manual eviction/preemption controls for pods, hand-maintained labels that conflict with NFD/operator labels |
+
+### **8.3 Host Compute (CPU, Threads)**
 
 #### **Why CPU Isolation?**
 
 Without isolation, the Linux kernel scheduler can:
+
 - Move your latency-sensitive threads between CPUs
 - Schedule housekeeping tasks on your performance-critical cores
 - Cause cache thrashing when threads migrate across NUMA nodes
@@ -1502,14 +1607,16 @@ GRUB_CMDLINE_LINUX="isolcpus=4-31 nohz_full=4-31 rcu_nocbs=4-31"
 
 **What each parameter does:**
 
-| Parameter | Effect | Why It Matters |
-|-----------|--------|----------------|
-| `isolcpus=4-31` | CPUs 4-31 not used by scheduler | Your threads get dedicated CPUs |
-| `nohz_full=4-31` | No timer ticks on those CPUs | No 1ms jitter from timer interrupts |
-| `rcu_nocbs=4-31` | RCU callbacks run elsewhere | No kernel housekeeping overhead |
-| `irqaffinity=0-3` | IRQs only on CPUs 0-3 | No interrupt storm on perf CPUs |
+| Parameter           | Effect                          | Why It Matters                      |
+| ------------------- | ------------------------------- | ----------------------------------- |
+| `isolcpus=4-31`   | CPUs 4-31 not used by scheduler | Your threads get dedicated CPUs     |
+| `nohz_full=4-31`  | No timer ticks on those CPUs    | No 1ms jitter from timer interrupts |
+| `rcu_nocbs=4-31`  | RCU callbacks run elsewhere     | No kernel housekeeping overhead     |
+| `irqaffinity=0-3` | IRQs only on CPUs 0-3           | No interrupt storm on perf CPUs     |
 
-#### **CPU Shielding with cgroups v2:**
+#### **Manual CPU Shielding with cgroups v2 (Non-K8s or Debug Only):**
+
+For pod workloads, Kubernetes owns cpuset cgroups through the kubelet CPU Manager. Use the commands below only for a non-Kubernetes service, a one-off benchmark, or to understand what Kubernetes is doing under the hood.
 
 ```bash
 # Create a performance cpuset
@@ -1527,7 +1634,9 @@ cat /proc/$PID/status | grep Cpus_allowed_list
 # Output: Cpus_allowed_list: 4-31
 ```
 
-#### **systemd-based CPU Isolation:**
+#### **systemd-based CPU Isolation (Non-K8s Services Only):**
+
+This is useful for host daemons such as logging, telemetry, or a bare-metal service. It is redundant for application pods because pod CPU placement comes from kubelet policy and pod resource requests.
 
 ```bash
 # /etc/systemd/system/my-hpc-service.service
@@ -1570,13 +1679,29 @@ numastat -p $PID
 
 ---
 
-### **8.3 Huge Pages Configuration**
+### **8.4 Host Network**
+
+Host network tuning prepares physical NICs and interrupts. Kubernetes still owns pod network attachment through the CNI, Multus, SR-IOV Network Operator, and device plugins.
+
+| Host Task | Why It Matters | K8s Boundary |
+|-----------|----------------|--------------|
+| NIC firmware and driver validation | Avoids link instability, missing offloads, or RDMA feature gaps | Kubernetes consumes the device; it does not fix firmware |
+| MTU and link mode | Required for jumbo frames, RDMA fabric consistency, and predictable throughput | CNI/NetworkAttachmentDefinition must match the host fabric |
+| Ring buffers and coalescing | Controls packet drops and latency/CPU tradeoff | Pod specs should not tune physical NIC rings directly |
+| RSS queues and IRQ affinity | Keeps NIC interrupts on housekeeping CPUs or dedicated network CPUs | Topology Manager should then align pods with nearby CPUs/devices |
+| SR-IOV VF enablement | Creates the hardware VFs that Kubernetes can advertise | SR-IOV device plugin/operator assigns VFs to pods |
+| RDMA/OFED stack | Makes `/dev/infiniband` and verbs devices available | RDMA device plugin exposes consumable resources |
+
+**Redundant on host for pods:** creating pod network namespaces manually, assigning VFs by hand after Kubernetes is managing them, or editing CNI-managed iptables/nftables rules directly. Do these through CNI/operator configuration.
+
+### **8.5 Host Memory**
 
 #### **Why Huge Pages?**
 
 Standard 4KB pages → frequent TLB misses for large memory regions (ML model weights, KV-cache).
 
 **TLB Miss Impact:**
+
 - 4KB pages, 1GB memory = 262,144 page table entries
 - TLB size: ~1,500 entries (L1+L2 TLB)
 - **Miss rate: Very high** → Each miss = 10-100 ns penalty
@@ -1636,18 +1761,47 @@ echo always > /sys/kernel/mm/transparent_hugepage/enabled
 echo defer > /sys/kernel/mm/transparent_hugepage/defrag
 ```
 
-| Workload Type | THP Setting | Explicit Huge Pages | Reason |
-|---------------|-------------|---------------------|--------|
-| Low-latency inference | `never` | Yes (2MB) | Avoid compaction pauses |
-| ML training | `madvise` | Yes (1GB) | Large model weights |
-| KV-cache store | `never` | Yes (2MB) | Predictable latency |
-| General services | `madvise` | No | Application decides |
+| Workload Type         | THP Setting | Explicit Huge Pages | Reason                  |
+| --------------------- | ----------- | ------------------- | ----------------------- |
+| Low-latency inference | `never`   | Yes (2MB)           | Avoid compaction pauses |
+| ML training           | `madvise` | Yes (1GB)           | Large model weights     |
+| KV-cache store        | `never`   | Yes (2MB)           | Predictable latency     |
+| General services      | `madvise` | No                  | Application decides     |
 
 **Project Connection:** Fiserv (huge pages for KV-cache, 3.2× faster H2D), CapitalOne (1GB pages for model weights)
 
 ---
 
-### **8.4 Kernel Tuning for Low-Latency**
+### **8.6 Host Storage**
+
+Host storage tuning makes local media reliable and visible. Kubernetes should still own how pods request and mount that storage.
+
+| Host Task | Why It Matters | K8s Boundary |
+|-----------|----------------|--------------|
+| Format and mount local NVMe | Gives predictable local model-cache and spill performance | Expose through local PV/PVC or CSI, not ad hoc application hostPath |
+| Filesystem choice (`xfs`, `ext4`) | Affects metadata behavior, direct I/O, and GDS compatibility | StorageClass/PV should document the supported path |
+| I/O scheduler and queue depth | Controls tail latency under mixed read/write pressure | Pods request storage; they should not tune host block queues |
+| Local PV directory ownership | Lets kubelet bind volumes safely | Use `WaitForFirstConsumer` so scheduling respects node locality |
+| GPUDirect Storage prerequisites | Enables direct NVMe to GPU DMA where supported | Use GDS CSI/driver integration for pod consumption |
+
+**Redundant on host for pods:** manually bind-mounting `/mnt/nvme*` into application containers when a PV/PVC exists. Use hostPath only for node agents and carefully controlled DaemonSets.
+
+### **8.7 Host GPU**
+
+Host GPU tuning prepares the accelerator stack. Kubernetes owns scheduling, device assignment, and per-pod visibility.
+
+| Host Task | Why It Matters | K8s Boundary |
+|-----------|----------------|--------------|
+| NVIDIA driver/toolkit readiness | Makes GPUs visible to container runtime and device plugin | GPU Operator can own this if enabled |
+| Persistence daemon | Avoids first-request CUDA initialization latency | Pod should not start/stop persistence mode |
+| Clock and power policy | Reduces latency variance from boost/throttle behavior | Apply consistently per node pool; schedule pods by node labels |
+| MIG mode enablement | Required before MIG instances can exist | MIG Manager should create and reconcile instances when it owns MIG |
+| NVLink/PCIe/fabric validation | Catches topology or bandwidth regressions before scheduling | GPU Feature Discovery and labels inform placement |
+| DCGM host access | Enables GPU health metrics and diagnostics | DCGM Exporter publishes metrics to the cluster |
+
+**Redundant on host for pods:** manually setting `CUDA_VISIBLE_DEVICES`, mounting `/dev/nvidia*` into containers, or hand-selecting GPU IDs. The NVIDIA device plugin should inject the correct devices and environment.
+
+### **8.8 Host Other Configuration**
 
 #### **sysctl Parameters:**
 
@@ -1757,16 +1911,16 @@ cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 cpupower frequency-info
 ```
 
-| Setting | Effect | Latency Impact |
-|---------|--------|----------------|
-| C-state disabled | CPU always at full power | Eliminates 10-100µs wake-up latency |
-| Governor: performance | Fixed max frequency | No frequency ramping delay |
-| Turbo disabled | Consistent clock speed | Predictable timing |
-| idle=poll | CPU never enters idle | Minimum possible latency (high power) |
+| Setting               | Effect                   | Latency Impact                        |
+| --------------------- | ------------------------ | ------------------------------------- |
+| C-state disabled      | CPU always at full power | Eliminates 10-100µs wake-up latency  |
+| Governor: performance | Fixed max frequency      | No frequency ramping delay            |
+| Turbo disabled        | Consistent clock speed   | Predictable timing                    |
+| idle=poll             | CPU never enters idle    | Minimum possible latency (high power) |
 
 ---
 
-### **8.5 NUMA Topology for Platform Engineers**
+### **8.9 Host NUMA Discovery (Not Pod Binding)**
 
 #### **Discovering NUMA Topology:**
 
@@ -1795,7 +1949,9 @@ nvidia-smi topo -m
 # GPU0 ↔ CPU: NODE0
 ```
 
-#### **NUMA-Aware Service Placement:**
+#### **NUMA-Aware Placement Boundary:**
+
+On bare metal without Kubernetes, `numactl` can launch a service on a specific NUMA node. In this guide's primary deployment model, workloads run as pods, so `numactl --cpunodebind` and `numactl --membind` should not be the production placement mechanism. Use them to discover topology, reproduce a benchmark, or debug a running node; use Kubernetes CPU Manager, Memory Manager, and Topology Manager for pod placement.
 
 ```bash
 # Rule: Place service on SAME NUMA node as its GPU and NIC
@@ -1809,10 +1965,10 @@ cat /sys/bus/pci/devices/0000:3b:00.0/numa_node  # GPU0
 cat /sys/bus/pci/devices/0000:86:00.0/numa_node  # NIC
 # Output: 0
 
-# Step 3: Pin service to NUMA node 0 CPUs
+# Step 3: Non-K8s/debug only: pin service to NUMA node 0 CPUs
 numactl --cpunodebind=0 --membind=0 ./my-inference-service
 
-# Step 4: Verify
+# Step 4: Verify placement
 numastat -p $(pgrep my-inference)
 # Should show most memory on node 0
 ```
@@ -1829,39 +1985,40 @@ PCIe → GPU → QPI/UPI interconnect → CPU (remote memory) → NIC
 Latency: 8-15 µs (3× slower!)
 ```
 
-**Platform Engineering Decision:** Always verify GPU, NIC, and CPU NUMA affinity before deploying HPC workloads.
+**Platform Engineering Decision:** Always verify GPU, NIC, and CPU NUMA affinity before deploying HPC workloads. For pod workloads, the fix is Kubernetes topology-aware scheduling, not manually wrapping the container process with `numactl`.
 
 ---
 
-### **8.6 Practice Questions: Host & OS Tuning**
+### **8.10 Practice Questions: Host & OS Tuning**
 
 1. **Your ML inference service has p99 latency spikes of 50ms every ~1 second. The average latency is 5ms. What would you investigate?**
 
    **Answer:** Timer tick interrupts and THP compaction.
+
    - Check if `nohz_full` is set for the CPUs running the service
    - Check THP: `cat /sys/kernel/mm/transparent_hugepage/enabled` — if "always", compaction causes pauses
    - Check IRQ affinity: `cat /proc/interrupts` — are IRQs hitting perf CPUs?
    - Check CPU governor: frequency scaling causes inconsistent latency
    - **Fix:** `nohz_full=<cpus>`, `THP=never`, pin IRQs to housekeeping CPUs, governor=performance
-
 2. **You've deployed a NUMA-aware C++ service in a container, but it's not getting NUMA benefits. What's wrong?**
 
    **Answer:** Container/K8s is not exposing NUMA topology.
+
    - Kubernetes CPU Manager not in "static" policy
    - Topology Manager not enabled or policy is "none"
    - Container's cpuset doesn't align with NUMA boundaries
    - **Fix:** Enable CPU Manager (static), Topology Manager (single-numa-node), use Guaranteed QoS
-
 3. **A service requests 4GB of huge pages but the allocation fails at runtime. Boot-time allocation succeeded. What happened?**
 
    **Answer:** Huge pages were allocated but not on the correct NUMA node, or another pod consumed them.
+
    - Check per-NUMA allocation: `cat /sys/devices/system/node/node0/hugepages/...`
    - Check if other pods are consuming huge pages (K8s hugepages resource)
    - **Fix:** Allocate per-NUMA node, set resource limits in pod spec, use node affinity
 
 ---
 
-## Module 9: Kubernetes for Low-Latency Workloads
+## Module 9: Kubernetes-Side Tuning (Orchestration Layer)
 
 ### **9.1 The Kubernetes Performance Challenge**
 
@@ -1892,18 +2049,33 @@ Optimized Kubernetes for HPC:
 
 #### **Key K8s Features for HPC:**
 
-| Feature | Purpose | When to Use |
-|---------|---------|-------------|
-| CPU Manager (static) | Exclusive CPU pinning | Low-latency inference |
-| Topology Manager | NUMA-aware scheduling | Multi-resource alignment |
-| Memory Manager | NUMA-aware memory | Large memory workloads |
-| Device Plugins | GPU/NIC/FPGA access | Hardware accelerators |
-| Huge Pages | TLB efficiency | Large memory regions |
-| Host Networking | Bypass kube-proxy | Ultra-low-latency |
+| Feature              | Purpose               | When to Use              |
+| -------------------- | --------------------- | ------------------------ |
+| CPU Manager (static) | Exclusive CPU pinning | Low-latency inference    |
+| Topology Manager     | NUMA-aware scheduling | Multi-resource alignment |
+| Memory Manager       | NUMA-aware memory     | Large memory workloads   |
+| Device Plugins       | GPU/NIC/FPGA access   | Hardware accelerators    |
+| Huge Pages           | TLB efficiency        | Large memory regions     |
+| Host Networking      | Bypass kube-proxy     | Ultra-low-latency        |
+| Local PV/CSI         | Storage locality      | Model cache, NVMe spill  |
+| Priority/PDB         | Lifecycle control     | Critical inference pods  |
 
 ---
 
-### **9.2 CPU Manager Policy: Static**
+### **9.2 K8s Side Tuning Checklist**
+
+Kubernetes-side tuning is the **production control plane** for pod placement and resource consumption. Even when the configuration is stored on the node, such as kubelet config, treat it as Kubernetes-side behavior because it controls how pods are admitted and isolated.
+
+| Category | K8s-Side Configuration | What It Replaces on Host |
+|----------|------------------------|--------------------------|
+| **Compute (CPU, Threads)** | `cpuManagerPolicy: static`, `reservedSystemCPUs`, integer CPU requests, Guaranteed QoS, `full-pcpus-only`, pod/node affinity, Topology Manager | `taskset`, manual `cpuset.cpus`, `systemd CPUAffinity`, `numactl --cpunodebind` for pods |
+| **Network** | Cilium/Calico config, Multus, SR-IOV Network Operator, RDMA device plugin, NetworkAttachmentDefinition, Service/ingress policy, selective `hostNetwork` | Manual pod network namespace work, manual VF moves, direct edits to CNI-managed rules |
+| **Memory** | Memory Manager, Topology Manager, huge page resources, `emptyDir.medium: Memory`, Guaranteed QoS, pod memory requests/limits, `IPC_LOCK` capability | `numactl --membind`, direct `/dev/shm` host sizing, direct pod `oom_score_adj` edits |
+| **Storage** | StorageClass, local PV/PVC, CSI drivers, node affinity, `emptyDir`, model-cache init containers, GDS CSI integration | Direct app hostPath mounts and manual pod data bind mounts |
+| **GPU** | NVIDIA GPU Operator, device plugin, MIG Manager, GPU Feature Discovery, `nvidia.com/gpu` or MIG resources, RuntimeClass | Manual `/dev/nvidia*` mounts, manual `CUDA_VISIBLE_DEVICES`, hand-assigned GPU IDs |
+| **Other Configuration** | PriorityClass, PDB, taints/tolerations, NFD labels, admission controls, runtime security context, observability DaemonSets | Manual eviction protection, hand-maintained topology labels, direct process priority changes |
+
+### **9.3 K8s Compute (CPU, Threads): CPU Manager Policy**
 
 #### **How CPU Manager Works:**
 
@@ -1951,16 +2123,16 @@ metadata:
 spec:
   # Prevent eviction
   priorityClassName: system-critical
-  
+
   # Node selection
   nodeSelector:
     node.kubernetes.io/instance-type: "gpu-hpc"
     feature.node.kubernetes.io/cpu-cpuid.AVX512F: "true"
-  
+
   containers:
   - name: inference-engine
     image: myregistry/fraud-engine:v2.1
-    
+
     resources:
       # Guaranteed QoS: requests == limits
       requests:
@@ -1973,13 +2145,13 @@ spec:
         memory: "32Gi"
         hugepages-2Mi: "4Gi"
         nvidia.com/gpu: "1"
-    
+
     volumeMounts:
     - name: hugepage-2mi
       mountPath: /mnt/hugepages
     - name: dev-shm
       mountPath: /dev/shm
-    
+
     # Security context for performance
     securityContext:
       privileged: false
@@ -1988,7 +2160,7 @@ spec:
         - IPC_LOCK              # Allow mlock (pin memory)
         - SYS_NICE              # Allow real-time priority
         - NET_RAW               # Allow raw sockets (DPDK)
-  
+
   volumes:
   - name: hugepage-2mi
     emptyDir:
@@ -1998,7 +2170,7 @@ spec:
     emptyDir:
       medium: Memory
       sizeLimit: "8Gi"           # Large /dev/shm for shared memory IPC
-  
+
   # Prevent scheduling on same node as noisy neighbors
   affinity:
     podAntiAffinity:
@@ -2025,16 +2197,16 @@ spec:
 
 ---
 
-### **9.3 Topology Manager Deep Dive**
+### **9.4 K8s Memory and NUMA: Topology Manager Deep Dive**
 
 #### **Topology Manager Policies:**
 
-| Policy | Behavior | Use Case |
-|--------|----------|----------|
-| `none` | No topology awareness | Default, general workloads |
-| `best-effort` | Try to align, don't reject | Prefer alignment, tolerate mismatch |
-| `restricted` | Reject if no aligned resources | NUMA-sensitive workloads |
-| `single-numa-node` | ALL resources from one NUMA node | Strict HPC (GPU + CPU + Memory) |
+| Policy               | Behavior                         | Use Case                            |
+| -------------------- | -------------------------------- | ----------------------------------- |
+| `none`             | No topology awareness            | Default, general workloads          |
+| `best-effort`      | Try to align, don't reject       | Prefer alignment, tolerate mismatch |
+| `restricted`       | Reject if no aligned resources   | NUMA-sensitive workloads            |
+| `single-numa-node` | ALL resources from one NUMA node | Strict HPC (GPU + CPU + Memory)     |
 
 #### **How Topology Manager Coordinates:**
 
@@ -2081,6 +2253,7 @@ spec:
 ```
 
 **Labels NFD adds to nodes:**
+
 ```
 feature.node.kubernetes.io/cpu-cpuid.AVX512F=true
 feature.node.kubernetes.io/cpu-hardware_multithreading=true
@@ -2091,7 +2264,22 @@ feature.node.kubernetes.io/system-os_release.ID=ubuntu
 
 ---
 
-### **9.4 Shared Memory & IPC in Kubernetes**
+### **9.5 K8s Network**
+
+Kubernetes should own pod networking through CNI and device-plugin integrations. Host tuning prepares the NIC; Kubernetes decides how the pod attaches.
+
+| K8s Configuration | Use Case | Notes |
+|-------------------|----------|-------|
+| Cilium eBPF/direct routing | Low-latency general pod networking | Reduces iptables/conntrack overhead |
+| Multus secondary network | Separate data plane from control/service network | Required for SR-IOV/RDMA attachments |
+| SR-IOV Network Operator | Dedicated VF per pod | Best latency/isolation tradeoff for on-prem bare metal |
+| RDMA device plugin | RDMA verbs access in pods | Add `IPC_LOCK` for memory registration |
+| `hostNetwork: true` | Extreme latency or legacy host-bound services | Avoid for general multi-tenant workloads because isolation is weak |
+| NetworkPolicy | Tenant isolation | Keep policy at CNI layer instead of manual host firewall edits |
+
+**Redundant on host for pods:** manually creating pod interfaces, moving VFs into namespaces, or editing CNI-managed packet rules. Put those decisions in NetworkAttachmentDefinitions, CNI config, and operator policies.
+
+### **9.6 K8s Memory: Shared Memory & IPC**
 
 #### **The Challenge:**
 
@@ -2136,18 +2324,48 @@ spec:
 
 #### **Shared Memory Performance in K8s:**
 
-| Configuration | Latency | Notes |
-|---------------|---------|-------|
-| Same pod, emptyDir Memory | 100 ns | Same as bare metal |
-| Same pod, hostIPC | 100 ns | Shares with host |
-| Different pods, hostIPC | 100 ns | Security risk |
-| Different pods, network | 10-50 µs | Use gRPC/TCP |
+| Configuration             | Latency   | Notes              |
+| ------------------------- | --------- | ------------------ |
+| Same pod, emptyDir Memory | 100 ns    | Same as bare metal |
+| Same pod, hostIPC         | 100 ns    | Shares with host   |
+| Different pods, hostIPC   | 100 ns    | Security risk      |
+| Different pods, network   | 10-50 µs | Use gRPC/TCP       |
 
 **Project Connection:** Apple (shared memory between pipeline stages), Broadcom (zero-copy between parser and scorer)
 
 ---
 
-### **9.5 Pod Disruption & Preemption Control**
+### **9.7 K8s Storage**
+
+For on-prem bare-metal inference, storage usually has two jobs: fast local model/cache access and predictable spill behavior. Kubernetes should express both through volumes and scheduling constraints.
+
+| K8s Configuration | Use Case | Notes |
+|-------------------|----------|-------|
+| Local PV + StorageClass | Local NVMe model cache or KV-cache overflow | Use `volumeBindingMode: WaitForFirstConsumer` so pod scheduling and PV locality line up |
+| PVC with node affinity | Durable local data tied to a node | Useful when model shards are pre-positioned |
+| `emptyDir` on disk | Scratch space for temporary artifacts | Counts against node ephemeral storage |
+| `emptyDir.medium: Memory` | RAM-backed scratch or IPC | Counts against pod memory limit |
+| CSI driver | Enterprise storage, GDS, or NVMe-oF integration | Prefer CSI over hand-built hostPath mounts |
+| Init container cache warmup | Pull model weights to local storage before serving | Keeps serving container startup path clean |
+
+**Redundant on host for pods:** direct application hostPath mounts to `/mnt/nvme*` when the same behavior can be represented as PV/PVC. HostPath is acceptable for node agents, drivers, and tightly controlled DaemonSets.
+
+### **9.8 K8s GPU**
+
+Kubernetes should own GPU advertisement, allocation, and isolation. The host supplies a healthy driver and device topology.
+
+| K8s Configuration | Use Case | Notes |
+|-------------------|----------|-------|
+| NVIDIA GPU Operator | Driver/toolkit/device-plugin lifecycle | Lets the cluster reconcile GPU node state |
+| NVIDIA device plugin | Expose `nvidia.com/gpu` resources | Injects devices and environment into pods |
+| MIG Manager | Declarative MIG layouts | Prefer this over hand-created MIG instances in production |
+| GPU Feature Discovery | Node labels for GPU model, MIG, topology | Use labels for node selection and capacity planning |
+| DCGM Exporter | GPU health and performance metrics | Feeds Prometheus alerts and quarantine automation |
+| RuntimeClass/security context | Correct container runtime and capabilities | Avoid privileged pods unless the workload truly needs it |
+
+**Redundant on host for pods:** manually assigning GPU IDs, mounting `/dev/nvidia*`, or setting `CUDA_VISIBLE_DEVICES`. Request GPU resources and let the device plugin perform injection.
+
+### **9.9 K8s Other Configuration**
 
 #### **Preventing Eviction of HPC Workloads:**
 
@@ -2201,17 +2419,19 @@ spec:
 
 ---
 
-### **9.6 Non-Kubernetes Deployment: Bare Metal & VMs**
+### **9.10 Bare-Metal Alternative (Outside the Primary Assumption)**
+
+The rest of this Part assumes Kubernetes on bare metal. Use this section only to reason about exceptions, migrations, or interview tradeoffs.
 
 #### **When NOT to Use Kubernetes:**
 
-| Scenario | Recommendation | Reason |
-|----------|---------------|--------|
-| Ultra-low-latency (< 10µs) | Bare metal | K8s overhead too high |
-| Single-tenant GPU cluster | Bare metal + Slurm | Simpler, less overhead |
-| RDMA networking | Bare metal or SR-IOV | Container networking adds latency |
-| Multi-tenant inference | Kubernetes + optimization | Best isolation + scheduling |
-| Mixed workloads | Kubernetes | Best resource utilization |
+| Scenario                    | Recommendation            | Reason                            |
+| --------------------------- | ------------------------- | --------------------------------- |
+| Ultra-low-latency (< 10µs) | Bare metal                | K8s overhead too high             |
+| Single-tenant GPU cluster   | Bare metal + Slurm        | Simpler, less overhead            |
+| RDMA networking             | Bare metal or SR-IOV      | Container networking adds latency |
+| Multi-tenant inference      | Kubernetes + optimization | Best isolation + scheduling       |
+| Mixed workloads             | Kubernetes                | Best resource utilization         |
 
 #### **Bare Metal Deployment (systemd):**
 
@@ -2266,27 +2486,28 @@ srun --gres=gpu:1 \
 
 ---
 
-### **9.7 Practice Questions: Kubernetes for HPC**
+### **9.11 Practice Questions: Kubernetes for HPC**
 
 1. **Your inference pod has 8 CPUs requested but you see latency variance. `perf` shows context switches. What's the K8s configuration issue?**
 
    **Answer:**
+
    - Pod is Burstable QoS (requests ≠ limits) → no exclusive CPUs
    - CPU Manager policy is "none" (default) → shared CFS bandwidth
    - **Fix:** Set requests == limits (Guaranteed QoS), enable `cpuManagerPolicy: static`
    - Also check: `full-pcpus-only` to avoid HyperThread sharing
-
 2. **You deployed a GPU inference service but GPU-to-CPU data transfer is 3× slower than bare metal. What's wrong?**
 
    **Answer:** NUMA misalignment.
+
    - GPU is on NUMA node 0 but pod's CPUs are on NUMA node 1
    - DMA transfers cross the QPI/UPI interconnect
    - **Fix:** Enable `topologyManagerPolicy: single-numa-node`
    - Verify with `nvidia-smi topo -m` and pod's cpuset
-
 3. **Two containers in the same pod need to share 8GB of data via shared memory. How do you configure this in K8s?**
 
    **Answer:**
+
    - Add `emptyDir` volume with `medium: Memory` and `sizeLimit: 8Gi`
    - Mount at `/dev/shm` in both containers
    - Both containers share IPC namespace within the pod
@@ -2307,21 +2528,21 @@ Pod A → veth → bridge → iptables/nftables → routing → bridge → veth 
                     kube-proxy rules (DNAT/SNAT)
                     conntrack table lookup
                     netfilter hooks
-                    
+
 Latency: 50-200 µs (vs. 1-5 µs bare metal)
 ```
 
 #### **Sources of Networking Overhead:**
 
-| Layer | Overhead | Impact |
-|-------|----------|--------|
-| veth pair | 5-10 µs | Virtual interface crossing |
-| Linux bridge | 5-10 µs | L2 forwarding |
-| iptables/nftables | 10-50 µs | Rule evaluation (scales with rules) |
-| conntrack | 5-20 µs | Connection tracking table |
-| SNAT/DNAT | 5-10 µs | Address translation |
-| Overlay (VXLAN) | 20-50 µs | Encapsulation/decapsulation |
-| **Total** | **50-150 µs** | **vs. 1-5 µs native** |
+| Layer             | Overhead             | Impact                              |
+| ----------------- | -------------------- | ----------------------------------- |
+| veth pair         | 5-10 µs             | Virtual interface crossing          |
+| Linux bridge      | 5-10 µs             | L2 forwarding                       |
+| iptables/nftables | 10-50 µs            | Rule evaluation (scales with rules) |
+| conntrack         | 5-20 µs             | Connection tracking table           |
+| SNAT/DNAT         | 5-10 µs             | Address translation                 |
+| Overlay (VXLAN)   | 20-50 µs            | Encapsulation/decapsulation         |
+| **Total**   | **50-150 µs** | **vs. 1-5 µs native**        |
 
 ---
 
@@ -2329,13 +2550,13 @@ Latency: 50-200 µs (vs. 1-5 µs bare metal)
 
 #### **CNI Comparison for HPC:**
 
-| CNI | Latency | Throughput | Features | Use Case |
-|-----|---------|------------|----------|----------|
-| Flannel (VXLAN) | 100-200 µs | 5 Gbps | Simple overlay | General workloads |
-| Calico (BGP) | 50-100 µs | 10 Gbps | Network policy | Multi-tenant |
-| Cilium (eBPF) | 20-50 µs | 25 Gbps | No iptables | Low-latency |
-| SR-IOV | 5-10 µs | 100 Gbps | Direct NIC access | Ultra-low-latency |
-| Host networking | 1-5 µs | Line rate | No isolation | Single-tenant HPC |
+| CNI             | Latency     | Throughput | Features          | Use Case          |
+| --------------- | ----------- | ---------- | ----------------- | ----------------- |
+| Flannel (VXLAN) | 100-200 µs | 5 Gbps     | Simple overlay    | General workloads |
+| Calico (BGP)    | 50-100 µs  | 10 Gbps    | Network policy    | Multi-tenant      |
+| Cilium (eBPF)   | 20-50 µs   | 25 Gbps    | No iptables       | Low-latency       |
+| SR-IOV          | 5-10 µs    | 100 Gbps   | Direct NIC access | Ultra-low-latency |
+| Host networking | 1-5 µs     | Line rate  | No isolation      | Single-tenant HPC |
 
 #### **Cilium (eBPF-based, recommended for HPC):**
 
@@ -2348,7 +2569,7 @@ metadata:
 spec:
   # Replace kube-proxy entirely
   kubeProxyReplacement: strict
-  
+
   # Use eBPF instead of iptables
   bpf:
     masquerade: true
@@ -2356,11 +2577,11 @@ spec:
     # Direct Server Return (skip reverse path)
     loadBalancer:
       mode: dsr
-  
+
   # Disable overlay for local traffic
   tunnel: disabled
   autoDirectNodeRoutes: true
-  
+
   # Enable bandwidth manager
   bandwidthManager:
     enabled: true
@@ -2368,6 +2589,7 @@ spec:
 ```
 
 **Why Cilium is better for HPC:**
+
 - **No iptables:** eBPF processes packets in kernel, no userspace
 - **No conntrack overhead:** Direct routing for known connections
 - **XDP (eXpress Data Path):** Process at NIC driver level (before kernel stack)
@@ -2634,16 +2856,17 @@ spec:
       hostPort: 8080
 ```
 
-| Aspect | Pod Network | Host Network |
-|--------|-------------|--------------|
-| Latency | 50-200 µs overhead | Native (0 overhead) |
-| Isolation | Full (separate namespace) | None (shared with host) |
-| Port conflicts | No | Yes (must manage ports) |
-| Service discovery | Full K8s services | Manual or hostPort |
-| Security | Strong (NetworkPolicy) | Weak (host-level only) |
-| Use case | General workloads | Ultra-low-latency, DPDK |
+| Aspect            | Pod Network               | Host Network            |
+| ----------------- | ------------------------- | ----------------------- |
+| Latency           | 50-200 µs overhead       | Native (0 overhead)     |
+| Isolation         | Full (separate namespace) | None (shared with host) |
+| Port conflicts    | No                        | Yes (must manage ports) |
+| Service discovery | Full K8s services         | Manual or hostPort      |
+| Security          | Strong (NetworkPolicy)    | Weak (host-level only)  |
+| Use case          | General workloads         | Ultra-low-latency, DPDK |
 
 **Decision Framework:**
+
 - **Use pod networking** for: multi-tenant, general services, need NetworkPolicy
 - **Use SR-IOV** for: low-latency + isolation (best of both worlds)
 - **Use host networking** for: single-tenant, extreme latency, DPDK/RDMA
@@ -2655,25 +2878,26 @@ spec:
 1. **Your inference service has 200µs network latency between pods on the same node. How do you reduce it to < 10µs?**
 
    **Answer:**
+
    - Current: Standard CNI (veth + bridge + iptables) = 50-200µs
    - Option 1: Cilium with eBPF + socket-level LB → 20-50µs
    - Option 2: SR-IOV (dedicated VF per pod) → 5-10µs
    - Option 3: Shared memory IPC (same pod, different containers) → 100ns
    - **Best for same-node inference:** Put cooperating services in same pod with shared memory
-
 2. **You need RDMA between GPU nodes for KV-cache transfer. How do you configure this in K8s?**
 
    **Answer:**
+
    - Deploy RDMA device plugin or SR-IOV network operator
    - Create NetworkAttachmentDefinition for RDMA network
    - Pod requests `rdma/hca_shared_devices` resource
    - Add `IPC_LOCK` capability for memory registration
    - Ensure pods on same RDMA fabric (subnet/partition)
    - Use Topology Manager to align RDMA NIC with GPU (same PCIe switch)
-
 3. **Explain the tradeoff between interrupt coalescing settings.**
 
    **Answer:**
+
    - `rx-usecs=0, rx-frames=1`: Interrupt on EVERY packet. Lowest latency (~1µs), highest CPU usage
    - `rx-usecs=100, rx-frames=64`: Batch packets. Higher latency (~100µs), lower CPU
    - **For HPC inference:** Use low coalescing on dedicated IRQ CPUs
@@ -2727,6 +2951,7 @@ helm install gpu-operator nvidia/gpu-operator \
 #### **What is MIG?**
 
 MIG (Multi-Instance GPU) partitions a single GPU into multiple isolated instances, each with dedicated:
+
 - **Compute:** SM (Streaming Multiprocessors)
 - **Memory:** Dedicated VRAM partition
 - **Cache:** Separate L2 cache
@@ -2819,15 +3044,15 @@ spec:
 
 #### **MIG vs. Time-Slicing vs. MPS:**
 
-| Feature | MIG | Time-Slicing | MPS |
-|---------|-----|--------------|-----|
-| **Isolation** | Full (memory, compute, cache) | None (shared everything) | Partial (shared memory) |
-| **Overhead** | None | Context switch overhead | Minimal |
-| **Granularity** | Fixed profiles | Any fraction | Any fraction |
-| **Error Isolation** | Yes (GPU fault isolated) | No (one fault kills all) | No |
-| **Best For** | Multi-tenant production | Dev/test, burstable | Cooperative multi-process |
-| **GPU Support** | A100, H100 only | All NVIDIA GPUs | Volta+ |
-| **Max Instances** | 7 (A100) | Unlimited (time-shared) | 48 processes |
+| Feature                   | MIG                           | Time-Slicing             | MPS                       |
+| ------------------------- | ----------------------------- | ------------------------ | ------------------------- |
+| **Isolation**       | Full (memory, compute, cache) | None (shared everything) | Partial (shared memory)   |
+| **Overhead**        | None                          | Context switch overhead  | Minimal                   |
+| **Granularity**     | Fixed profiles                | Any fraction             | Any fraction              |
+| **Error Isolation** | Yes (GPU fault isolated)      | No (one fault kills all) | No                        |
+| **Best For**        | Multi-tenant production       | Dev/test, burstable      | Cooperative multi-process |
+| **GPU Support**     | A100, H100 only               | All NVIDIA GPUs          | Volta+                    |
+| **Max Instances**   | 7 (A100)                      | Unlimited (time-shared)  | 48 processes              |
 
 ---
 
@@ -2854,6 +3079,7 @@ data:
 ```
 
 **Time-Slicing Behavior:**
+
 ```
 Physical GPU: 1× A100 80GB
 Time-sliced: 4× "virtual GPUs"
@@ -2905,17 +3131,17 @@ data:
       metric: DCGM_FI_DEV_GPU_TEMP
       threshold: 85  # Don't schedule if > 85°C
       action: avoid
-    
+
     - name: memory-check
       metric: DCGM_FI_DEV_FB_FREE
       threshold: 10240  # Need at least 10GB free
       action: require
-    
+
     - name: xid-error-check
       metric: DCGM_FI_DEV_XID_ERRORS
       threshold: 0  # Any XID errors = avoid GPU
       action: avoid
-    
+
     - name: ecc-error-check
       metric: DCGM_FI_DEV_RETIRED_PAGES
       threshold: 5  # More than 5 retired pages = quarantine
@@ -2931,22 +3157,22 @@ data:
 while true; do
     # Check for XID errors (GPU hardware faults)
     xid_errors=$(nvidia-smi --query-gpu=xid_errors --format=csv,noheader -i 0)
-    
+
     if [[ "$xid_errors" != "N/A" && "$xid_errors" -gt 0 ]]; then
         echo "GPU 0 has XID errors: $xid_errors"
-        
+
         # Cordon node to prevent new scheduling
         kubectl cordon $(hostname)
-        
+
         # Label GPU as unhealthy
         kubectl label node $(hostname) gpu-health=degraded --overwrite
-        
+
         # Alert
         curl -X POST "http://alertmanager:9093/api/v1/alerts" \
             -H "Content-Type: application/json" \
             -d "[{\"labels\":{\"alertname\":\"GPUXIDError\",\"node\":\"$(hostname)\",\"severity\":\"critical\"}}]"
     fi
-    
+
     sleep 30
 done
 ```
@@ -3011,16 +3237,17 @@ WantedBy=multi-user.target
 1. **You have 4 A100 GPUs and need to serve 20 different small models (each needs < 10GB VRAM). How do you configure GPU sharing?**
 
    **Answer:**
+
    - Use MIG: Each A100 → 7× `1g.10gb` instances = 28 MIG slices for 4 GPUs
    - Each model gets 1 MIG slice (10GB VRAM, 14 SMs)
    - Full isolation between models (memory faults don't propagate)
    - Configure via GPU Operator's MIG Manager
    - **Why not time-slicing:** No memory isolation, OOM risk
    - **Why not MPS:** No fault isolation
-
 2. **A GPU shows XID error 79 (GPU fallen off the bus). What's your response procedure?**
 
    **Answer:**
+
    1. Immediately cordon the node (`kubectl cordon`)
    2. Drain non-critical workloads (`kubectl drain --ignore-daemonsets`)
    3. Check if it's transient: reset GPU (`nvidia-smi -r -i <gpu_id>`)
@@ -3028,10 +3255,10 @@ WantedBy=multi-user.target
    5. Mark GPU as quarantined in labels
    6. File hardware replacement ticket
    7. Monitor other GPUs on same node (PCIe switch failure can cascade)
-
 3. **Why should you lock GPU clocks for inference workloads?**
 
    **Answer:**
+
    - Default: GPU boosts/throttles based on thermal + power
    - This causes **latency variance**: p50=5ms but p99=15ms (during throttle)
    - Locking clocks gives consistent performance (p50≈p99)
@@ -3158,12 +3385,12 @@ helm install nvidia-gds-driver nvidia/nvidia-gds-driver
 
 #### **Performance Comparison:**
 
-| Path | Model Load (7B, 14GB) | Bandwidth |
-|------|----------------------|-----------|
-| Network → CPU → GPU | 5-10 seconds | 1-2 GB/s |
-| Local NVMe → CPU → GPU | 2-3 seconds | 5-6 GB/s |
-| Local NVMe → GPU (GDS) | 1-1.5 seconds | 10-12 GB/s |
-| NVMe-oF → GPU (GDS) | 2-3 seconds | 8-10 GB/s |
+| Path                     | Model Load (7B, 14GB) | Bandwidth  |
+| ------------------------ | --------------------- | ---------- |
+| Network → CPU → GPU    | 5-10 seconds          | 1-2 GB/s   |
+| Local NVMe → CPU → GPU | 2-3 seconds           | 5-6 GB/s   |
+| Local NVMe → GPU (GDS)  | 1-1.5 seconds         | 10-12 GB/s |
+| NVMe-oF → GPU (GDS)     | 2-3 seconds           | 8-10 GB/s  |
 
 ---
 
@@ -3215,15 +3442,16 @@ vm.oom_kill_allocating_task = 1  # Kill the allocating task, not random
 1. **Your model loading takes 10 seconds (14GB model from network storage to GPU). How do you reduce to < 2 seconds?**
 
    **Answer:**
+
    - Use local NVMe storage for model weights (5-6 GB/s) → ~2.5s
    - Enable GPUDirect Storage for direct NVMe→GPU DMA (10-12 GB/s) → ~1.2s
    - Pre-load models on pod startup (warm cache)
    - Use model sharding (load portions in parallel across multiple NVMe)
    - Consider NVIDIA MPS for model pre-loading
-
 2. **A pod is getting OOM-killed but the node has plenty of memory. What's happening?**
 
    **Answer:**
+
    - Pod's memory *limit* is set too low (cgroup limit, not node limit)
    - Huge pages are allocated but not counted in cgroup memory
    - `/dev/shm` (tmpfs) counts against memory limit
@@ -3359,7 +3587,7 @@ slos:
         threshold: 10000 # < 10ms
       - target: 0.9999  # 99.99% of requests
         threshold: 50000 # < 50ms
-    
+
   - name: gpu-availability
     description: "GPU available for scheduling"
     indicator:
@@ -3367,7 +3595,7 @@ slos:
       metric: DCGM_FI_DEV_GPU_UTIL > 0
     objectives:
       - target: 0.9999  # 99.99% uptime (< 53 min/year downtime)
-    
+
   - name: throughput
     description: "Inference throughput"
     indicator:
@@ -3408,7 +3636,7 @@ groups:
       severity: warning
     annotations:
       summary: "GPU {{ $labels.gpu }} temperature {{ $value }}°C"
-      
+
   # GPU memory exhaustion
   - alert: GPUMemoryLow
     expr: (DCGM_FI_DEV_FB_FREE / DCGM_FI_DEV_FB_TOTAL) < 0.1
@@ -3417,11 +3645,11 @@ groups:
       severity: critical
     annotations:
       summary: "GPU {{ $labels.gpu }} memory < 10% free"
-  
+
   # Latency SLO breach
   - alert: InferenceLatencyHigh
     expr: |
-      histogram_quantile(0.99, 
+      histogram_quantile(0.99,
         rate(inference_request_duration_microseconds_bucket[5m])
       ) > 10000
     for: 5m
@@ -3429,17 +3657,17 @@ groups:
       severity: critical
     annotations:
       summary: "p99 latency {{ $value }}µs exceeds 10ms SLO"
-  
+
   # NUMA misalignment detected
   - alert: NUMARemoteAccess
-    expr: rate(node_numa_interleave_hit_total[5m]) / 
+    expr: rate(node_numa_interleave_hit_total[5m]) /
           (rate(node_numa_hit_total[5m]) + rate(node_numa_miss_total[5m])) < 0.9
     for: 10m
     labels:
       severity: warning
     annotations:
       summary: "NUMA locality < 90% on {{ $labels.instance }}"
-  
+
   # Context switches on isolated CPUs
   - alert: IsolatedCPUContextSwitches
     expr: rate(node_context_switches_total{cpu=~"[4-9]|[12-31]"}[1m]) > 100
@@ -3457,16 +3685,17 @@ groups:
 1. **Your inference p99 latency jumped from 5ms to 50ms. Walk through your debugging process.**
 
    **Answer:**
+
    1. Check GPU metrics (DCGM): Is GPU throttling? Memory full? XID errors?
    2. Check system metrics: CPU migration? Context switches on perf CPUs? Page faults?
    3. Check network: Increased latency? Packet drops? Retransmissions?
    4. Check application: Batch size spike? KV-cache eviction? Model reload?
    5. Use eBPF: `runqlat` for scheduler delay, `biolatency` for I/O
    6. Common causes: THP compaction, IRQ storm on perf CPUs, noisy neighbor, GPU thermal throttle
-
 2. **How do you detect NUMA misalignment in production without adding latency?**
 
    **Answer:**
+
    - Use hardware performance counters (PMU): `perf stat -e numa-stores-remote`
    - eBPF tracepoint: `migrate:mm_migrate_pages` (pages moving between nodes)
    - Prometheus: `node_numa_miss_total` vs `node_numa_hit_total`
@@ -3482,6 +3711,7 @@ groups:
 **Objective:** Set up a K8s worker node optimized for low-latency inference.
 
 **Steps:**
+
 1. Configure kernel boot parameters (isolcpus, hugepages, nohz_full)
 2. Set up CPU Manager with static policy
 3. Enable Topology Manager (single-numa-node)
@@ -3493,6 +3723,7 @@ groups:
 6. Benchmark: Compare latency with/without optimizations
 
 **Expected Results:**
+
 - Without tuning: p99 = 15ms, variance = 10ms
 - With tuning: p99 = 5ms, variance = 0.5ms
 - **3× better p99, 20× less variance**
@@ -3504,6 +3735,7 @@ groups:
 **Objective:** Deploy SR-IOV for direct NIC access in pods.
 
 **Steps:**
+
 1. Enable SR-IOV on NIC (create 8 VFs)
 2. Install SR-IOV Network Device Plugin
 3. Create NetworkAttachmentDefinition
@@ -3511,6 +3743,7 @@ groups:
 5. Benchmark: iperf3 throughput and latency vs. standard CNI
 
 **Expected Results:**
+
 - Standard CNI: 10 Gbps, 50µs latency
 - SR-IOV: 100 Gbps, 5µs latency
 - **10× throughput, 10× lower latency**
@@ -3522,6 +3755,7 @@ groups:
 **Objective:** Partition A100 into MIG instances and serve multiple models.
 
 **Steps:**
+
 1. Enable MIG mode on GPU
 2. Create MIG instances (mix of 1g.10gb and 3g.40gb)
 3. Configure Device Plugin for MIG
@@ -3529,6 +3763,7 @@ groups:
 5. Verify isolation (memory fault in one instance doesn't affect others)
 
 **Expected Results:**
+
 - 7 isolated instances per GPU
 - Each instance serves independent model
 - Zero interference between instances
@@ -3541,6 +3776,7 @@ groups:
 **Objective:** Deploy complete monitoring for HPC cluster.
 
 **Steps:**
+
 1. Deploy Prometheus + Grafana
 2. Deploy DCGM Exporter (GPU metrics)
 3. Deploy Node Exporter with HPC-specific collectors
@@ -3553,6 +3789,7 @@ groups:
    - Inference latency distribution (µs resolution)
 
 **Expected Results:**
+
 - Single pane of glass for entire HPC cluster health
 - Sub-second alerting on performance degradation
 - Historical data for capacity planning
@@ -3606,95 +3843,96 @@ groups:
 26. Your C++ service uses NUMA-aware memory allocation, but when deployed in Kubernetes, NUMA locality drops to 50%. What's wrong and how do you fix it?
 
     **Answer:** Kubernetes CPU Manager is in "none" policy (default), so the pod's cpuset spans both NUMA nodes. Fix: Enable `cpuManagerPolicy: static`, use Guaranteed QoS (requests==limits), enable `topologyManagerPolicy: single-numa-node`. Verify with `numastat -p <pid>`.
-
 27. Compare MIG, time-slicing, and MPS for GPU sharing in a multi-tenant cluster. When would you use each?
 
     **Answer:**
+
     - **MIG:** Full isolation (memory + compute + cache), A100/H100 only, max 7 instances. Use for production multi-tenant with SLA guarantees.
     - **Time-slicing:** No isolation, any GPU, unlimited virtual GPUs. Use for dev/test, non-critical workloads.
     - **MPS:** Partial isolation (shared memory), Volta+, max 48 processes. Use for cooperative multi-process (same team, trusted code).
     - **Decision:** Production inference = MIG. Dev clusters = time-slicing. Parallel CUDA kernels = MPS.
-
 28. A low-latency inference pod has p99 latency spikes every ~1 second. The application code is clean. What infrastructure issues would you investigate?
 
     **Answer:** Timer tick interrupts on the CPU.
+
     1. Check `nohz_full` — if not set, kernel timer fires every 1ms (jitter source)
-    2. Check THP compaction — `cat /sys/kernel/mm/transparent_hugepage/enabled` 
+    2. Check THP compaction — `cat /sys/kernel/mm/transparent_hugepage/enabled`
     3. Check IRQ affinity — NIC interrupts hitting performance CPUs
     4. Check CPU governor — frequency scaling causes timing variance
     5. Check noisy neighbors — other pods stealing CPU time
-    
-    **Fix:** `nohz_full=<cpus>`, `THP=never`, pin IRQs to housekeeping CPUs, `governor=performance`, use Guaranteed QoS with CPU Manager.
 
+    **Fix:** `nohz_full=<cpus>`, `THP=never`, pin IRQs to housekeeping CPUs, `governor=performance`, use Guaranteed QoS with CPU Manager.
 29. How do you configure Kubernetes to provide exclusive CPU cores to a pod? What are the prerequisites?
 
     **Answer:**
+
     1. `cpuManagerPolicy: static` in kubelet config
     2. Pod must be **Guaranteed QoS** (requests == limits for ALL containers)
     3. CPU request must be an **integer** (not fractional like 0.5)
     4. Reserve system CPUs: `reservedSystemCPUs: "0-3"`
     5. Optional: `full-pcpus-only: "true"` to avoid HyperThread sharing
     6. After enabling, delete `cpu_manager_state` file and restart kubelet
-
 30. Your inference cluster uses RDMA for KV-cache transfer. How do you expose RDMA to Kubernetes pods?
 
     **Answer:**
+
     - Option 1: RDMA shared device plugin (shared HCA, multiple pods)
     - Option 2: SR-IOV + RDMA (exclusive VF per pod, best isolation)
     - Both require: Multus CNI (secondary network), `IPC_LOCK` capability, RDMA kernel modules
     - Topology Manager should align RDMA NIC and GPU on same NUMA node
     - Use NetworkAttachmentDefinition for secondary RDMA network
-
 31. Explain the networking overhead in Kubernetes and list 3 strategies to reduce it for HPC workloads.
 
     **Answer:** Default K8s networking adds 50-200µs (veth + bridge + iptables + conntrack + overlay).
-    
+
     **Strategies:**
+
     1. **Cilium with eBPF:** Replace iptables, skip conntrack for known connections (20-50µs)
     2. **SR-IOV:** Direct NIC VF to pod, bypass entire kernel network stack (5-10µs)
     3. **Host networking:** `hostNetwork: true`, zero overhead but no isolation (1-5µs)
-    
-    **Bonus:** Same-pod shared memory for co-located services (100ns, zero network)
 
+    **Bonus:** Same-pod shared memory for co-located services (100ns, zero network)
 32. How do you size huge pages for a node running multiple inference pods? What happens if you over/under-allocate?
 
     **Answer:**
+
     - **Sizing:** Sum all pods' `hugepages-2Mi` requests + 10% buffer
     - **Per-NUMA:** Allocate proportionally to each NUMA node
     - **Under-allocate:** Pods get stuck in Pending (resource unavailable, not schedulable)
     - **Over-allocate:** Wastes memory (huge pages are reserved, can't be used for regular pages)
     - **Best practice:** Boot-time allocation (avoids fragmentation), monitor with `cat /proc/meminfo | grep Huge`
-
 33. Design a GPU health monitoring and auto-quarantine system for a 100-node inference cluster.
 
     **Answer:**
+
     - **Collection:** DCGM Exporter on each node → Prometheus
     - **Key metrics:** Temperature, XID errors, ECC errors, retired pages, PCIe errors
     - **Thresholds:** Temp > 85°C (warning), XID errors > 0 (critical), retired pages > 5 (quarantine)
     - **Automation:** Prometheus alerting → webhook → script that cordons node + labels GPU unhealthy
     - **Recovery:** After manual inspection/reset, uncordon and remove label
     - **Prevention:** Lock GPU clocks, adequate cooling, persistence mode
-
 34. When would you choose bare metal + Slurm over Kubernetes for HPC workloads?
 
     **Answer:**
+
     - **Bare metal + Slurm when:**
+
       - Single-tenant (dedicated team/workload)
       - Ultra-low-latency requirement (< 10µs)
       - RDMA networking is primary communication
       - Training workloads (long-running, static allocation)
       - Simpler operational model (no K8s overhead)
-    
     - **Kubernetes when:**
+
       - Multi-tenant (shared cluster, different teams)
       - Mixed workloads (inference + batch + development)
       - Dynamic scaling (autoscaling inference replicas)
       - Need service mesh, observability, CI/CD integration
       - Teams already have K8s expertise
-
 35. How do you prevent the OOM killer from terminating your inference process?
 
     **Answer:**
+
     - **Host level:** `echo -1000 > /proc/<pid>/oom_score_adj` (never OOM-kill)
     - **K8s level:** Use Guaranteed QoS (oom_score_adj = -997, last to be killed)
     - **Preventive:** Set accurate memory limits, monitor memory usage
@@ -3707,39 +3945,40 @@ groups:
 36. Design an inference platform that serves 50K requests/sec with p99 < 10ms. Cover both application architecture AND infrastructure.
 
     **Answer:**
+
     - **Application:** vLLM with continuous batching, PagedAttention, prefix caching. Multiple model replicas.
-    - **Infrastructure:** 
+    - **Infrastructure:**
       - 8× A100 nodes, MIG 3g.40gb (2 instances/GPU = 16 instances)
       - CPU Manager static, Topology Manager single-numa-node
       - Cilium CNI (eBPF, no iptables)
       - Huge pages for KV-cache (pre-allocated at boot)
       - GPU clocks locked, persistence mode, C-states disabled
       - DCGM monitoring, eBPF scheduler latency tracking
-
 37. You're migrating a bare-metal HPC cluster to Kubernetes. What performance regressions do you expect and how do you mitigate?
 
     **Answer:**
-    | Regression | Cause | Mitigation |
-    |-----------|-------|------------|
-    | +50-200µs network | CNI overhead | SR-IOV or Cilium |
-    | CPU jitter | No isolation | CPU Manager static + nohz_full |
-    | NUMA misalignment | Random scheduling | Topology Manager |
-    | Huge page unavailable | Not configured | Pre-allocate, resource requests |
-    | GPU init latency | No persistence | nvidia-persistenced, locked clocks |
-    | IPC overhead | Namespace isolation | Same-pod + shared /dev/shm |
 
+    | Regression            | Cause               | Mitigation                         |
+    | --------------------- | ------------------- | ---------------------------------- |
+    | +50-200µs network    | CNI overhead        | SR-IOV or Cilium                   |
+    | CPU jitter            | No isolation        | CPU Manager static + nohz_full     |
+    | NUMA misalignment     | Random scheduling   | Topology Manager                   |
+    | Huge page unavailable | Not configured      | Pre-allocate, resource requests    |
+    | GPU init latency      | No persistence      | nvidia-persistenced, locked clocks |
+    | IPC overhead          | Namespace isolation | Same-pod + shared /dev/shm         |
 38. Design a multi-region GPU inference cluster with automatic failover. How do you handle KV-cache state?
 
     **Answer:**
+
     - **Architecture:** Active-active across 2-3 regions, global load balancer (Cloudflare/AWS Global Accelerator)
     - **KV-cache:** Not replicated (too expensive). Session affinity to region. On failover: cold start (accept higher TTFT for first request)
     - **Alternative:** Prefix cache shared across region (store common system prompts). Per-user KV-cache is disposable.
     - **Failover:** Health check → drain → redirect. Target: < 30s failover time
     - **Cost optimization:** Auto-scale between regions based on time-of-day load
-
 39. A CUDA kernel is 10× faster on dev machine but only 2× faster in production. What infrastructure differences could explain this?
 
     **Answer:**
+
     - **GPU generation:** Dev has H100 (FP8 Tensor Cores), prod has T4 (no FP8)
     - **GPU clocks:** Dev at boost clock, prod thermally throttled
     - **PCIe bandwidth:** Dev has PCIe 5.0, prod has PCIe 3.0 (memory-bound kernels affected)
@@ -3747,10 +3986,10 @@ groups:
     - **Power management:** Prod GPU in power-saving mode (clocks not locked)
     - **Contention:** Prod GPU shared via time-slicing (context switch overhead)
     - **Fix:** Lock clocks, verify NUMA affinity, use MIG not time-slicing, match PCIe gen
-
 40. Design the platform for a service needing shared memory between 3 processes, GPU access, RDMA networking, and sub-ms latency.
 
     **Answer:**
+
     ```yaml
     # Single pod with 3 containers (shared IPC namespace)
     spec:
@@ -3759,12 +3998,12 @@ groups:
       - name: process-a  # Producer
       - name: process-b  # GPU compute  
       - name: process-c  # Network I/O
-      
+
       # Shared /dev/shm for zero-copy IPC
       volumes:
       - name: dshm
         emptyDir: { medium: Memory, sizeLimit: "16Gi" }
-      
+
       # Resources: Guaranteed QoS
       resources:
         requests/limits:
@@ -3773,7 +4012,7 @@ groups:
           hugepages-2Mi: "8Gi"
           nvidia.com/gpu: "1"
           rdma/hca: "1"
-      
+
       # Node: CPU Manager static, Topology Manager single-numa-node
       # All resources (CPU + GPU + RDMA NIC) on same NUMA node
     ```
@@ -3783,26 +4022,28 @@ groups:
 41. Walk me through your approach when a production service has degraded latency. You have 15 minutes to diagnose.
 
     **Answer:**
+
     1. **60-second check:** `uptime` (load), `dmesg | tail` (errors), `vmstat 1 3` (CPU/mem), `mpstat -P ALL 1 1` (per-CPU), `pidstat 1 3` (per-process)
     2. **USE method:** For each resource (CPU, memory, disk, network, GPU), check utilization, saturation, errors
     3. **Identify bottleneck resource** (the saturated one)
     4. **Profile:** If CPU → `perf record -F 99 -g + flame graph`. If memory → `free -m` + `numastat`. If network → `ss -tnip` + `tcpdump`
     5. **Root cause:** Read flame graph (wide plateau = hot path), check off-CPU (blocked = lock/IO)
     6. **Quick fix:** Apply tuning recipe (CPU pin, lock fix, buffer increase)
-    - **Key insight:** Systematic methodology (USE) beats guessing. Never jump to conclusions before checking ALL resources.
 
+    - **Key insight:** Systematic methodology (USE) beats guessing. Never jump to conclusions before checking ALL resources.
 42. Your flame graph shows 30% time in `madvise()` system call. What's happening and how do you fix it?
 
     **Answer:** Transparent Huge Pages (THP) compaction. The kernel is trying to compact memory into huge pages, causing `madvise(MADV_HUGEPAGE)` stalls.
+
     - **Confirm:** `perf stat -e page-faults,compaction-stalls`
     - **Fix:** `echo never > /sys/kernel/mm/transparent_hugepage/enabled`
     - **Alternative:** Use explicit huge pages (pre-allocated at boot, no compaction)
     - **Impact:** THP compaction can add 10-50ms stalls (devastating for p99 latency)
     - **K8s:** Set via tuned operator or init container in DaemonSet
-
 43. Describe how you would use eBPF/bpftrace to debug a scheduling latency issue where threads are experiencing 5ms+ wakeup delays on "isolated" CPUs.
 
     **Answer:**
+
     ```bash
     # 1. Measure scheduler latency on specific CPUs
     bpftrace -e 'tracepoint:sched:sched_wakeup /args->target_cpu >= 4 && args->target_cpu <= 15/ {
@@ -3812,29 +4053,30 @@ groups:
         @delay_us = hist((nsecs - @start[args->next_pid]) / 1000);
         delete(@start[args->next_pid]);
     }'
-    
+
     # 2. Find what's running on "isolated" CPUs
     bpftrace -e 'tracepoint:sched:sched_switch /cpu >= 4 && cpu <= 15/ {
         printf("CPU %d: %s (pid %d) -> %s (pid %d)\n", cpu,
                args->prev_comm, args->prev_pid, args->next_comm, args->next_pid);
     }'
     ```
+
     - **Common causes:** RCU callbacks, workqueue threads, IRQs not affinity-set, kernel timers
     - **Fix:** `nohz_full=4-15`, `rcu_nocbs=4-15`, IRQ affinity to CPUs 0-3, `isolcpus=nohz,domain,managed_irq,4-15`
-
 44. You're using tcmalloc and notice periodic 20ms latency spikes every 60 seconds. HeapTrack shows stable memory (no leak). What's causing it?
 
     **Answer:** tcmalloc's background thread releasing memory back to the OS (`MallocExtension::ReleaseToSystem()`). Every 60s, tcmalloc scans its page heap and calls `madvise(MADV_DONTNEED)` on unused spans.
+
     - **Confirm:** `bpftrace -e 'tracepoint:syscalls:sys_enter_madvise /args->behavior == 4/ { @[ustack] = count(); }'`
     - **Fix options:**
       - `TCMALLOC_RELEASE_RATE=0` (never release, accept higher RSS)
       - Tune release rate: `MallocExtension::instance()->SetMemoryReleaseRate(0.0)`
       - Switch to jemalloc with `dirty_decay_ms:-1`
       - Pre-allocate memory pools for hot path (bypass allocator entirely)
-
 45. Explain the difference between on-CPU and off-CPU flame graphs. When would off-CPU analysis reveal problems that on-CPU cannot?
 
     **Answer:**
+
     - **On-CPU:** Shows where threads spend time RUNNING (consuming CPU cycles). Good for: CPU-bound issues, hot algorithms, compute optimization
     - **Off-CPU:** Shows where threads spend time BLOCKED (not running). Good for: lock contention, I/O wait, scheduler delay, dependency wait
     - **Off-CPU reveals problems on-CPU cannot when:**
@@ -3859,6 +4101,7 @@ groups:
 #### **What is the USE Method?**
 
 Created by Brendan Gregg. For every resource, check:
+
 - **U**tilization: How busy is the resource? (% time busy)
 - **S**aturation: How much extra work is queued? (queue depth)
 - **E**rrors: Are there error events? (failed operations)
@@ -3879,15 +4122,15 @@ For each resource (CPU, Memory, Disk, Network, GPU):
 
 #### **USE Method Applied to Each Resource:**
 
-| Resource | Utilization | Saturation | Errors |
-|----------|-------------|------------|--------|
-| **CPU** | `mpstat` (%usr+%sys) | run queue length (`vmstat` r column) | `perf stat` (machine check exceptions) |
-| **Memory** | `free -m` (used/total) | swap usage, OOM kills | `dmesg` (ECC errors) |
-| **Disk** | `iostat` (%util) | `iostat` (avgqu-sz) | `smartctl`, `dmesg` |
-| **Network** | `sar -n DEV` (bandwidth) | `ss -s` (drops), `netstat -s` (retransmits) | `ethtool -S` (errors) |
-| **GPU** | `nvidia-smi` (GPU %, MEM %) | pending kernel queue | XID errors, ECC errors |
-| **PCIe** | `nvidia-smi` (tx/rx throughput) | replay count | correctable/uncorrectable errors |
-| **Interconnect** | `numastat` (remote accesses) | QPI/UPI backpressure | link errors |
+| Resource               | Utilization                       | Saturation                                      | Errors                                   |
+| ---------------------- | --------------------------------- | ----------------------------------------------- | ---------------------------------------- |
+| **CPU**          | `mpstat` (%usr+%sys)            | run queue length (`vmstat` r column)          | `perf stat` (machine check exceptions) |
+| **Memory**       | `free -m` (used/total)          | swap usage, OOM kills                           | `dmesg` (ECC errors)                   |
+| **Disk**         | `iostat` (%util)                | `iostat` (avgqu-sz)                           | `smartctl`, `dmesg`                  |
+| **Network**      | `sar -n DEV` (bandwidth)        | `ss -s` (drops), `netstat -s` (retransmits) | `ethtool -S` (errors)                  |
+| **GPU**          | `nvidia-smi` (GPU %, MEM %)     | pending kernel queue                            | XID errors, ECC errors                   |
+| **PCIe**         | `nvidia-smi` (tx/rx throughput) | replay count                                    | correctable/uncorrectable errors         |
+| **Interconnect** | `numastat` (remote accesses)    | QPI/UPI backpressure                            | link errors                              |
 
 #### **USE Method Checklist Script:**
 
@@ -3956,11 +4199,11 @@ fi
 
 #### **For Services (Complement to USE for Resources):**
 
-| Metric | Description | Tool |
-|--------|-------------|------|
-| **R**ate | Requests per second | Prometheus `rate()` |
-| **E**rrors | Failed requests per second | HTTP 5xx, gRPC errors |
-| **D**uration | Latency distribution (p50/p99) | Histogram buckets |
+| Metric             | Description                    | Tool                  |
+| ------------------ | ------------------------------ | --------------------- |
+| **R**ate     | Requests per second            | Prometheus `rate()` |
+| **E**rrors   | Failed requests per second     | HTTP 5xx, gRPC errors |
+| **D**uration | Latency distribution (p50/p99) | Histogram buckets     |
 
 ```
 USE Method → Resources (CPU, Memory, Disk, Network, GPU)
@@ -4128,15 +4371,16 @@ perf sched latency --sort max
 1. **A service has p99 latency of 50ms but p50 is only 5ms. What does this tell you? How would you investigate?**
 
    **Answer:** Bimodal or tail latency issue. The median case is fine but outliers are 10× worse. Investigate:
+
    - **Queue buildup:** Periodic saturation causing queue delay (check batch boundaries)
    - **GC/compaction:** If Java/Go, GC pauses. If C++, THP compaction.
    - **Lock contention:** Occasional contention causes long waits
    - **Scheduling:** Thread being preempted (check with `perf sched latency`)
    - **Approach:** Correlate p99 spikes with system events (IRQs, GC, CPU throttle)
-
 2. **You run the USE method and find CPU utilization at 40%, no saturation, no errors — but the service is still slow. What's happening?**
 
    **Answer:** Thread is spending time OFF-CPU (blocked, not running):
+
    - Lock contention (waiting for mutex)
    - I/O wait (synchronous disk/network call)
    - Scheduling delay (low priority, preempted)
@@ -4509,19 +4753,19 @@ tcpdump -i eth0 -nn -W 10 -C 100 -w /tmp/capture port 8080
 1. **`vmstat` shows r=32 on a 16-core system, but CPU utilization is only 60%. Explain.**
 
    **Answer:** 32 runnable threads but only 16 CPUs → threads are queuing. But utilization per-CPU averages 60% because some CPUs are idle while others are at 100%. Likely cause: uneven load distribution (some CPUs saturated, others idle). Fix: check CPU affinity, rebalance workload, or use work-stealing thread pool.
-
 2. **`numastat -p $PID` shows memory split 50/50 across nodes. The service uses `numactl --membind=0`. What happened?**
 
    **Answer:** Possible causes:
+
    - Process forked after `numactl` and child inherited but used `malloc` with first-touch on different node
    - Memory-mapped files with default policy (interleave)
    - Shared memory region created with wrong NUMA policy
    - Kubernetes Topology Manager not properly configured
    - **Debug:** Check `/proc/$PID/numa_maps` for per-mapping NUMA allocation
-
 3. **`ss -tnip` shows `retrans:45/1200` for your inference client connection. What does this mean and how do you fix it?**
 
    **Answer:** 45 retransmissions out of 1200 segments = 3.75% packet loss. Very bad for latency (each retransmit adds RTT + timeout).
+
    - Check `ethtool -S` for interface errors (hardware issue?)
    - Check switch buffer drops (`show interface counters`)
    - Check TCP buffer sizing (`ss -tm` — buffer full = drops)
@@ -4844,16 +5088,16 @@ tracepoint:syscalls:sys_exit_read /@start[tid]/ {
 
 #### **When to Use VTune vs. perf:**
 
-| Aspect | perf | VTune |
-|--------|------|-------|
-| **Cost** | Free | Free (community) |
-| **Platforms** | Linux only | Linux, Windows, macOS |
-| **Ease** | CLI, learning curve | GUI, guided analysis |
-| **Depth** | Raw counters | Interpreted results, suggestions |
-| **GPU** | No | Limited (OpenCL) |
-| **Threading** | Basic | Excellent (threading analysis) |
-| **Memory** | Basic counters | Full memory access analysis |
-| **Best for** | Quick profiling, scripting | Deep analysis, reporting |
+| Aspect              | perf                       | VTune                            |
+| ------------------- | -------------------------- | -------------------------------- |
+| **Cost**      | Free                       | Free (community)                 |
+| **Platforms** | Linux only                 | Linux, Windows, macOS            |
+| **Ease**      | CLI, learning curve        | GUI, guided analysis             |
+| **Depth**     | Raw counters               | Interpreted results, suggestions |
+| **GPU**       | No                         | Limited (OpenCL)                 |
+| **Threading** | Basic                      | Excellent (threading analysis)   |
+| **Memory**    | Basic counters             | Full memory access analysis      |
+| **Best for**  | Quick profiling, scripting | Deep analysis, reporting         |
 
 #### **VTune Analysis Types:**
 
@@ -4998,31 +5242,31 @@ A real-time frame profiler for C++ applications. Extremely low overhead (< 1% CP
 
 void process_batch(const Batch& batch) {
     ZoneScoped;  // Automatic zone profiling
-    
+  
     {
         ZoneScopedN("preprocessing");
         preprocess(batch);
     }
-    
+  
     {
         ZoneScopedN("gpu_inference");
         TracyGpuZone("inference_kernel");
         run_inference(batch);
     }
-    
+  
     {
         ZoneScopedN("postprocessing");
         postprocess(batch);
     }
-    
+  
     // Track memory allocations
     TracyAlloc(ptr, size);
     TracyFree(ptr);
-    
+  
     // Custom plots (metrics over time)
     TracyPlot("batch_size", batch.size());
     TracyPlot("queue_depth", queue.size());
-    
+  
     // Frame marks (for per-iteration analysis)
     FrameMark;
 }
@@ -5030,17 +5274,18 @@ void process_batch(const Batch& batch) {
 
 #### **Tracy Features:**
 
-| Feature | Description | Use Case |
-|---------|-------------|----------|
-| Zone profiling | Function/block timing | Find hot code paths |
-| Lock tracking | Mutex contention visualization | Debug lock waits |
-| Memory profiling | Allocation tracking per frame | Find allocation spikes |
-| GPU profiling | CUDA/Vulkan timeline | GPU kernel timing |
-| Frame analysis | Per-iteration breakdown | Latency consistency |
-| Network streaming | Real-time remote profiling | Production profiling |
-| Call stacks | Stack sampling | Combined with zones |
+| Feature           | Description                    | Use Case               |
+| ----------------- | ------------------------------ | ---------------------- |
+| Zone profiling    | Function/block timing          | Find hot code paths    |
+| Lock tracking     | Mutex contention visualization | Debug lock waits       |
+| Memory profiling  | Allocation tracking per frame  | Find allocation spikes |
+| GPU profiling     | CUDA/Vulkan timeline           | GPU kernel timing      |
+| Frame analysis    | Per-iteration breakdown        | Latency consistency    |
+| Network streaming | Real-time remote profiling     | Production profiling   |
+| Call stacks       | Stack sampling                 | Combined with zones    |
 
 **When to use Tracy vs. perf:**
+
 - **Tracy:** Instrumented, real-time, per-frame analysis, GUI visualization
 - **perf:** Sampling, system-wide, no code changes, statistical
 
@@ -5101,6 +5346,7 @@ ncu --set full -o optimized ./inference-engine --kernel=v2
 1. **You have a flame graph where 40% of CPU time is in `__pthread_mutex_lock`. What does this tell you? How do you fix it?**
 
    **Answer:** 40% of CPU time wasted spinning on locks. The application has severe lock contention.
+
    - **Identify the lock:** Check caller stacks in flame graph (which mutex?)
    - **Options:**
      - Reduce critical section size (hold lock for less time)
@@ -5109,10 +5355,10 @@ ncu --set full -o optimized ./inference-engine --kernel=v2
      - Use reader-writer lock if reads >> writes
      - Use per-CPU/per-core data (eliminate sharing entirely)
    - **Verify:** After fix, re-profile. futex_wait should decrease in off-CPU flame graph.
-
 2. **VTune shows 70% Backend Memory Bound, specifically L3 Bound. What's happening and how do you optimize?**
 
    **Answer:** Working set fits in L2 per-access but total accesses spill to L3 frequently.
+
    - **Root cause:** Data access pattern has poor spatial locality or working set slightly exceeds L2
    - **Fixes:**
      - Cache blocking (tile loops to fit working set in L2)
@@ -5121,10 +5367,10 @@ ncu --set full -o optimized ./inference-engine --kernel=v2
      - Reduce data size (compression, smaller types, quantization)
      - Pack hot fields together (cache-line-aware struct layout)
    - **Measure:** Use `perf stat -e LLC-load-misses` before/after
-
 3. **Your off-CPU flame graph shows 60% of blocked time in `ep_poll` (epoll_wait). Is this a problem?**
 
    **Answer:** **Usually NOT a problem.** `epoll_wait` is the event loop waiting for I/O events (normal for async servers). It means the thread is efficiently waiting for work.
+
    - **Problem if:** latency is high AND CPU is idle. Then investigate why responses take long:
      - Downstream service slow?
      - Batch not filling? (timeout-based batching)
@@ -5295,13 +5541,13 @@ heaptrack_print heaptrack.inference-engine.$PID.gz
 
 #### **HeapTrack vs. Other Tools:**
 
-| Tool | Overhead | Leak Detection | Temporal View | GUI | Production |
-|------|----------|----------------|---------------|-----|------------|
-| Valgrind Massif | 10-50× | Yes | Yes | No (ms_print) | No |
-| HeapTrack | 2-5× | Yes | Yes | Yes (excellent) | Testing only |
-| ASan + LSan | 2× | Yes (at exit) | No | No | CI/staging |
-| tcmalloc profiler | 1-2% | No | Yes | Web UI | Yes |
-| jemalloc profiler | 1-2% | No | Yes | jeprof | Yes |
+| Tool              | Overhead | Leak Detection | Temporal View | GUI             | Production   |
+| ----------------- | -------- | -------------- | ------------- | --------------- | ------------ |
+| Valgrind Massif   | 10-50×  | Yes            | Yes           | No (ms_print)   | No           |
+| HeapTrack         | 2-5×    | Yes            | Yes           | Yes (excellent) | Testing only |
+| ASan + LSan       | 2×      | Yes (at exit)  | No            | No              | CI/staging   |
+| tcmalloc profiler | 1-2%     | No             | Yes           | Web UI          | Yes          |
+| jemalloc profiler | 1-2%     | No             | Yes           | jeprof          | Yes          |
 
 ---
 
@@ -5352,15 +5598,16 @@ MALLOC_CONF="prof:true,prof_active:false" ./inference-engine
 1. **HeapTrack shows 200K allocations/sec in your inference hot path. The allocations are all 64 bytes. How do you fix this?**
 
    **Answer:** Excessive small allocations cause heap fragmentation and malloc overhead (50ns each = 10ms/sec wasted).
+
    - **Fix 1:** Arena allocator (pre-allocate, bulk reset per request) — 5ns per alloc
    - **Fix 2:** Object pool (pre-allocate fixed-size objects, recycle)
    - **Fix 3:** Stack allocation (if lifetime is function-scoped)
    - **Fix 4:** Batch allocation (allocate 1000 objects at once, dispense)
    - **Verify:** HeapTrack allocation rate should drop 100× after fix
-
 2. **ASan reports use-after-free in your lock-free queue. The queue passes tests. What's happening?**
 
    **Answer:** ABA problem or premature deallocation in concurrent access:
+
    - Consumer reads pointer, gets preempted
    - Producer frees and reallocates the slot
    - Consumer uses stale pointer → use-after-free
@@ -5402,14 +5649,14 @@ tshark -r /tmp/inference.pcap -z expert
 
 #### **Network Performance Patterns to Look For:**
 
-| Pattern | Symptom in Wireshark | Root Cause | Fix |
-|---------|---------------------|------------|-----|
-| Retransmissions | `[TCP Retransmission]` | Packet loss | Check switch buffers, NIC errors |
-| Small window | `[TCP Window Update]` low values | Receiver can't keep up | Increase rmem_max |
-| Nagle's delay | 40ms gaps between small packets | Nagle + delayed ACK | TCP_NODELAY |
-| MTU issues | Fragmentation, ICMP "too big" | MTU mismatch | Set consistent MTU |
-| Connection reset | `[RST]` after data | App crash, timeout | Check application logs |
-| Slow start | Low throughput for first RTT | TCP slow start | TCP Fast Open, larger initial window |
+| Pattern          | Symptom in Wireshark               | Root Cause             | Fix                                  |
+| ---------------- | ---------------------------------- | ---------------------- | ------------------------------------ |
+| Retransmissions  | `[TCP Retransmission]`           | Packet loss            | Check switch buffers, NIC errors     |
+| Small window     | `[TCP Window Update]` low values | Receiver can't keep up | Increase rmem_max                    |
+| Nagle's delay    | 40ms gaps between small packets    | Nagle + delayed ACK    | TCP_NODELAY                          |
+| MTU issues       | Fragmentation, ICMP "too big"      | MTU mismatch           | Set consistent MTU                   |
+| Connection reset | `[RST]` after data               | App crash, timeout     | Check application logs               |
+| Slow start       | Low throughput for first RTT       | TCP slow start         | TCP Fast Open, larger initial window |
 
 ---
 
@@ -5470,14 +5717,15 @@ sockperf ping-pong -i $POD_IP -p 8080 --time 10
 1. **Wireshark shows [TCP ZeroWindow] from your inference server. What's happening?**
 
    **Answer:** Server's receive buffer is full — it's advertising zero window (telling client to stop sending). Causes:
+
    - Application not reading from socket fast enough (processing backlog)
    - Receive buffer too small (`net.core.rmem_max`)
    - **Fix:** Increase buffer: `sysctl -w net.core.rmem_max=134217728`
    - **Also check:** Why is the application slow to read? (CPU bottleneck? lock contention?)
-
 2. **You see 200ms latency between pods on the same node. `ping` shows 0.1ms. Why the difference?**
 
    **Answer:** Ping (ICMP) bypasses most of the application stack:
+
    - Connection pooling/establishment overhead
    - Serialization/deserialization time
    - Request queuing in application
@@ -5743,6 +5991,7 @@ Phase 5: Validation
 1. **After deploying your inference service, p99 is 50ms but p50 is 3ms. Your tuning target is p99 < 10ms. Walk through your approach.**
 
    **Answer:**
+
    1. **Profile the tail:** Capture timestamps of slow requests, correlate with system events
    2. **Check off-CPU:** Off-CPU flame graph for slow requests (what are they blocked on?)
    3. **Check system:** Is it periodic? (Timer ticks, GC, THP compaction)
@@ -5753,10 +6002,10 @@ Phase 5: Validation
       - Increase batch timeout (avoid partial batch overhead)
    5. **Re-measure:** Expect p99 to drop to 5-10ms range
    6. **If still high:** Investigate application-level (lock contention, memory allocation in hot path)
-
 2. **Your service does 10K req/sec on bare metal but only 6K req/sec in Kubernetes. Where's the 40% regression?**
 
    **Answer:** Systematic investigation:
+
    - **Network:** 10-50µs overhead per request × 10K = 100-500ms/sec of overhead. Fix: Cilium/SR-IOV
    - **CPU isolation:** Without CPU Manager static, context switches add latency. Fix: Guaranteed QoS + static policy
    - **NUMA:** Random scheduling across nodes. Fix: Topology Manager
@@ -5772,6 +6021,7 @@ Phase 5: Validation
 #### **Why Coverage Matters for HPC:**
 
 Coverage ensures your hot paths are tested. For performance-critical code:
+
 - 100% branch coverage on hot paths (the code that matters for latency)
 - Integration tests cover real deployment scenarios
 - Performance regression tests with coverage tracking
@@ -5800,13 +6050,13 @@ open coverage_html/index.html
 
 #### **Coverage Targets:**
 
-| Code Category | Target Coverage | Rationale |
-|---------------|----------------|-----------|
+| Code Category             | Target Coverage    | Rationale                            |
+| ------------------------- | ------------------ | ------------------------------------ |
 | Hot path (inference loop) | 100% line + branch | Performance-critical, must be tested |
-| Error handling | 90% line | Failure paths must work |
-| Configuration/startup | 80% line | Less critical but should work |
-| Debug/admin endpoints | 50% line | Nice to have |
-| Overall project | 80%+ line | General quality bar |
+| Error handling            | 90% line           | Failure paths must work              |
+| Configuration/startup     | 80% line           | Less critical but should work        |
+| Debug/admin endpoints     | 50% line           | Nice to have                         |
+| Overall project           | 80%+ line          | General quality bar                  |
 
 #### **Integration with CI:**
 
@@ -5826,7 +6076,7 @@ open coverage_html/index.html
   run: |
     lcov --capture --directory . --output-file coverage.info
     lcov --remove coverage.info '/usr/*' '*/test/*' --output-file coverage.info
-    
+  
 - name: Check coverage threshold
   run: |
     COVERAGE=$(lcov --summary coverage.info | grep "lines" | awk '{print $2}' | sed 's/%//')
@@ -5842,12 +6092,12 @@ open coverage_html/index.html
 
 #### **Sanitizer Matrix:**
 
-| Sanitizer | Flag | Overhead | Detects | When to Use |
-|-----------|------|----------|---------|-------------|
-| ASan | `-fsanitize=address` | 2× | Buffer overflow, use-after-free, leaks | Every CI build |
-| TSan | `-fsanitize=thread` | 5-10× | Data races, deadlocks | Nightly/weekly |
-| MSan | `-fsanitize=memory` | 3× | Uninitialized reads | Weekly |
-| UBSan | `-fsanitize=undefined` | 1.2× | Undefined behavior | Every CI build |
+| Sanitizer | Flag                     | Overhead | Detects                                | When to Use    |
+| --------- | ------------------------ | -------- | -------------------------------------- | -------------- |
+| ASan      | `-fsanitize=address`   | 2×      | Buffer overflow, use-after-free, leaks | Every CI build |
+| TSan      | `-fsanitize=thread`    | 5-10×   | Data races, deadlocks                  | Nightly/weekly |
+| MSan      | `-fsanitize=memory`    | 3×      | Uninitialized reads                    | Weekly         |
+| UBSan     | `-fsanitize=undefined` | 1.2×    | Undefined behavior                     | Every CI build |
 
 ```bash
 # CI pipeline: Run tests with each sanitizer
@@ -5948,14 +6198,15 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 1. **Your CI has 95% code coverage but you're still seeing production crashes. Why? What's missing?**
 
    **Answer:** Line coverage doesn't guarantee correctness:
+
    - **Branch coverage missing:** Lines executed but not all branches (if/else paths)
    - **Concurrency not tested:** Single-threaded tests pass but race conditions in production
    - **Edge cases:** Coverage doesn't mean all input combinations tested
    - **Fix:** Add branch coverage (target 80%+), add TSan to CI, add fuzz testing, add load tests that exercise concurrent paths
-
 2. **How would you set up continuous profiling for a production inference service without impacting latency?**
 
    **Answer:**
+
    - Use eBPF-based profiling (Parca/Pyroscope) — kernel-level, < 1% overhead
    - Sample at 19 Hz (prime number avoids aliasing with periodic events)
    - Aggregate stacks in-kernel BPF map (no per-sample userspace overhead)
@@ -5972,6 +6223,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 **Objective:** Apply USE method to diagnose performance issue on a loaded system.
 
 **Steps:**
+
 1. Run the USE method checklist script (Section 15.1)
 2. Identify which resource is the bottleneck (CPU? Memory? Disk? Network? GPU?)
 3. Drill down with appropriate tool (perf, iostat, ss, nvidia-smi)
@@ -5979,6 +6231,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 5. Apply fix and re-measure
 
 **Expected Outcome:**
+
 - Systematic identification of bottleneck in < 5 minutes
 - Root cause in < 15 minutes
 - Fix validated with before/after metrics
@@ -5990,6 +6243,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 **Objective:** Build a complete profiling pipeline (on-CPU + off-CPU + differential).
 
 **Steps:**
+
 1. Profile baseline with `perf record` → generate on-CPU flame graph
 2. Profile after load increase → generate second flame graph
 3. Generate differential flame graph (compare)
@@ -5998,6 +6252,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 6. Verify with differential flame graph (blue = improvement)
 
 **Expected Outcome:**
+
 - Identify hot function (> 10% CPU)
 - Identify blocking point (off-CPU)
 - Show 20%+ improvement in differential flame graph
@@ -6009,6 +6264,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 **Objective:** Find and fix a memory leak using multiple tools.
 
 **Steps:**
+
 1. Run with HeapTrack → identify growing allocation
 2. Run with ASan (LeakSanitizer) → get stack trace of leak
 3. Fix the leak (missing free/delete, reference cycle, etc.)
@@ -6016,6 +6272,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 5. Run Valgrind memcheck for any remaining issues
 
 **Expected Outcome:**
+
 - Leak identified with exact source location
 - Memory stable after fix (no growth over 10-minute run)
 - Zero Valgrind errors after fix
@@ -6027,6 +6284,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 **Objective:** Diagnose and fix high network latency between services.
 
 **Steps:**
+
 1. Measure baseline with `sockperf` (µs-precision RTT)
 2. Capture with `tcpdump` during high-latency period
 3. Analyze in Wireshark/tshark (retransmissions? window? Nagle?)
@@ -6035,6 +6293,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 6. Document before/after
 
 **Expected Outcome:**
+
 - Identify specific network issue (e.g., Nagle's delay = 40ms spikes)
 - Apply fix (TCP_NODELAY)
 - Latency reduction: 40ms → 0.5ms
@@ -6046,6 +6305,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 **Objective:** Take a service from "slow" to "fast" using the complete troubleshooting toolkit.
 
 **Steps:**
+
 1. **60-second analysis** (uptime, vmstat, mpstat, pidstat, iostat, free, sar, ss, top)
 2. **USE method** → identify bottleneck resource
 3. **Profile** (perf/flame graph for CPU, heaptrack for memory, nsys for GPU)
@@ -6055,6 +6315,7 @@ bpftrace -e 'profile:hz:1 /pid == '$PID'/ { @[ustack(5)] = count(); }'
 7. **Document** (before/after metrics, what was changed, why)
 
 **Expected Outcome:**
+
 - 2-5× latency improvement
 - Complete troubleshooting documented with evidence
 - Reproducible methodology for future issues
@@ -6070,6 +6331,7 @@ Benchmarking is the disciplined process of measuring system performance against 
 ### 23.1 Benchmarking Methodology
 
 #### **Why Benchmark?**
+
 - **Acceptance testing:** Validate new hardware meets vendor specs before production
 - **Regression detection:** Catch firmware, driver, or config changes that degrade perf
 - **Capacity planning:** Know actual throughput limits to inform scheduling decisions
@@ -6088,6 +6350,7 @@ Benchmarking is the disciplined process of measuring system performance against 
 ```
 
 #### **Key Principles**
+
 - **Report efficiency (% of theoretical peak)** not just raw numbers
 - **Always report variance** — if stddev > 5%, something is wrong
 - **Disable frequency scaling** (`cpupower frequency-set -g performance`) for reproducibility
@@ -6105,6 +6368,7 @@ The industry-standard benchmark for measuring FLOPS. Used to rank the TOP500 sup
 **What it measures:** Dense linear algebra (DGEMM) — peak floating-point throughput.
 
 **Usage:**
+
 ```bash
 # Intel optimized (via Intel oneAPI)
 source /opt/intel/oneapi/setvars.sh
@@ -6119,6 +6383,7 @@ mpirun -np <num_procs> -ppn <procs_per_node> ./xhpl
 **Target:** >80% of theoretical peak FLOPS for a well-tuned cluster.
 
 **Theoretical Peak Calculation:**
+
 ```
 Peak GFLOPS = cores × frequency × FLOPs_per_cycle
   e.g., 64 cores × 2.5 GHz × 32 (AVX-512 DP) = 5,120 GFLOPS
@@ -6158,12 +6423,13 @@ OMP_NUM_THREADS=64 numactl --interleave=all ./stream
 ```
 
 **Key Metrics:**
-| Operation | Formula | Bytes/Iter |
-|-----------|---------|------------|
-| Copy | a[i] = b[i] | 16 |
-| Scale | a[i] = q*b[i] | 16 |
-| Add | a[i] = b[i] + c[i] | 24 |
-| Triad | a[i] = b[i] + q*c[i] | 24 |
+
+| Operation | Formula              | Bytes/Iter |
+| --------- | -------------------- | ---------- |
+| Copy      | a[i] = b[i]          | 16         |
+| Scale     | a[i] = q*b[i]        | 16         |
+| Add       | a[i] = b[i] + c[i]   | 24         |
+| Triad     | a[i] = b[i] + q*c[i] | 24         |
 
 **Target:** >85% of theoretical peak bandwidth per socket.
 
@@ -6183,6 +6449,7 @@ Measures memory latency and bandwidth with NUMA awareness.
 ```
 
 **What to look for:**
+
 - Local NUMA latency: ~80-100 ns (typical DDR5)
 - Remote NUMA latency: ~140-180 ns (1-hop)
 - Bandwidth drop-off under load
@@ -6212,12 +6479,13 @@ mpirun -np 16 ./osu_mbw_mr
 ```
 
 **Targets (InfiniBand HDR 200 Gb/s):**
-| Metric | Expected |
-|--------|----------|
-| Latency (0 byte) | < 1.5 µs |
-| Latency (4 KB) | < 3 µs |
+
+| Metric                | Expected                   |
+| --------------------- | -------------------------- |
+| Latency (0 byte)      | < 1.5 µs                  |
+| Latency (4 KB)        | < 3 µs                    |
 | Bandwidth (large msg) | > 23 GB/s (unidirectional) |
-| Bi-directional BW | > 40 GB/s |
+| Bi-directional BW     | > 40 GB/s                  |
 
 #### **Tool: ib_read_bw / ib_write_bw / ib_send_bw (perftest)**
 
@@ -6265,10 +6533,11 @@ mpirun -np 16 --host node1:8,node2:8 ./all_reduce_perf -b 8M -e 2G -f 2 -g 1
 ```
 
 **Targets (8× A100/H100 NVLink):**
-| Operation | Bus BW (expected) |
-|-----------|-------------------|
-| All-Reduce (intra-node) | > 250 GB/s (A100), > 400 GB/s (H100) |
-| All-Reduce (inter-node, IB) | > 20 GB/s per GPU |
+
+| Operation                   | Bus BW (expected)                    |
+| --------------------------- | ------------------------------------ |
+| All-Reduce (intra-node)     | > 250 GB/s (A100), > 400 GB/s (H100) |
+| All-Reduce (inter-node, IB) | > 20 GB/s per GPU                    |
 
 ---
 
@@ -6351,10 +6620,11 @@ nvidia-smi dmon -s pucvmet -d 1
 ```
 
 **Targets:**
-| GPU | FP16 Tensor (TFLOPS) | HBM BW (TB/s) |
-|-----|---------------------|----------------|
-| A100 | ~312 | ~2.0 |
-| H100 | ~989 (FP8: ~1,979) | ~3.35 |
+
+| GPU  | FP16 Tensor (TFLOPS) | HBM BW (TB/s) |
+| ---- | -------------------- | ------------- |
+| A100 | ~312                 | ~2.0          |
+| H100 | ~989 (FP8: ~1,979)   | ~3.35         |
 
 #### **Tool: MLPerf Inference / Training**
 
@@ -6373,35 +6643,35 @@ A structured process to validate a new HPC cluster or detect regressions.
 
 #### **Phase 1: Single-Node Validation**
 
-| Step | Tool | What to Validate |
-|------|------|------------------|
-| 1 | `dmidecode`, `lscpu`, `nvidia-smi` | Hardware matches spec |
-| 2 | STREAM | Memory BW ≥ 85% theoretical |
-| 3 | Intel MLC | NUMA latency within spec |
-| 4 | HPL (single node) | Compute ≥ 80% peak FLOPS |
-| 5 | FIO | Local NVMe meets spec (IOPS + BW) |
-| 6 | gpu-burn + DCGM diag | GPU health, no throttling |
-| 7 | `nvidia-smi nvlink -s` | NVLink BW matches spec |
+| Step | Tool                                     | What to Validate                  |
+| ---- | ---------------------------------------- | --------------------------------- |
+| 1    | `dmidecode`, `lscpu`, `nvidia-smi` | Hardware matches spec             |
+| 2    | STREAM                                   | Memory BW ≥ 85% theoretical      |
+| 3    | Intel MLC                                | NUMA latency within spec          |
+| 4    | HPL (single node)                        | Compute ≥ 80% peak FLOPS         |
+| 5    | FIO                                      | Local NVMe meets spec (IOPS + BW) |
+| 6    | gpu-burn + DCGM diag                     | GPU health, no throttling         |
+| 7    | `nvidia-smi nvlink -s`                 | NVLink BW matches spec            |
 
 #### **Phase 2: Pair-wise Node Testing**
 
-| Step | Tool | What to Validate |
-|------|------|------------------|
-| 1 | ib_write_bw (perftest) | RDMA BW matches link rate |
-| 2 | ib_write_lat | Latency within spec |
-| 3 | OSU latency/bandwidth | MPI layer overhead acceptable |
-| 4 | NCCL all-reduce (2 nodes) | Multi-node GPU comms working |
+| Step | Tool                      | What to Validate              |
+| ---- | ------------------------- | ----------------------------- |
+| 1    | ib_write_bw (perftest)    | RDMA BW matches link rate     |
+| 2    | ib_write_lat              | Latency within spec           |
+| 3    | OSU latency/bandwidth     | MPI layer overhead acceptable |
+| 4    | NCCL all-reduce (2 nodes) | Multi-node GPU comms working  |
 
 #### **Phase 3: Full-Cluster Scale-out**
 
-| Step | Tool | What to Validate |
-|------|------|------------------|
-| 1 | HPL (all nodes) | Cluster FLOPS ≥ 75% of sum |
-| 2 | HPCG (all nodes) | Realistic workload perf |
-| 3 | IOR (all nodes) | Parallel FS aggregate BW |
-| 4 | OSU all-reduce (all nodes) | Collective scaling |
-| 5 | NCCL all-reduce (all GPUs) | GPU collective at scale |
-| 6 | MLPerf Training (1 job) | End-to-end AI workload |
+| Step | Tool                       | What to Validate            |
+| ---- | -------------------------- | --------------------------- |
+| 1    | HPL (all nodes)            | Cluster FLOPS ≥ 75% of sum |
+| 2    | HPCG (all nodes)           | Realistic workload perf     |
+| 3    | IOR (all nodes)            | Parallel FS aggregate BW    |
+| 4    | OSU all-reduce (all nodes) | Collective scaling          |
+| 5    | NCCL all-reduce (all GPUs) | GPU collective at scale     |
+| 6    | MLPerf Training (1 job)    | End-to-end AI workload      |
 
 #### **Phase 4: Stress & Soak Testing**
 
@@ -6431,13 +6701,13 @@ Examples:
 
 #### **Red Flags**
 
-| Symptom | Likely Cause |
-|---------|-------------|
-| Efficiency < 50% | Misconfiguration, thermal throttling, or faulty hardware |
+| Symptom                      | Likely Cause                                               |
+| ---------------------------- | ---------------------------------------------------------- |
+| Efficiency < 50%             | Misconfiguration, thermal throttling, or faulty hardware   |
 | High variance (stddev > 10%) | Noisy neighbor, frequency scaling, or background processes |
-| Asymmetric pair-wise BW | Bad cable, misconfigured port, or switch issue |
-| NVLink BW < 50% peak | NVLink disabled, topology mismatch, or driver issue |
-| Latency 2× expected | Wrong NUMA placement, congestion, or routing issue |
+| Asymmetric pair-wise BW      | Bad cable, misconfigured port, or switch issue             |
+| NVLink BW < 50% peak         | NVLink disabled, topology mismatch, or driver issue        |
+| Latency 2× expected         | Wrong NUMA placement, congestion, or routing issue         |
 
 #### **Benchmark Report Template**
 
@@ -6466,23 +6736,23 @@ Examples:
 
 ### 23.8 Tool Reference Summary
 
-| Category | Tool | What It Measures |
-|----------|------|------------------|
-| **Compute** | HPL | Peak FLOPS (dense LA) |
-| | HPCG | Realistic FLOPS (sparse) |
-| | STREAM | Memory bandwidth |
-| | Intel MLC | Memory latency + NUMA |
-| **Network** | OSU Micro-Benchmarks | MPI latency/BW/collectives |
-| | perftest (ib_*) | Raw RDMA verbs perf |
-| | iperf3 | TCP/UDP Ethernet |
-| | NCCL Tests | GPU collective comms |
-| **Storage** | FIO | Block I/O (IOPS, BW, latency) |
-| | IOR | Parallel filesystem |
-| | MDTest | Metadata operations |
-| **GPU** | gpu-burn | Sustained compute + thermal |
-| | DCGM diag | GPU health validation |
-| | cuBLAS bench | Peak TFLOPS |
-| | MLPerf | End-to-end AI workloads |
+| Category          | Tool                 | What It Measures              |
+| ----------------- | -------------------- | ----------------------------- |
+| **Compute** | HPL                  | Peak FLOPS (dense LA)         |
+|                   | HPCG                 | Realistic FLOPS (sparse)      |
+|                   | STREAM               | Memory bandwidth              |
+|                   | Intel MLC            | Memory latency + NUMA         |
+| **Network** | OSU Micro-Benchmarks | MPI latency/BW/collectives    |
+|                   | perftest (ib_*)      | Raw RDMA verbs perf           |
+|                   | iperf3               | TCP/UDP Ethernet              |
+|                   | NCCL Tests           | GPU collective comms          |
+| **Storage** | FIO                  | Block I/O (IOPS, BW, latency) |
+|                   | IOR                  | Parallel filesystem           |
+|                   | MDTest               | Metadata operations           |
+| **GPU**     | gpu-burn             | Sustained compute + thermal   |
+|                   | DCGM diag            | GPU health validation         |
+|                   | cuBLAS bench         | Peak TFLOPS                   |
+|                   | MLPerf               | End-to-end AI workloads       |
 
 ---
 
@@ -6490,16 +6760,12 @@ Examples:
 
 1. **"How do you validate a new GPU cluster?"**
    → Phase 1-4 workflow above: single-node → pair-wise → full-cluster → soak.
-
 2. **"How do you know if your network is healthy?"**
    → OSU latency < 1.5 µs, ib_write_bw matches link rate, NCCL AR bus BW > 80% theoretical.
-
 3. **"Your HPL efficiency is only 60%. What do you check?"**
    → Frequency scaling disabled? NUMA-aware placement? Problem size (N) large enough? Block size (NB) tuned? Thermal throttling?
-
 4. **"Shared filesystem is slow. How do you diagnose?"**
    → IOR for aggregate BW, MDTest for metadata, FIO for individual OST/OSS, check network (ib_write_bw) to storage servers.
-
 5. **"NCCL all-reduce is slower than expected across nodes."**
    → Check: IB link up? Correct GID index? PCIe BW (GPU→NIC)? NCCL_DEBUG=INFO for topology? Sharp/NCCL tree vs ring?
 
@@ -6510,6 +6776,7 @@ Examples:
 ### **Books:**
 
 **Part I (Application):**
+
 1. "Computer Systems: A Programmer's Perspective" - Bryant & O'Hallaron
 2. "Effective Modern C++" - Scott Meyers
 3. "C++ Concurrency in Action" - Anthony Williams
@@ -6533,6 +6800,7 @@ Examples:
 ### **Online Resources:**
 
 **Systems Programming:**
+
 1. **Ulrich Drepper:** "What Every Programmer Should Know About Memory"
 2. **1024cores.net:** Lock-free programming tutorials
 3. **Brendan Gregg's Blog:** Performance analysis methodologies
@@ -6561,6 +6829,7 @@ Examples:
 ### **Tools:**
 
 **Profiling & Debugging:**
+
 1. **perf:** CPU profiling, hardware counters, tracepoints
 2. **Intel VTune:** Hotspots, memory access, threading, microarchitecture
 3. **Intel Advisor:** Vectorization analysis, roofline model
@@ -6618,62 +6887,62 @@ Examples:
 
 ### **Weekly Checkpoints:**
 
-| Week | Module | Hours Planned | Hours Actual | Completion % | Notes |
-|------|--------|---------------|--------------|--------------|-------|
-| 1 | Memory & CPU | 10 | | | |
-| 2 | Concurrency | 10 | | | |
-| 3 | Zero-Copy | 10 | | | |
-| 4 | Distributed Systems | 10 | | | |
-| 5 | System Design | 10 | | | |
-| 6 | Performance + App Labs | 10 | | | |
-| 7 | Host & OS Tuning | 8 | | | |
-| 8 | Kubernetes for HPC | 10 | | | |
-| 9 | Networking + GPU Infra | 10 | | | |
-| 10 | Storage + Observability + Platform Labs | 10 | | | |
-| 11 | Performance Methodology + Linux Tools | 10 | | | |
-| 12 | Profiling (perf, VTune, eBPF, Tracy) | 10 | | | |
-| 13 | Memory Analysis + Network Troubleshooting | 10 | | | |
-| 14 | Tuning Recipes + Coverage + Troubleshooting Labs | 10 | | | |
+| Week | Module                                           | Hours Planned | Hours Actual | Completion % | Notes |
+| ---- | ------------------------------------------------ | ------------- | ------------ | ------------ | ----- |
+| 1    | Memory & CPU                                     | 10            |              |              |       |
+| 2    | Concurrency                                      | 10            |              |              |       |
+| 3    | Zero-Copy                                        | 10            |              |              |       |
+| 4    | Distributed Systems                              | 10            |              |              |       |
+| 5    | System Design                                    | 10            |              |              |       |
+| 6    | Performance + App Labs                           | 10            |              |              |       |
+| 7    | Host & OS Tuning                                 | 8             |              |              |       |
+| 8    | Kubernetes for HPC                               | 10            |              |              |       |
+| 9    | Networking + GPU Infra                           | 10            |              |              |       |
+| 10   | Storage + Observability + Platform Labs          | 10            |              |              |       |
+| 11   | Performance Methodology + Linux Tools            | 10            |              |              |       |
+| 12   | Profiling (perf, VTune, eBPF, Tracy)             | 10            |              |              |       |
+| 13   | Memory Analysis + Network Troubleshooting        | 10            |              |              |       |
+| 14   | Tuning Recipes + Coverage + Troubleshooting Labs | 10            |              |              |       |
 
 ### **Hands-On Labs:**
 
-| Lab | Status | Date Completed | Notes |
-|-----|--------|----------------|-------|
-| Lab 1: Lock-Free Queue | ☐ | | |
-| Lab 2: Arena Allocator | ☐ | | |
-| Lab 3: Shared Memory IPC | ☐ | | |
-| Lab 4: K8s Node for HPC | ☐ | | |
-| Lab 5: SR-IOV Network | ☐ | | |
-| Lab 6: GPU MIG Config | ☐ | | |
-| Lab 7: Observability Stack | ☐ | | |
-| Lab 8: USE Method Analysis | ☐ | | |
-| Lab 9: Flame Graph Pipeline | ☐ | | |
-| Lab 10: Memory Leak Detection | ☐ | | |
-| Lab 11: Network Latency Investigation | ☐ | | |
-| Lab 12: End-to-End Optimization | ☐ | | |
+| Lab                                   | Status | Date Completed | Notes |
+| ------------------------------------- | ------ | -------------- | ----- |
+| Lab 1: Lock-Free Queue                | ☐     |                |       |
+| Lab 2: Arena Allocator                | ☐     |                |       |
+| Lab 3: Shared Memory IPC              | ☐     |                |       |
+| Lab 4: K8s Node for HPC               | ☐     |                |       |
+| Lab 5: SR-IOV Network                 | ☐     |                |       |
+| Lab 6: GPU MIG Config                 | ☐     |                |       |
+| Lab 7: Observability Stack            | ☐     |                |       |
+| Lab 8: USE Method Analysis            | ☐     |                |       |
+| Lab 9: Flame Graph Pipeline           | ☐     |                |       |
+| Lab 10: Memory Leak Detection         | ☐     |                |       |
+| Lab 11: Network Latency Investigation | ☐     |                |       |
+| Lab 12: End-to-End Optimization       | ☐     |                |       |
 
 ### **Confidence Self-Assessment:**
 
-| Topic | Before (1-10) | After (1-10) | Improvement |
-|-------|---------------|--------------|-------------|
-| Memory Hierarchy | | | |
-| Concurrency | | | |
-| Zero-Copy | | | |
-| Distributed Systems | | | |
-| System Design | | | |
-| Performance Optimization | | | |
-| Host & OS Tuning | | | |
-| Kubernetes for HPC | | | |
-| Networking Infrastructure | | | |
-| GPU Infrastructure | | | |
-| Observability & SRE | | | |
-| Performance Methodology (USE/RED) | | | |
-| Linux Performance Tools | | | |
-| Profiling (perf/VTune/eBPF) | | | |
-| Memory & Leak Analysis | | | |
-| Network Troubleshooting | | | |
-| Tuning Recipes | | | |
-| Code Coverage & Quality | | | |
+| Topic                             | Before (1-10) | After (1-10) | Improvement |
+| --------------------------------- | ------------- | ------------ | ----------- |
+| Memory Hierarchy                  |               |              |             |
+| Concurrency                       |               |              |             |
+| Zero-Copy                         |               |              |             |
+| Distributed Systems               |               |              |             |
+| System Design                     |               |              |             |
+| Performance Optimization          |               |              |             |
+| Host & OS Tuning                  |               |              |             |
+| Kubernetes for HPC                |               |              |             |
+| Networking Infrastructure         |               |              |             |
+| GPU Infrastructure                |               |              |             |
+| Observability & SRE               |               |              |             |
+| Performance Methodology (USE/RED) |               |              |             |
+| Linux Performance Tools           |               |              |             |
+| Profiling (perf/VTune/eBPF)       |               |              |             |
+| Memory & Leak Analysis            |               |              |             |
+| Network Troubleshooting           |               |              |             |
+| Tuning Recipes                    |               |              |             |
+| Code Coverage & Quality           |               |              |             |
 
 ---
 

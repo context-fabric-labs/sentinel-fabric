@@ -15,10 +15,12 @@
 6. [Module 5: KV-Cache Management](#module-5-kv-cache-management)
 7. [Module 6: Prompt Optimization](#module-6-prompt-optimization)
 8. [Module 7: Advanced Optimization Techniques](#module-7-advanced-optimization-techniques)
-9. [Module 8: Hands-On Labs](#module-8-hands-on-labs)
-10. [Interview Question Bank](#interview-question-bank)
-11. [Resource Library](#resource-library)
-12. [Progress Tracker](#progress-tracker)
+9. [Module 8: Traditional ML Model Inference at Scale](#module-8-traditional-ml-model-inference-at-scale)
+10. [Module 9: Traditional ML Optimization & Production Patterns](#module-9-traditional-ml-optimization--production-patterns)
+11. [Module 10: Hands-On Labs](#module-10-hands-on-labs)
+12. [Interview Question Bank](#interview-question-bank)
+13. [Resource Library](#resource-library)
+14. [Progress Tracker](#progress-tracker)
 
 ---
 
@@ -37,11 +39,13 @@ By the end of this training, you will:
 - ✅ Master **KV-cache management** for 70%+ hit rates
 - ✅ Optimize **prompt handling** for 60% token reduction
 - ✅ Apply **advanced techniques** (speculative decoding, prefix caching, quantization)
+- ✅ Build **production traditional ML pipelines** (fraud, payments, risk) at 100K+ TPS
+- ✅ Implement **ML production patterns** (drift detection, circuit breakers, shadow scoring)
 - ✅ Answer **interview questions** with depth and real-world examples
 
 ### **Training Duration:**
-- **Total Hours:** 40–50 hours
-- **Duration:** 4–6 weeks (part-time)
+- **Total Hours:** 55–70 hours
+- **Duration:** 6–8 weeks (part-time)
 - **Format:** 30% theory, 70% hands-on labs
 
 ### **Prerequisites:**
@@ -1805,7 +1809,1345 @@ output = flash_attn_qkvpacked_func(
 
 ---
 
-## Module 8: Hands-On Labs
+## Module 8: Traditional ML Model Inference at Scale
+
+### **8.1 Traditional ML Inference Pipeline**
+
+#### **Why Traditional ML Still Dominates:**
+
+Despite the LLM hype, **70–80% of production inference workloads** are traditional ML models:
+
+| Domain | Models Used | Latency Requirement | Volume |
+|--------|-------------|-------------------|--------|
+| **Fraud Detection** | XGBoost, LightGBM, Random Forest | < 10ms (real-time) | 50K–500K TPS |
+| **Payment Processing** | Gradient Boosted Trees, Logistic Regression | < 5ms (inline) | 100K+ TPS |
+| **Credit Scoring** | Ensemble (GBDT + LR) | < 50ms | 10K+ TPS |
+| **Recommendation** | Two-tower embeddings, ANN | < 20ms | 1M+ QPS |
+| **Ad Ranking** | Wide & Deep, DeepFM | < 10ms | 10M+ QPS |
+| **Risk Assessment** | XGBoost + Rule Engine | < 100ms | 5K–50K TPS |
+
+**Key Insight:** Traditional ML inference differs fundamentally from LLM inference:
+- **No autoregressive generation** (single forward pass)
+- **CPU-friendly** (tree models don't need GPUs)
+- **Feature engineering dominates** (80% of latency in feature computation)
+- **Extreme throughput** (millions of predictions/second)
+- **Ultra-low latency** (single-digit milliseconds)
+
+---
+
+#### **Traditional ML Inference Pipeline:**
+
+```
+Raw Event → Feature Store Lookup → Feature Engineering → Model Prediction → Post-Processing → Decision
+              (2–5 ms)              (1–3 ms)              (0.5–2 ms)          (0.5–1 ms)       (0.5 ms)
+```
+
+**Total Budget: 5–15 ms end-to-end**
+
+---
+
+### **8.2 Feature Store & Real-Time Feature Engineering**
+
+#### **Feature Store Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Feature Store                          │
+├─────────────────────────────────────────────────────────┤
+│  Online Store (Redis/DynamoDB)                           │
+│  • Pre-computed features                                 │
+│  • p99 < 2ms lookup                                      │
+│  • User profile, historical aggregates                   │
+├─────────────────────────────────────────────────────────┤
+│  Real-Time Compute (Flink/Kafka Streams)                 │
+│  • Windowed aggregations (last 1h, 24h, 7d)             │
+│  • Streaming features (velocity, frequency)              │
+│  • Event-driven updates                                  │
+├─────────────────────────────────────────────────────────┤
+│  Offline Store (Spark/BigQuery)                           │
+│  • Batch features (daily, weekly)                        │
+│  • Training data generation                              │
+│  • Backfill pipelines                                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### **Real-Time Feature Engineering (Fraud Detection Example):**
+
+```python
+class FraudFeatureEngine:
+    def __init__(self, feature_store, stream_processor):
+        self.feature_store = feature_store
+        self.stream = stream_processor
+    
+    def compute_features(self, transaction):
+        # 1. Static features (pre-computed, O(1) lookup)
+        user_profile = self.feature_store.get(f"user:{transaction.user_id}")
+        merchant_profile = self.feature_store.get(f"merchant:{transaction.merchant_id}")
+        
+        # 2. Real-time streaming features (windowed aggregations)
+        velocity_features = self.stream.get_windowed_features(
+            key=transaction.user_id,
+            windows=["1min", "5min", "1hour", "24hour"]
+        )
+        
+        # 3. Derived features (computed inline)
+        derived = {
+            "amount_vs_avg_ratio": transaction.amount / (user_profile["avg_amount"] + 1e-6),
+            "distance_from_last_txn": haversine(
+                transaction.location, user_profile["last_location"]
+            ),
+            "time_since_last_txn_sec": (
+                transaction.timestamp - user_profile["last_txn_time"]
+            ).total_seconds(),
+            "is_new_merchant": merchant_profile.get("first_seen") is None,
+            "txn_count_1h": velocity_features["count_1hour"],
+            "amount_sum_24h": velocity_features["sum_24hour"],
+        }
+        
+        # 4. Assemble feature vector
+        feature_vector = {**user_profile, **merchant_profile, **velocity_features, **derived}
+        return feature_vector
+```
+
+#### **Feature Computation Optimization:**
+
+```python
+class OptimizedFeatureEngine:
+    """Parallel feature computation with caching."""
+    
+    def __init__(self, feature_store, cache_ttl_ms=100):
+        self.feature_store = feature_store
+        self.local_cache = TTLCache(maxsize=10000, ttl=cache_ttl_ms / 1000)
+    
+    async def compute_features_parallel(self, transaction):
+        """Fetch all features in parallel (not sequentially)."""
+        
+        # Launch all lookups concurrently
+        user_task = asyncio.create_task(
+            self.feature_store.get_async(f"user:{transaction.user_id}")
+        )
+        merchant_task = asyncio.create_task(
+            self.feature_store.get_async(f"merchant:{transaction.merchant_id}")
+        )
+        velocity_task = asyncio.create_task(
+            self.stream.get_windowed_features_async(transaction.user_id)
+        )
+        
+        # Await all concurrently (2ms instead of 6ms sequential)
+        user, merchant, velocity = await asyncio.gather(
+            user_task, merchant_task, velocity_task
+        )
+        
+        return self.assemble_features(transaction, user, merchant, velocity)
+```
+
+**Performance Impact:**
+- Sequential lookup: 6–8ms
+- Parallel lookup: 2–3ms
+- With local cache: 0.5–1ms (for repeated users)
+
+---
+
+### **8.3 Model Serving Frameworks for Traditional ML**
+
+#### **Framework Comparison:**
+
+| Framework | Best For | Latency | Throughput | Language |
+|-----------|----------|---------|------------|----------|
+| **ONNX Runtime** | Cross-platform, tree models | < 1ms | Very High | C++/Python |
+| **Triton** | Multi-model, GPU/CPU | < 5ms | High | C++ |
+| **TensorFlow Serving** | TF models | < 10ms | High | C++ |
+| **TorchServe** | PyTorch models | < 10ms | Medium | Java/Python |
+| **Seldon Core** | Kubernetes-native | < 20ms | Medium | Python |
+| **BentoML** | Easy deployment | < 15ms | Medium | Python |
+| **Custom C++** | Ultra-low latency | < 0.5ms | Very High | C++ |
+
+#### **ONNX Runtime for Tree Models (Production Standard):**
+
+```python
+import onnxruntime as ort
+import numpy as np
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
+
+# Convert XGBoost/LightGBM to ONNX
+from onnxmltools import convert_xgboost
+
+onnx_model = convert_xgboost(
+    xgb_model,
+    initial_types=[("features", FloatTensorType([None, num_features]))]
+)
+
+# Deploy with ONNX Runtime (sub-millisecond inference)
+session_options = ort.SessionOptions()
+session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+session_options.intra_op_num_threads = 4
+session_options.inter_op_num_threads = 1
+
+session = ort.InferenceSession(
+    "fraud_model.onnx",
+    sess_options=session_options,
+    providers=["CPUExecutionProvider"]
+)
+
+# Inference (< 0.5ms for single request)
+def predict(features: np.ndarray) -> float:
+    input_name = session.get_inputs()[0].name
+    result = session.run(None, {input_name: features.astype(np.float32)})
+    return result[0][0]
+```
+
+**Why ONNX for Tree Models:**
+- **0.1–0.5ms latency** (vs. 1–5ms with native scikit-learn)
+- **Graph optimizations** (operator fusion, constant folding)
+- **Thread-efficient** (no GIL issues)
+- **Portable** (same model runs on any platform)
+
+---
+
+#### **Custom C++ Inference for Ultra-Low Latency:**
+
+```cpp
+#include <treelite/c_api.h>
+
+class FastTreeInference {
+private:
+    TreeliteModelHandle model_;
+    TreelitePredictorHandle predictor_;
+    
+public:
+    FastTreeInference(const std::string& model_path) {
+        TreeliteLoadModel(model_path.c_str(), &model_);
+        TreelitePredictorCreate(model_, 4 /* num_threads */, &predictor_);
+    }
+    
+    float predict(const float* features, size_t num_features) {
+        float result;
+        TreelitePredictorPredict(
+            predictor_, features, num_features, &result
+        );
+        return result;
+    }
+    
+    // Batch prediction (vectorized, SIMD-optimized)
+    void predict_batch(const float* features, size_t batch_size,
+                       size_t num_features, float* results) {
+        TreelitePredictorPredictBatch(
+            predictor_, features, batch_size, num_features, results
+        );
+    }
+};
+```
+
+**Performance:**
+- Single prediction: **< 100 microseconds**
+- Batch of 1000: **< 5ms** (SIMD vectorized)
+- **10× faster** than Python-based inference
+
+---
+
+### **8.4 Tree Model Optimization**
+
+#### **Model Compilation with Treelite:**
+
+```python
+import treelite
+import treelite_runtime
+
+# Compile XGBoost model to native code
+model = treelite.Model.from_xgboost(xgb_model)
+
+# Compile to shared library (C code → .so)
+model.export_lib(
+    toolchain="gcc",
+    libpath="./fraud_model.so",
+    params={
+        "parallel_comp": 32,  # Parallel compilation
+        "quantize": 1         # Quantize thresholds
+    }
+)
+
+# Load compiled model (10× faster than native XGBoost)
+predictor = treelite_runtime.Predictor("./fraud_model.so")
+result = predictor.predict(features_batch)
+```
+
+**Speedup:** 5–10× over native XGBoost/LightGBM predict()
+
+---
+
+#### **Model Pruning & Compression:**
+
+```python
+class TreeModelOptimizer:
+    """Optimize tree models for inference speed."""
+    
+    def prune_model(self, model, max_depth=6, min_samples_leaf=100):
+        """Reduce tree depth for faster inference."""
+        # Shallower trees = fewer comparisons = lower latency
+        # Trade-off: slight accuracy loss for significant speed gain
+        pruned = clone_model_with_params(model, {
+            "max_depth": max_depth,
+            "min_samples_leaf": min_samples_leaf
+        })
+        return pruned
+    
+    def reduce_trees(self, model, target_n_estimators=100):
+        """Use fewer trees with higher learning rate."""
+        # 500 trees at lr=0.01 ≈ 100 trees at lr=0.05
+        # 5× fewer tree traversals
+        model.n_estimators = target_n_estimators
+        return model
+    
+    def quantize_thresholds(self, model):
+        """Quantize split thresholds to reduce memory footprint."""
+        # Float64 → Float32 thresholds
+        # Reduces model size by 50%, fits in CPU cache
+        for tree in model.get_booster().trees:
+            tree.thresholds = tree.thresholds.astype(np.float32)
+        return model
+```
+
+**Optimization Impact:**
+
+| Technique | Latency Reduction | Accuracy Impact | Memory Savings |
+|-----------|-------------------|-----------------|----------------|
+| Depth pruning (8→6) | 25% | < 0.1% AUC | 40% |
+| Tree reduction (500→100) | 80% | 0.2–0.5% AUC | 80% |
+| Threshold quantization | 10% | Negligible | 50% |
+| ONNX compilation | 70% | None | - |
+
+---
+
+### **8.5 Embedding Model Inference (Recommendations/Search)**
+
+#### **Two-Tower Architecture at Scale:**
+
+```python
+class TwoTowerInference:
+    """
+    Recommendation system with pre-computed item embeddings
+    and real-time user embedding computation.
+    """
+    
+    def __init__(self, user_model, item_index, top_k=100):
+        self.user_model = user_model      # Small model, computed per-request
+        self.item_index = item_index      # ANN index (FAISS/ScaNN)
+        self.top_k = top_k
+    
+    def recommend(self, user_features):
+        # Step 1: Compute user embedding (1–2ms)
+        user_embedding = self.user_model.predict(user_features)
+        
+        # Step 2: ANN search against item embeddings (1–5ms)
+        scores, item_ids = self.item_index.search(
+            user_embedding.reshape(1, -1), self.top_k
+        )
+        
+        return item_ids[0], scores[0]
+```
+
+#### **ANN Index Optimization (FAISS):**
+
+```python
+import faiss
+
+class OptimizedANNIndex:
+    def __init__(self, dimension, num_items):
+        self.dimension = dimension
+        
+        # Choose index type based on dataset size
+        if num_items < 100_000:
+            # Flat index (exact, fast for small datasets)
+            self.index = faiss.IndexFlatIP(dimension)
+        elif num_items < 10_000_000:
+            # IVF index (approximate, good balance)
+            quantizer = faiss.IndexFlatIP(dimension)
+            self.index = faiss.IndexIVFFlat(quantizer, dimension, 1024)
+        else:
+            # IVF + PQ (highly compressed, 100M+ items)
+            quantizer = faiss.IndexFlatIP(dimension)
+            self.index = faiss.IndexIVFPQ(
+                quantizer, dimension, 4096, 32, 8
+            )
+    
+    def build(self, embeddings):
+        if hasattr(self.index, 'train'):
+            self.index.train(embeddings)
+        self.index.add(embeddings)
+    
+    def search(self, query, k=100):
+        # Set nprobe for recall/speed trade-off
+        if hasattr(self.index, 'nprobe'):
+            self.index.nprobe = 64  # Search 64 clusters
+        
+        distances, indices = self.index.search(query, k)
+        return distances, indices
+```
+
+**ANN Index Performance:**
+
+| Index Type | Build Time | Search Latency | Recall@100 | Memory |
+|-----------|------------|----------------|------------|--------|
+| Flat (exact) | O(1) | 10ms (1M items) | 100% | 100% |
+| IVF-Flat | O(n) | 1–2ms | 95% | 100% |
+| IVF-PQ | O(n) | 0.5–1ms | 90% | 10% |
+| HNSW | O(n log n) | 0.5ms | 98% | 130% |
+
+---
+
+### **8.6 Real-Time Scoring Architecture (Payment Processing)**
+
+#### **Inline vs. Async Scoring:**
+
+```
+Inline Scoring (Payment Authorization):
+Transaction → [Feature Compute] → [Model Score] → [Decision] → Approve/Deny
+                                                                 (< 10ms total)
+
+Async Scoring (Post-Authorization):
+Transaction → Approve → [Queue] → [Feature Compute] → [Model Score] → Flag/Alert
+                                                                        (< 1 sec)
+```
+
+#### **High-Throughput Scoring Service:**
+
+```python
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
+
+class ScoringService:
+    """
+    Production scoring service handling 100K+ TPS.
+    Uses process pool for CPU-bound model inference.
+    """
+    
+    def __init__(self, model_path, num_workers=8):
+        self.executor = ProcessPoolExecutor(max_workers=num_workers)
+        self.model = load_model(model_path)  # ONNX session per worker
+        self.feature_engine = OptimizedFeatureEngine()
+        self.decision_engine = DecisionEngine()
+    
+    async def score_transaction(self, transaction):
+        # 1. Feature computation (async I/O, 2ms)
+        features = await self.feature_engine.compute_features_parallel(transaction)
+        
+        # 2. Model inference (CPU-bound, offload to process pool, 0.5ms)
+        loop = asyncio.get_event_loop()
+        score = await loop.run_in_executor(
+            self.executor,
+            self.model.predict,
+            features
+        )
+        
+        # 3. Decision (rule engine + threshold, 0.2ms)
+        decision = self.decision_engine.decide(score, transaction)
+        
+        return decision
+    
+    async def score_batch(self, transactions):
+        """Score batch of transactions concurrently."""
+        tasks = [self.score_transaction(txn) for txn in transactions]
+        return await asyncio.gather(*tasks)
+```
+
+#### **Connection Pooling & Resource Management:**
+
+```python
+class ResourcePool:
+    """
+    Manage model instances and feature store connections.
+    Critical for sustaining 100K+ TPS.
+    """
+    
+    def __init__(self, pool_size=16):
+        self.model_pool = queue.Queue(maxsize=pool_size)
+        self.redis_pool = redis.ConnectionPool(max_connections=pool_size * 2)
+        
+        # Pre-warm model instances
+        for _ in range(pool_size):
+            session = ort.InferenceSession("model.onnx", providers=["CPUExecutionProvider"])
+            self.model_pool.put(session)
+    
+    def get_model(self):
+        return self.model_pool.get(timeout=5)
+    
+    def return_model(self, session):
+        self.model_pool.put(session)
+    
+    def predict_with_pool(self, features):
+        session = self.get_model()
+        try:
+            result = session.run(None, {"features": features})
+            return result
+        finally:
+            self.return_model(session)
+```
+
+---
+
+### **8.7 Model Warm-Up & Cold Start Mitigation**
+
+#### **Model Pre-Loading:**
+
+```python
+class ModelWarmer:
+    """Pre-warm models to avoid cold start latency."""
+    
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.session = None
+    
+    def warm_up(self, num_warmup_requests=100):
+        """Run dummy predictions to warm up CPU caches and JIT."""
+        
+        # Load model
+        self.session = ort.InferenceSession(self.model_path)
+        
+        # Generate synthetic data matching production distribution
+        dummy_features = np.random.randn(num_warmup_requests, self.num_features).astype(np.float32)
+        
+        # Run warmup predictions (fills CPU cache, triggers JIT compilation)
+        for i in range(num_warmup_requests):
+            self.session.run(None, {"features": dummy_features[i:i+1]})
+        
+        print(f"Model warmed up with {num_warmup_requests} predictions")
+        return self.session
+    
+    def verify_latency(self, target_p99_ms=1.0):
+        """Verify model meets latency target after warmup."""
+        latencies = []
+        test_data = np.random.randn(1000, self.num_features).astype(np.float32)
+        
+        for i in range(1000):
+            start = time.perf_counter()
+            self.session.run(None, {"features": test_data[i:i+1]})
+            latencies.append((time.perf_counter() - start) * 1000)
+        
+        p99 = np.percentile(latencies, 99)
+        print(f"p99 latency: {p99:.2f}ms (target: {target_p99_ms}ms)")
+        assert p99 < target_p99_ms, f"Model too slow: {p99:.2f}ms > {target_p99_ms}ms"
+```
+
+**Cold Start Impact:**
+- First prediction: 10–50ms (model loading, memory allocation)
+- After warmup: 0.1–0.5ms
+- **100× difference** — warmup is critical for production
+
+---
+
+### **8.8 Ensemble Scoring Patterns (Fraud/Risk)**
+
+#### **Multi-Stage Scoring Pipeline:**
+
+```python
+class FraudScoringPipeline:
+    """
+    Production fraud scoring with multi-stage evaluation.
+    CapitalOne/Fiserv pattern.
+    """
+    
+    def __init__(self):
+        self.rule_engine = RuleEngine()           # Fast rules (< 0.1ms)
+        self.fast_model = XGBoostScorer()         # XGBoost (< 0.5ms)
+        self.deep_model = NeuralScorer()          # Neural net (< 2ms)
+        self.ensemble = EnsembleAggregator()
+    
+    def score(self, transaction, features):
+        # Stage 1: Rule-based fast filter (< 0.1ms)
+        rule_result = self.rule_engine.evaluate(transaction)
+        if rule_result.action == "BLOCK":
+            return Score(1.0, reason="rule_match", stage="rules")
+        if rule_result.action == "ALLOW":
+            return Score(0.0, reason="trusted", stage="rules")
+        
+        # Stage 2: Fast ML model (< 0.5ms)
+        fast_score = self.fast_model.predict(features)
+        if fast_score < 0.1:
+            return Score(fast_score, reason="low_risk", stage="fast_model")
+        if fast_score > 0.95:
+            return Score(fast_score, reason="high_risk", stage="fast_model")
+        
+        # Stage 3: Deep model (only for uncertain cases, < 2ms)
+        deep_score = self.deep_model.predict(features)
+        
+        # Stage 4: Ensemble
+        final_score = self.ensemble.combine(
+            fast_score=fast_score,
+            deep_score=deep_score,
+            rule_score=rule_result.score,
+            weights=[0.4, 0.5, 0.1]
+        )
+        
+        return Score(final_score, reason="ensemble", stage="full")
+```
+
+**Performance Profile:**
+- 60% of transactions: resolved at Stage 1 (rules) — **< 0.1ms**
+- 25% of transactions: resolved at Stage 2 (fast model) — **< 0.5ms**
+- 15% of transactions: full pipeline — **< 3ms**
+- **Weighted average: < 0.5ms**
+
+---
+
+## Module 9: Traditional ML Optimization & Production Patterns
+
+### **9.1 CPU Optimization for ML Inference**
+
+#### **NUMA-Aware Deployment:**
+
+```python
+import os
+
+class NUMAOptimizedInference:
+    """
+    Pin model workers to specific NUMA nodes for
+    optimal memory access patterns on multi-socket servers.
+    """
+    
+    def __init__(self, numa_node=0):
+        # Pin to specific NUMA node
+        os.sched_setaffinity(0, self.get_cpus_for_numa(numa_node))
+        
+        # Set memory policy
+        os.environ["OMP_NUM_THREADS"] = "8"
+        os.environ["KMP_AFFINITY"] = "granularity=fine,compact,1,0"
+        os.environ["MALLOC_CONF"] = "background_thread:true,metadata_thp:auto"
+    
+    def get_cpus_for_numa(self, node):
+        """Get CPU cores belonging to NUMA node."""
+        import subprocess
+        result = subprocess.run(
+            ["numactl", "--hardware"],
+            capture_output=True, text=True
+        )
+        # Parse NUMA topology
+        # Node 0: CPUs 0-15
+        # Node 1: CPUs 16-31
+        return set(range(node * 16, (node + 1) * 16))
+```
+
+#### **SIMD Vectorization for Feature Processing:**
+
+```python
+import numpy as np
+
+class VectorizedFeatureProcessor:
+    """
+    Process features using NumPy vectorization (SIMD under the hood).
+    Avoid Python loops for feature computation.
+    """
+    
+    def compute_batch_features(self, transactions_batch):
+        """
+        Process batch of 1000 transactions simultaneously.
+        NumPy uses AVX2/AVX-512 SIMD instructions.
+        """
+        amounts = np.array([t.amount for t in transactions_batch])
+        avg_amounts = np.array([t.user_avg for t in transactions_batch])
+        
+        # Vectorized operations (SIMD, no Python loop)
+        amount_ratios = amounts / (avg_amounts + 1e-6)
+        log_amounts = np.log1p(amounts)
+        z_scores = (amounts - avg_amounts) / (np.std(amounts) + 1e-6)
+        
+        # Stack into feature matrix
+        features = np.column_stack([
+            amounts, amount_ratios, log_amounts, z_scores
+        ])
+        
+        return features.astype(np.float32)
+```
+
+**Performance:**
+- Python loop (1000 features): 50ms
+- NumPy vectorized (1000 features): 0.5ms
+- **100× speedup** from vectorization
+
+---
+
+#### **Memory Layout Optimization:**
+
+```python
+class CacheOptimizedFeatures:
+    """
+    Store features in column-major (Fortran) order for
+    tree model traversal efficiency.
+    """
+    
+    def __init__(self, num_features):
+        self.num_features = num_features
+        # Pre-allocate aligned memory
+        self.buffer = np.empty(
+            (1024, num_features),
+            dtype=np.float32,
+            order='C'  # Row-major for batch prediction
+        )
+    
+    def prepare_batch(self, raw_features):
+        """Copy features into pre-allocated aligned buffer."""
+        batch_size = len(raw_features)
+        np.copyto(self.buffer[:batch_size], raw_features)
+        return self.buffer[:batch_size]
+```
+
+**Why This Matters:**
+- CPU L1 cache line: 64 bytes (16 float32 values)
+- Row-major layout: consecutive features in same cache line
+- **2× throughput** from cache-friendly access patterns
+
+---
+
+### **9.2 Model Monitoring & Drift Detection**
+
+#### **Production Monitoring Framework:**
+
+```python
+from dataclasses import dataclass
+from collections import deque
+import numpy as np
+
+@dataclass
+class PredictionMetrics:
+    timestamp: float
+    latency_ms: float
+    score: float
+    features_hash: str
+    model_version: str
+
+class ModelMonitor:
+    """
+    Real-time monitoring for model health, drift, and performance.
+    """
+    
+    def __init__(self, window_size=10000):
+        self.predictions = deque(maxlen=window_size)
+        self.baseline_stats = None
+    
+    def record_prediction(self, metrics: PredictionMetrics):
+        self.predictions.append(metrics)
+    
+    def check_score_drift(self, threshold=0.05):
+        """Detect if prediction score distribution has shifted."""
+        recent_scores = [p.score for p in list(self.predictions)[-1000:]]
+        
+        # Compare to baseline
+        current_mean = np.mean(recent_scores)
+        baseline_mean = self.baseline_stats["score_mean"]
+        
+        drift = abs(current_mean - baseline_mean) / baseline_mean
+        
+        if drift > threshold:
+            return {
+                "alert": "SCORE_DRIFT",
+                "current_mean": current_mean,
+                "baseline_mean": baseline_mean,
+                "drift_pct": drift * 100
+            }
+        return None
+    
+    def check_feature_drift(self, current_features, threshold=0.1):
+        """PSI (Population Stability Index) for feature drift."""
+        psi_scores = {}
+        
+        for feature_name in current_features.columns:
+            current_dist = np.histogram(current_features[feature_name], bins=10)[0]
+            baseline_dist = self.baseline_stats["feature_distributions"][feature_name]
+            
+            # Normalize
+            current_dist = current_dist / current_dist.sum() + 1e-6
+            baseline_dist = baseline_dist / baseline_dist.sum() + 1e-6
+            
+            # PSI calculation
+            psi = np.sum(
+                (current_dist - baseline_dist) * np.log(current_dist / baseline_dist)
+            )
+            psi_scores[feature_name] = psi
+        
+        # Flag features with significant drift
+        drifted = {k: v for k, v in psi_scores.items() if v > threshold}
+        return drifted if drifted else None
+    
+    def check_latency_degradation(self, target_p99_ms=5.0):
+        """Alert if model latency exceeds SLA."""
+        recent_latencies = [p.latency_ms for p in list(self.predictions)[-1000:]]
+        p99 = np.percentile(recent_latencies, 99)
+        
+        if p99 > target_p99_ms:
+            return {
+                "alert": "LATENCY_SLA_BREACH",
+                "current_p99_ms": p99,
+                "target_p99_ms": target_p99_ms
+            }
+        return None
+```
+
+#### **Drift Detection Strategies:**
+
+| Method | Detects | Latency | Use Case |
+|--------|---------|---------|----------|
+| **PSI (Population Stability Index)** | Feature distribution shift | Low | Feature monitoring |
+| **KS Test** | Distribution shape change | Medium | Statistical rigor |
+| **ADWIN** | Concept drift (streaming) | Very Low | Real-time detection |
+| **DDM (Drift Detection Method)** | Error rate increase | Low | Accuracy monitoring |
+| **Page-Hinkley** | Mean shift detection | Very Low | Score monitoring |
+
+---
+
+### **9.3 A/B Testing & Shadow Scoring**
+
+#### **Shadow Mode Deployment:**
+
+```python
+class ShadowScorer:
+    """
+    Run new model in shadow mode alongside production model.
+    Compare outputs without affecting decisions.
+    """
+    
+    def __init__(self, production_model, shadow_model, sample_rate=0.1):
+        self.production = production_model
+        self.shadow = shadow_model
+        self.sample_rate = sample_rate
+        self.comparison_log = []
+    
+    async def score(self, features):
+        # Always run production model (this drives decisions)
+        prod_score = self.production.predict(features)
+        
+        # Conditionally run shadow model (non-blocking)
+        if random.random() < self.sample_rate:
+            asyncio.create_task(self._shadow_score(features, prod_score))
+        
+        return prod_score  # Return production result immediately
+    
+    async def _shadow_score(self, features, prod_score):
+        """Score with shadow model and log comparison."""
+        shadow_score = self.shadow.predict(features)
+        
+        self.comparison_log.append({
+            "timestamp": time.time(),
+            "prod_score": prod_score,
+            "shadow_score": shadow_score,
+            "abs_diff": abs(prod_score - shadow_score),
+            "agreement": (prod_score > 0.5) == (shadow_score > 0.5)
+        })
+    
+    def get_comparison_report(self):
+        """Analyze shadow vs. production agreement."""
+        if not self.comparison_log:
+            return None
+        
+        agreements = [r["agreement"] for r in self.comparison_log]
+        diffs = [r["abs_diff"] for r in self.comparison_log]
+        
+        return {
+            "agreement_rate": np.mean(agreements),
+            "mean_score_diff": np.mean(diffs),
+            "p95_score_diff": np.percentile(diffs, 95),
+            "total_comparisons": len(self.comparison_log)
+        }
+```
+
+---
+
+### **9.4 Feature Importance & Model Explainability at Serving Time**
+
+#### **Real-Time SHAP (Approximate):**
+
+```python
+class FastExplainer:
+    """
+    Approximate SHAP values for real-time explanation.
+    Full SHAP is too slow (100ms+), use TreeSHAP or approximation.
+    """
+    
+    def __init__(self, model, background_data):
+        # Pre-compute TreeSHAP explainer (one-time cost)
+        import shap
+        self.explainer = shap.TreeExplainer(model, data=background_data)
+        
+        # Cache top-K feature contributions
+        self.feature_names = model.feature_names_
+    
+    def explain(self, features, top_k=5):
+        """Return top-K contributing features for a prediction."""
+        
+        # TreeSHAP is O(T * L * D) - fast for tree models
+        shap_values = self.explainer.shap_values(features.reshape(1, -1))
+        
+        # Get top-K features by absolute SHAP value
+        abs_shap = np.abs(shap_values[0])
+        top_indices = np.argsort(abs_shap)[-top_k:][::-1]
+        
+        explanations = []
+        for idx in top_indices:
+            explanations.append({
+                "feature": self.feature_names[idx],
+                "contribution": float(shap_values[0][idx]),
+                "value": float(features[idx])
+            })
+        
+        return explanations
+```
+
+**Latency:**
+- Full KernelSHAP: 100–500ms (too slow for real-time)
+- TreeSHAP: 1–5ms (suitable for inline scoring)
+- Pre-computed lookup: < 0.1ms (for rule-based explanations)
+
+---
+
+### **9.5 Model Fallback & Graceful Degradation**
+
+#### **Circuit Breaker Pattern:**
+
+```python
+import time
+from enum import Enum
+
+class CircuitState(Enum):
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Failing, use fallback
+    HALF_OPEN = "half_open"  # Testing recovery
+
+class ModelCircuitBreaker:
+    """
+    Circuit breaker for model inference.
+    Falls back to simpler model if primary fails.
+    """
+    
+    def __init__(self, primary_model, fallback_model,
+                 failure_threshold=5, recovery_timeout_sec=30):
+        self.primary = primary_model
+        self.fallback = fallback_model
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout_sec
+        self.last_failure_time = 0
+    
+    def predict(self, features):
+        if self.state == CircuitState.OPEN:
+            # Check if recovery timeout elapsed
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                self.state = CircuitState.HALF_OPEN
+            else:
+                return self._fallback_predict(features)
+        
+        try:
+            # Try primary model
+            start = time.perf_counter()
+            result = self.primary.predict(features)
+            latency = (time.perf_counter() - start) * 1000
+            
+            # Check latency SLA
+            if latency > 10:  # > 10ms = too slow
+                raise TimeoutError(f"Model too slow: {latency:.1f}ms")
+            
+            # Success: reset failures
+            self.failure_count = 0
+            self.state = CircuitState.CLOSED
+            return result
+            
+        except Exception as e:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            
+            if self.failure_count >= self.failure_threshold:
+                self.state = CircuitState.OPEN
+            
+            return self._fallback_predict(features)
+    
+    def _fallback_predict(self, features):
+        """Use simpler, faster fallback model."""
+        # Fallback: logistic regression (always < 0.1ms)
+        return self.fallback.predict(features)
+```
+
+#### **Multi-Level Fallback:**
+
+```python
+class GracefulDegradation:
+    """
+    Progressive fallback strategy for scoring services.
+    
+    Level 0: Full ensemble (XGBoost + Neural + Rules) — 3ms
+    Level 1: Fast model only (XGBoost) — 0.5ms  
+    Level 2: Logistic Regression — 0.1ms
+    Level 3: Rule-based scoring — 0.01ms
+    Level 4: Default decision (approve/deny based on amount) — 0ms
+    """
+    
+    def __init__(self):
+        self.levels = [
+            ("full_ensemble", FullEnsembleModel()),
+            ("fast_model", XGBoostModel()),
+            ("simple_model", LogisticRegressionModel()),
+            ("rules", RuleBasedScorer()),
+            ("default", DefaultDecision()),
+        ]
+        self.current_level = 0
+    
+    def predict(self, features, max_latency_ms=10):
+        for level_name, model in self.levels[self.current_level:]:
+            try:
+                start = time.perf_counter()
+                result = model.predict(features)
+                latency = (time.perf_counter() - start) * 1000
+                
+                if latency <= max_latency_ms:
+                    return result, level_name
+                    
+            except Exception:
+                continue  # Try next level
+        
+        # Last resort
+        return self.levels[-1][1].predict(features), "default"
+```
+
+---
+
+### **9.6 Load Testing & Capacity Planning**
+
+#### **Inference Load Testing Framework:**
+
+```python
+import asyncio
+import aiohttp
+import time
+import numpy as np
+from dataclasses import dataclass
+
+@dataclass
+class LoadTestResult:
+    total_requests: int
+    successful: int
+    failed: int
+    mean_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+    throughput_rps: float
+    error_rate: float
+
+class InferenceLoadTester:
+    """
+    Load test a scoring service to determine capacity limits.
+    """
+    
+    def __init__(self, endpoint_url, num_features=50):
+        self.endpoint = endpoint_url
+        self.num_features = num_features
+    
+    async def run_load_test(self, target_rps, duration_sec=60):
+        """Run constant-rate load test."""
+        interval = 1.0 / target_rps
+        latencies = []
+        errors = 0
+        start_time = time.time()
+        
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            
+            while time.time() - start_time < duration_sec:
+                features = np.random.randn(self.num_features).tolist()
+                task = asyncio.create_task(
+                    self._send_request(session, features, latencies)
+                )
+                tasks.append(task)
+                await asyncio.sleep(interval)
+            
+            # Wait for all in-flight requests
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            errors = sum(1 for r in results if isinstance(r, Exception))
+        
+        elapsed = time.time() - start_time
+        
+        return LoadTestResult(
+            total_requests=len(latencies) + errors,
+            successful=len(latencies),
+            failed=errors,
+            mean_latency_ms=np.mean(latencies) if latencies else 0,
+            p50_latency_ms=np.percentile(latencies, 50) if latencies else 0,
+            p95_latency_ms=np.percentile(latencies, 95) if latencies else 0,
+            p99_latency_ms=np.percentile(latencies, 99) if latencies else 0,
+            throughput_rps=len(latencies) / elapsed,
+            error_rate=errors / (len(latencies) + errors)
+        )
+    
+    async def find_breaking_point(self):
+        """Find maximum RPS before SLA breach."""
+        for target_rps in [100, 500, 1000, 5000, 10000, 50000, 100000]:
+            result = await self.run_load_test(target_rps, duration_sec=30)
+            
+            print(f"  {target_rps:>6} RPS → p99={result.p99_latency_ms:.1f}ms, "
+                  f"errors={result.error_rate:.1%}")
+            
+            if result.p99_latency_ms > 10 or result.error_rate > 0.01:
+                print(f"  Breaking point: ~{target_rps} RPS")
+                return target_rps
+        
+        return 100000  # Didn't break
+```
+
+#### **Capacity Planning Formula:**
+
+```
+Required Instances = (Peak TPS × Safety Factor) / (Instance Capacity)
+
+Where:
+- Peak TPS: Maximum expected transactions per second
+- Safety Factor: 1.5–2.0× (headroom for bursts)
+- Instance Capacity: Max RPS per instance at p99 < SLA
+
+Example (Fraud Detection):
+- Peak TPS: 50,000
+- Safety Factor: 2.0
+- Instance Capacity: 10,000 RPS (measured via load test)
+- Required Instances = (50,000 × 2.0) / 10,000 = 10 instances
+```
+
+---
+
+### **9.7 Model Serialization & Versioning Best Practices**
+
+#### **Model Artifact Management:**
+
+```python
+class ModelArtifact:
+    """
+    Standard model artifact format for production deployment.
+    """
+    
+    def __init__(self, model, metadata):
+        self.model = model
+        self.metadata = {
+            "model_id": str(uuid.uuid4()),
+            "model_type": type(model).__name__,
+            "version": metadata["version"],
+            "trained_at": datetime.utcnow().isoformat(),
+            "features": metadata["features"],
+            "feature_count": len(metadata["features"]),
+            "metrics": metadata["metrics"],  # AUC, precision, recall
+            "thresholds": metadata["thresholds"],
+            "min_latency_ms": None,  # Filled during validation
+            "max_batch_size": None,
+        }
+    
+    def save(self, path):
+        """Save model + metadata together."""
+        os.makedirs(path, exist_ok=True)
+        
+        # Save ONNX model
+        onnx_path = os.path.join(path, "model.onnx")
+        self.export_to_onnx(onnx_path)
+        
+        # Save metadata
+        meta_path = os.path.join(path, "metadata.json")
+        with open(meta_path, 'w') as f:
+            json.dump(self.metadata, f, indent=2)
+        
+        # Save feature schema (for validation)
+        schema_path = os.path.join(path, "feature_schema.json")
+        self.save_feature_schema(schema_path)
+    
+    def validate_before_deploy(self, test_data, latency_target_ms=5.0):
+        """Gate: model must pass validation before production."""
+        
+        # 1. Accuracy check
+        predictions = self.model.predict(test_data.features)
+        auc = roc_auc_score(test_data.labels, predictions)
+        assert auc >= self.metadata["metrics"]["min_auc"], \
+            f"AUC {auc:.4f} below threshold {self.metadata['metrics']['min_auc']}"
+        
+        # 2. Latency check
+        latencies = []
+        for i in range(1000):
+            start = time.perf_counter()
+            self.model.predict(test_data.features[i:i+1])
+            latencies.append((time.perf_counter() - start) * 1000)
+        
+        p99 = np.percentile(latencies, 99)
+        assert p99 < latency_target_ms, \
+            f"p99 latency {p99:.2f}ms exceeds target {latency_target_ms}ms"
+        
+        # 3. Feature schema compatibility
+        assert set(test_data.feature_names) == set(self.metadata["features"]), \
+            "Feature schema mismatch"
+        
+        return True
+```
+
+---
+
+### **9.8 Production Deployment Patterns**
+
+#### **Blue-Green Deployment for ML Models:**
+
+```python
+class BlueGreenDeployment:
+    """
+    Zero-downtime model deployment with instant rollback.
+    """
+    
+    def __init__(self):
+        self.blue_model = None   # Current production
+        self.green_model = None  # New version (staging)
+        self.active = "blue"
+    
+    def deploy_new_version(self, new_model):
+        """Deploy new model to green slot."""
+        self.green_model = new_model
+        
+        # Run validation
+        if not self.validate_green():
+            self.green_model = None
+            raise ValueError("Green model failed validation")
+    
+    def switch_traffic(self):
+        """Atomically switch traffic to green."""
+        self.active = "green"
+        # Old blue can be rolled back to instantly
+    
+    def rollback(self):
+        """Instant rollback to blue."""
+        self.active = "blue"
+    
+    def predict(self, features):
+        if self.active == "blue":
+            return self.blue_model.predict(features)
+        else:
+            return self.green_model.predict(features)
+```
+
+#### **Feature Flag Controlled Rollout:**
+
+```python
+class FeatureFlaggedModel:
+    """
+    Gradual rollout controlled by feature flags.
+    Useful for observing new model behavior in production.
+    """
+    
+    def __init__(self, old_model, new_model, flag_service):
+        self.old_model = old_model
+        self.new_model = new_model
+        self.flag_service = flag_service
+    
+    def predict(self, features, user_id=None):
+        # Check if user is in rollout group
+        if self.flag_service.is_enabled("new_fraud_model_v2", user_id=user_id):
+            return self.new_model.predict(features)
+        else:
+            return self.old_model.predict(features)
+```
+
+---
+
+### **9.9 Batch Inference at Scale (Offline)**
+
+#### **Distributed Batch Scoring with Spark:**
+
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import pandas_udf
+import pandas as pd
+
+class DistributedBatchScorer:
+    """
+    Score millions of records using Spark + ONNX.
+    Use for: daily risk assessments, batch fraud review, model monitoring.
+    """
+    
+    def __init__(self, model_path, spark_config=None):
+        self.spark = SparkSession.builder \
+            .appName("batch_scoring") \
+            .config("spark.executor.instances", "50") \
+            .config("spark.executor.memory", "8g") \
+            .config("spark.executor.cores", "4") \
+            .getOrCreate()
+        
+        self.model_path = model_path
+    
+    def score_dataset(self, input_path, output_path):
+        """Score entire dataset in parallel across cluster."""
+        
+        df = self.spark.read.parquet(input_path)
+        
+        # Broadcast model to all executors (loaded once per executor)
+        model_broadcast = self.spark.sparkContext.broadcast(self.model_path)
+        
+        @pandas_udf("float")
+        def score_batch(features_series: pd.Series) -> pd.Series:
+            import onnxruntime as ort
+            
+            # Load model (cached per executor via broadcast)
+            session = ort.InferenceSession(model_broadcast.value)
+            
+            # Convert to numpy and predict
+            features = np.stack(features_series.values)
+            scores = session.run(None, {"features": features})[0]
+            
+            return pd.Series(scores.flatten())
+        
+        # Apply scoring UDF
+        scored_df = df.withColumn("fraud_score", score_batch(df["features"]))
+        
+        # Write results
+        scored_df.write.parquet(output_path)
+        
+        return scored_df.count()
+```
+
+**Performance:**
+- 100M records on 50 executors: ~10 minutes
+- Throughput: ~170K records/second
+- Cost: ~$5 on cloud (spot instances)
+
+---
+
+### **9.10 Interview-Ready Traditional ML Patterns Summary**
+
+#### **Quick Reference Card:**
+
+| Pattern | When to Use | Latency | Example |
+|---------|-------------|---------|---------|
+| **Rule → Fast → Deep cascade** | High-volume, mixed difficulty | 0.1–3ms | Fraud detection |
+| **ONNX + Process Pool** | CPU inference at scale | 0.5ms | Payment scoring |
+| **Feature Store + Parallel Fetch** | Complex features needed | 2–3ms | Risk assessment |
+| **ANN Index (FAISS/ScaNN)** | Similarity search | 0.5–5ms | Recommendations |
+| **Circuit Breaker + Fallback** | High availability required | 0.1–10ms | Any critical path |
+| **Shadow Scoring** | Safe model validation | 0 (async) | Model upgrades |
+| **Treelite Compilation** | Max tree model speed | 0.05–0.1ms | Latency-critical |
+| **Blue-Green + Canary** | Zero-downtime deploys | 0 | Any model update |
+
+#### **Key Metrics for Traditional ML Serving:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Traditional ML Inference Metrics Dashboard             │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Latency:                                               │
+│    • p50: 0.3ms  │  p95: 1.2ms  │  p99: 3.5ms        │
+│                                                         │
+│  Throughput:                                            │
+│    • Current: 45,000 TPS  │  Capacity: 100,000 TPS    │
+│                                                         │
+│  Model Health:                                          │
+│    • AUC: 0.943  │  PSI: 0.02  │  Drift: None        │
+│                                                         │
+│  Operational:                                           │
+│    • Error Rate: 0.001%  │  Circuit: CLOSED            │
+│    • Cache Hit: 85%  │  Fallback Rate: 0.1%           │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Module 10: Hands-On Labs
 
 ### **Lab 1: Deploy vLLM and Benchmark**
 
@@ -1861,6 +3203,64 @@ output = flash_attn_qkvpacked_func(
 
 ---
 
+### **Lab 4: Build a Fraud Scoring Pipeline**
+
+**Objective:** Implement a multi-stage fraud scoring service with cascade, feature store, and fallback.
+
+**Steps:**
+1. Train XGBoost + Logistic Regression models on synthetic fraud data
+2. Export both to ONNX format
+3. Implement cascade scoring (rules → XGBoost → fallback to LR)
+4. Add circuit breaker with automatic fallback
+5. Load test and measure throughput/latency at each stage
+6. Implement shadow scoring for model comparison
+
+**Expected Results:**
+- XGBoost (ONNX): < 0.5ms p99 latency
+- Cascade: 60% resolved by rules (< 0.1ms)
+- Throughput: > 50,000 TPS per instance
+- Circuit breaker triggers fallback within 5 failures
+
+---
+
+### **Lab 5: Feature Store + Real-Time Scoring**
+
+**Objective:** Build end-to-end feature pipeline with parallel feature fetching and scoring.
+
+**Steps:**
+1. Set up Redis as online feature store
+2. Implement parallel async feature fetching
+3. Pre-compute windowed aggregation features
+4. Build scoring service with process pool
+5. Benchmark: sequential vs. parallel feature fetch
+6. Measure end-to-end latency breakdown
+
+**Expected Results:**
+- Parallel feature fetch: 2ms (vs. 8ms sequential)
+- End-to-end scoring: < 5ms p99
+- Feature store hit rate: > 95%
+
+---
+
+### **Lab 6: Model Drift Detection & Monitoring**
+
+**Objective:** Build real-time model monitoring with drift detection and alerting.
+
+**Steps:**
+1. Generate baseline statistics from training data
+2. Simulate feature drift (shift distributions)
+3. Implement PSI-based feature drift detection
+4. Implement score distribution monitoring
+5. Build latency degradation alerting
+6. Create dashboard metrics
+
+**Expected Results:**
+- PSI detects feature drift within 1000 samples
+- Score drift alert triggers within 5% shift
+- Latency alert triggers within 2× SLA breach
+
+---
+
 ## Interview Question Bank
 
 ### **Fundamentals:**
@@ -1905,6 +3305,21 @@ output = flash_attn_qkvpacked_func(
 23. Compare INT8 vs. FP16 quantization. Trade-offs?
 24. How do you reduce token usage for large context workflows?
 
+### **Traditional ML Inference:**
+
+25. How do you achieve sub-millisecond inference for tree models in production?
+26. Describe the cascade scoring pattern. What percentage of requests should the fast path handle?
+27. How does a feature store architecture differ for online vs. offline serving?
+28. What is PSI (Population Stability Index)? How do you detect model drift in production?
+29. Explain the circuit breaker pattern for model inference. When does it trigger?
+30. How would you design a fraud scoring system handling 100K+ TPS with < 10ms latency?
+31. Compare ONNX Runtime vs. Treelite for tree model inference. When would you use each?
+32. How do you handle model fallback and graceful degradation under load?
+33. What CPU optimization techniques improve ML inference throughput? (NUMA, SIMD, cache alignment)
+34. Describe blue-green deployment for ML models. How do you ensure zero-downtime rollout?
+35. How does shadow scoring work? Why is it safer than A/B testing for model validation?
+36. What are the key differences between real-time scoring and batch scoring architectures?
+
 ---
 
 ## Resource Library
@@ -1915,6 +3330,8 @@ output = flash_attn_qkvpacked_func(
 2. **FlashAttention:** "FlashAttention: Fast and Memory-Efficient Exact Attention" (2022)
 3. **Speculative Decoding:** "Speculative Decoding" (Chen et al., 2023)
 4. **TensorRT-LLM:** NVIDIA Technical Blog (2023)
+5. **Treelite:** "Treelite: Toolbox for Decision Tree Deployment" (2018)
+6. **SHAP:** "A Unified Approach to Interpreting Model Predictions" (Lundberg & Lee, 2017)
 
 ### **Documentation:**
 
@@ -1922,6 +3339,10 @@ output = flash_attn_qkvpacked_func(
 2. **TensorRT-LLM:** https://nvidia.github.io/TensorRT-LLM
 3. **Triton:** https://triton-inference-server.readthedocs.io
 4. **ONNX Runtime:** https://onnxruntime.ai
+5. **Feast (Feature Store):** https://feast.dev
+6. **FAISS:** https://faiss.ai
+7. **Treelite:** https://treelite.readthedocs.io
+8. **BentoML:** https://docs.bentoml.com
 
 ### **Videos:**
 
@@ -1929,6 +3350,8 @@ output = flash_attn_qkvpacked_func(
 2. **LLM Serving Systems:** Stanford CS329S
 3. **CUDA Optimization:** NVIDIA GTC talks
 4. **FlashAttention:** Author talk (Tri Dao)
+5. **ML Systems at Scale:** Stanford CS329S (Full Course)
+6. **Feature Stores in Production:** Tecton/Feast talks
 
 ### **Blogs:**
 
@@ -1936,6 +3359,10 @@ output = flash_attn_qkvpacked_func(
 2. **Hugging Face:** "LLM Inference Optimization"
 3. **Fireworks AI:** "LLM Inference Optimization Techniques"
 4. **Modal:** "LLM Performance Guide"
+5. **Uber Engineering:** "Michelangelo ML Platform"
+6. **Netflix Tech Blog:** "ML Infrastructure at Scale"
+7. **Stripe Engineering:** "Fraud Detection ML Systems"
+8. **DoorDash Engineering:** "Real-Time ML Prediction Service"
 
 ---
 
@@ -1950,7 +3377,9 @@ output = flash_attn_qkvpacked_func(
 | 3 | Module 3: Batching | 8 | ☐ | |
 | 4 | Module 4: Orchestration | 8 | ☐ | |
 | 5 | Module 5: KV-Cache | 8 | ☐ | |
-| 6 | Module 6-7: Advanced | 8 | ☐ | |
+| 6 | Module 6-7: Advanced LLM | 8 | ☐ | |
+| 7 | Module 8: Traditional ML Inference | 10 | ☐ | |
+| 8 | Module 9: Traditional ML Production | 10 | ☐ | |
 
 ### **Hands-On Labs:**
 
@@ -1959,6 +3388,9 @@ output = flash_attn_qkvpacked_func(
 | Lab 1: vLLM Deployment | ☐ | | |
 | Lab 2: Dynamic Batcher | ☐ | | |
 | Lab 3: KV-Cache | ☐ | | |
+| Lab 4: Fraud Scoring Pipeline | ☐ | | |
+| Lab 5: Feature Store + Scoring | ☐ | | |
+| Lab 6: Drift Detection | ☐ | | |
 
 ### **Confidence Self-Assessment:**
 
@@ -1970,7 +3402,9 @@ output = flash_attn_qkvpacked_func(
 | Multi-Model Orchestration | | | |
 | KV-Cache Management | | | |
 | Prompt Optimization | | | |
-| Advanced Techniques | | | |
+| Advanced LLM Techniques | | | |
+| Traditional ML Inference | | | |
+| ML Production Patterns | | | |
 
 ---
 
