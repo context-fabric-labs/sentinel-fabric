@@ -1,0 +1,3359 @@
+Below are 8 practical tasks a system engineer would actually perform involving CUDA profiling and fixing in your payment processing + LLM pipeline. Each one is a real scenario with symptoms, profiling steps, root cause, and fix — not theory.
+
+Task 1: "P99 TTFT spiked after we increased prompt length for fraud context"
+Context
+Your fraud detection prompt grew from 512 → 2048 tokens because product added more transaction history in the prompt for better fraud reasoning.
+Symptom
+	• P99 TTFT (time to first token) jumped from 45 ms → 190 ms
+	• P50 barely changed
+	• GPU utilization looks fine in nvidia-smi
+	What you do
+	Step 1: Profile prefill with nsys
+	
+	
+	
+	Shell
+	nsys profile -o prefill_long \
+	 --trace-fork-before-exec=true \
+	 --cuda-graph-trace=node \
+	 -t cuda,nvtx,cublas \
+	 python benchmarks/benchmark_latency.py \
+	 --model meta-llama/Llama-3.1-8B-Instruct \
+	 --input-len 2048 \
+	 --output-len 1 \
+	 --batch-size 1 \
+	 --num-iters 5
+	Show more lines
+	Step 2: What you see in the timeline
+	Prefill phase:
+  |--cublas_gemm (0.8ms)--|--flash_attn (1.2ms)--|--cublas_gemm--|--flash_attn--|...
+                                    ↑
+                            This grew 4× because attention is O(T²)
+	The attention kernels dominate prefill, and at 2048 tokens the QKᵀ matrix is 4× larger than at 512 tokens.
+	Step 3: Confirm with ncu on attention kernel
+	
+	
+	
+	Shell
+	VLLM_ENFORCE_EAGER=1 ncu -o attn_long \
+	 -k regex:"flash_attn" -c 3 \
+	 --section SpeedOfLight \
+	 --section MemoryWorkloadAnalysis \
+	 python benchmarks/benchmark_latency.py \
+	 --input-len 2048 --output-len 1 --batch-size 1
+	Show more lines
+	What ncu shows:
+	SM Throughput:     62%      ← compute-heavy (prefill is compute-bound)
+DRAM Throughput:   41%
+Kernel duration:   1.2 ms   ← this is the bottleneck
+	Root cause
+	Prefill attention is O(T²) in sequence length. Going 512 → 2048 = 16× more attention compute (partially offset by FlashAttention's tiling, but still ~4× slower in practice).
+	Fix (system engineer level)
+	Fix	How	Impact
+	Truncate prompt	Limit transaction history to most recent N	Directly reduces T
+	Chunked prefill	Enable --enable-chunked-prefill in vLLM	Spreads prefill across steps, reduces TTFT spike
+	Prefix caching	Enable --enable-prefix-caching in vLLM	If many prompts share system prompt prefix, cache its KV
+	Move to FP8	--quantization fp8	Faster GEMMs in prefill
+	What you learned (CUDA knowledge applied)
+		○ Attention kernel is O(T²) — you recognized this from the profile
+		○ Prefill is compute-bound — SOL confirmed it
+		○ The fix is system-level (prompt design, chunked prefill, caching), not kernel rewriting
+		
+Task 2: "Decode throughput dropped 40% after enabling CUDA Graphs"
+Context
+You enabled CUDA Graphs in vLLM for decode acceleration (--enforce-eager=false, which is default). But throughput actually dropped.
+Symptom
+	• Decode TPS dropped from 850 → 510 tokens/sec
+	• GPU memory usage jumped
+	• OOM errors on long sequences
+	What you do
+	Step 1: Profile with nsys (CUDA Graph node visibility)
+	
+	
+	
+	Shell
+	nsys profile -o graph_debug \
+	 --trace-fork-before-exec=true \
+	 --cuda-graph-trace=node \
+	 vllm serve meta-llama/Llama-3.1-8B-Instruct \
+	 --max-num-seqs 64 \
+	 --max-model-len 4096
+	Show more lines
+	Step 2: What you see
+	CUDA Graph capture: 847 MB allocated for graph workspace
+KV cache available: reduced from 32 GB → 24 GB
+Max concurrent sequences: effectively dropped from 64 → 38
+	The CUDA Graph pre-allocates static memory for the worst-case decode shape, which steals memory from KV cache.
+	Step 3: Confirm with vLLM metrics
+	
+	
+	
+	Shell
+	curl http://localhost:8000/metrics | grep cache
+	Show more lines
+	vllm:gpu_cache_usage_perc  0.94    ← cache almost full
+vllm:num_requests_waiting  12      ← requests queuing
+vllm:num_preemptions_total 847     ← requests being evicted!
+	Root cause
+	CUDA Graphs require static memory allocation for all possible decode shapes. With many shape buckets × large max sequence length, graph workspace eats too much GPU memory → less KV cache → fewer concurrent requests → lower throughput.
+	Fix
+	Fix	How	Impact
+	Reduce max-model-len	--max-model-len 2048 (if your prompts fit)	Fewer graph variants, less memory
+	Limit graph batch size buckets	vLLM config for graph capture budget	Fewer static allocations
+	Use eager mode for long sequences	Hybrid: graphs for short, eager for long	Best of both worlds
+	Upgrade to H200	141 GB HBM3e → more room for both	Hardware solution
+	What you learned (CUDA knowledge applied)
+		○ CUDA Graphs require static memory — you understood this from CUDA runtime knowledge
+		○ Graph capture steals from KV cache pool — you diagnosed via metrics + nsys
+		○ The fix is memory budget tuning, not kernel optimization
+		
+Task 3: "Hundreds of tiny kernels between decode steps"
+Context
+You're running vLLM with a custom post-processing pipeline (token filtering, safety checks, logging) that runs after each decode step.
+Symptom
+	• Decode latency is 2× higher than expected
+	• GPU utilization oscillates between 80% and 20%
+	What you do
+	Step 1: nsys timeline
+	
+	
+	
+	Shell
+	nsys profile -o decode_gaps \
+	 --trace-fork-before-exec=true \
+	 --cuda-graph-trace=node \
+	 -t cuda,nvtx \
+	 vllm serve meta-llama/Llama-3.1-8B-Instruct
+	Show more lines
+	Step 2: What you see
+	Timeline per decode step:
+	|--attention--|--mlp--|  GAP  |--safety_check_kernel1--|--kernel2--|--kernel3--|  GAP  |--next_step--|
+     0.4ms     0.3ms   12µs          2µs                  1µs         3µs       15µs
+                         ↑                                                        ↑
+                    CPU overhead                                            CPU overhead
+	Between the main model kernels and your post-processing, there are CPU gaps (Python overhead) and many tiny kernels (safety/filtering ops running as separate CUDA kernels).
+	Step 3: Quantify with nsys stats
+	
+	
+	
+	Shell
+	nsys stats decode_gaps.nsys-rep --report cuda_gpu_kern_sum
+	Show more lines
+	Kernel Name                  Count    Avg(µs)   Total(ms)
+flash_attn_fwd               500      420       210
+cublas_gemm                  1500     310       465
+elementwise_mul              2000     1.8       3.6      ← tiny
+cast_fp16_to_fp32            2000     1.2       2.4      ← tiny
+token_filter_mask            500      2.1       1.05     ← tiny
+                                                          
+CPU gaps between kernels:                       ~150 ms   ← THIS IS THE PROBLEM
+	The tiny kernels themselves are cheap, but the CPU overhead launching them dominates.
+	Root cause
+	Your custom post-processing code runs in Python eager mode, launching many small CUDA ops per decode step. Each launch has ~5–15 µs CPU overhead, and you have ~6 launches per step × 500 steps = ~45 ms of pure launch overhead.
+	Fix
+	Fix	How	Impact
+	Move post-processing to CPU	Safety checks on CPU while GPU runs next step	Overlap CPU + GPU work
+	Fuse post-processing ops	torch.compile the post-processing function	Reduce kernel count 5–10×
+	Include in CUDA Graph	If post-processing is static, capture it in the decode graph	Eliminate launch overhead
+	Batch post-processing	Accumulate N tokens, process in one batch	Amortize overhead
+	What you learned (CUDA knowledge applied)
+		○ Kernel launch overhead matters for tiny kernels — CUDA runtime knowledge
+		○ nsys timeline reveals CPU gaps — profiling skill
+		○ Fix is fusion / graph capture / CPU offload — system engineering
+		
+Task 4: "Tensor-parallel Llama 70B is slower than expected on 4× H100"
+Context
+You deployed Llama-3.1-70B with tensor parallelism (TP=4) across 4 H100 GPUs. Expected ~4× speedup over single GPU, but getting only ~2.1×.
+Symptom
+	• Single H100: 12 tokens/sec (70B, batch=1)
+	• 4× H100 TP=4: 25 tokens/sec (expected ~45)
+	What you do
+	Step 1: nsys with multi-process tracing
+	
+	
+	
+	Shell
+	nsys profile -o tp4_debug \
+	 --trace-fork-before-exec=true \
+	 --cuda-graph-trace=node \
+	 -t cuda,nvtx,nccl \
+	 vllm serve meta-llama/Llama-3.1-70B-Instruct \
+	 --tensor-parallel-size 4
+	Show more lines
+	Step 2: What you see in the multi-GPU timeline
+	GPU 0: |--gemm--|--attn--|  WAIT  |--allreduce--|--gemm--|
+GPU 1: |--gemm--|--attn--|  WAIT  |--allreduce--|--gemm--|
+GPU 2: |--gemm--|--attn--|--WAIT--|--allreduce--|--gemm--|
+GPU 3: |--gemm--|--attn--|--WAIT--|--allreduce--|--gemm--|
+                            ↑           ↑
+                      Sync barrier  AllReduce = 0.8ms per layer!
+	AllReduce after every attention + MLP layer is 0.8 ms each. With 80 layers × 2 AllReduces per layer = 128 ms of pure communication per decode step.
+	Step 3: Check NVLink vs PCIe
+	
+	
+	
+	Shell
+	nvidia-smi topo -m
+	Show more lines
+	GPU0  GPU1  GPU2  GPU3
+GPU0   X    NV12  SYS   SYS
+GPU1  NV12   X    SYS   SYS
+GPU2  SYS   SYS    X    NV12
+GPU3  SYS   SYS   NV12   X
+	Problem found: GPU 0↔2 and GPU 0↔3 communicate via PCIe (SYS), not NVLink. Only GPU 0↔1 and GPU 2↔3 have NVLink.
+	Root cause
+	The server has 2 NVLink pairs, not a full NVLink mesh. Cross-pair AllReduce goes through PCIe, which is ~10× slower than NVLink.
+	Fix
+	Fix	How	Impact
+	Use TP=2 instead of TP=4	--tensor-parallel-size 2	AllReduce stays on NVLink pair
+	Request NVLink-mesh node	HGX H100 / DGX H100 (full NVLink)	All pairs have NVLink
+	Use pipeline parallelism	TP=2 × PP=2	Less AllReduce, more pipeline overlap
+	Overlap AllReduce with compute	TensorRT-LLM supports this	Hide communication latency
+	What you learned (CUDA knowledge applied)
+		○ AllReduce is a distributed GPU reduction — you understood the cost
+		○ NVLink topology determines AllReduce speed — system engineering knowledge
+		○ nsys with NCCL tracing reveals communication bottlenecks
+		○ Fix is topology-aware deployment, not kernel optimization
+		
+Task 5: "FP8 quantized model produces garbage output on some prompts"
+Context
+You switched from BF16 to FP8 quantization for 2× throughput. Most prompts work fine, but some long fraud analysis prompts return nonsense.
+Symptom
+	• Short prompts (< 512 tokens): correct output
+	• Long prompts (> 2048 tokens): garbled / repetitive output
+	• No CUDA errors, no OOM
+	What you do
+	Step 1: Check for numerical overflow in attention
+	
+	
+	
+	Shell
+	# Compare BF16 vs FP8 output for the failing prompt
+	python -c "
+	from vllm import LLM
+	
+	# BF16 baseline
+	llm_bf16 = LLM('meta-llama/Llama-3.1-8B-Instruct', dtype='bfloat16')
+	out_bf16 = llm_bf16.generate(['<your_long_fraud_prompt>'])
+	
+	# FP8
+	llm_fp8 = LLM('meta-llama/Llama-3.1-8B-Instruct', quantization='fp8')
+	out_fp8 = llm_fp8.generate(['<your_long_fraud_prompt>'])
+	
+	print('BF16:', out_bf16[0].outputs[0].text[:200])
+	print('FP8:', out_fp8[0].outputs[0].text[:200])
+	"
+	Show more lines
+	Output diverges after ~1500 tokens.
+	Step 2: Profile attention kernel numerics
+	
+	
+	
+	Shell
+	VLLM_ENFORCE_EAGER=1 ncu -o fp8_attn \
+	 -k regex:"flash_attn|softmax" -c 3 \
+	 --section SpeedOfLight \
+	 --section ComputeWorkloadAnalysis \
+	 python benchmarks/benchmark_latency.py \
+	 --model meta-llama/Llama-3.1-8B-Instruct \
+	 --quantization fp8 \
+	 --input-len 2048 --output-len 16 --batch-size 1
+	Show more lines
+	Root cause
+	FP8 attention with long sequences can have numerical precision issues in the softmax reduction. The sum of exponentials over 2048+ positions loses precision when accumulated in FP8/FP16 without proper scaling.
+	Specifically:
+		○ Softmax computes ∑130_(j=1)^T▒e^(x_j−x_max ) 
+		○ At T=2048, this sum involves many small values
+		○ FP8's 3-bit mantissa (E4M3) cannot represent the differences accurately
+		○ The resulting attention weights are wrong → wrong output
+		Fix
+		Fix	How	Impact
+		Keep attention in BF16	Mixed quantization: weights FP8, attention BF16	Fixes accuracy, keeps most of FP8 speedup
+		Use KV cache in FP16	--kv-cache-dtype fp16	Better precision for long-context attention
+		Limit context length for FP8	Route long prompts to BF16 endpoint	Selective precision
+		Use FP8 E5M2 for attention	More exponent range for softmax	Better dynamic range
+		What you learned (CUDA knowledge applied)
+			§ Reduction precision matters — softmax accumulation in FP8 loses accuracy at long sequences
+			§ This is Pattern 5 from the reduction optimization guide (mixed-precision accumulation)
+			§ Fix is precision configuration, not kernel rewriting
+			§ You used ncu to confirm which kernels are affected
+			
+Task 6: "Model serving latency is inconsistent — some requests take 3× longer"
+Context
+Same model, same prompt length, same batch size — but P99 is 3× P50.
+Symptom
+P50 TPOT: 18 ms
+P95 TPOT: 22 ms
+P99 TPOT: 58 ms    ← 3× P50!
+What you do
+Step 1: nsys with extended capture
+
+
+
+Shell
+nsys profile -o jitter_debug \
+ --trace-fork-before-exec=true \
+ --cuda-graph-trace=node \
+ --duration 120 \
+ vllm serve meta-llama/Llama-3.1-8B-Instruct
+Show more lines
+Step 2: What you find in timeline
+The slow decode steps coincide with:
+Normal step:  |--decode_kernels (15ms)--|
+Slow step:    |--decode_kernels (15ms)--|--PREFILL_INTERRUPT (40ms)--|--resume--|
+A new request's prefill is interrupting ongoing decode batches.
+Root cause
+vLLM's default scheduler interleaves prefill and decode. When a new request arrives, its prefill (compute-heavy) blocks decode (latency-sensitive) on the same GPU.
+Fix
+Fix	How	Impact
+Chunked prefill	--enable-chunked-prefill --max-num-batched-tokens 512	Prefill broken into small chunks, less decode disruption
+Prefill/decode disaggregation	Separate prefill and decode to different GPUs	Complete isolation
+Priority scheduling	Prioritize decode over prefill	Lower P99 for active generations
+Limit prefill concurrency	--max-num-seqs tuning	Fewer prefill interruptions
+What you learned (CUDA knowledge applied)
+	• GPU can only run one thing at a time on an SM — prefill monopolizes compute
+	• nsys timeline reveals the interleaving pattern
+	• Fix is scheduling policy, informed by GPU execution model understanding
+	
+Task 7: "KV cache OOM at 60% of expected concurrency"
+Context
+Your capacity plan says 64 concurrent requests on H100 80GB. But OOM hits at 38.
+What you do
+Step 1: Memory accounting
+
+
+
+Shell
+curl http://localhost:8000/metrics | grep -E "cache|memory"
+Show more lines
+vllm:gpu_cache_usage_perc         0.97
+vllm:num_requests_running         38
+vllm:num_requests_waiting         26
+Step 2: Calculate expected vs actual
+Model weights (Llama 8B, FP16):    ~16 GB
+CUDA Graph workspace:               ~4 GB
+CUDA context + activations:          ~3 GB
+KV cache available:                 ~57 GB
+Per-request KV cache (FP16, 4096 max_len):
+  = 2 × num_layers × num_kv_heads × head_dim × max_seq_len × sizeof(fp16)
+  = 2 × 32 × 8 × 128 × 4096 × 2 bytes
+  = ~512 MB per request
+Expected: 57 GB / 0.512 GB ≈ 111 requests
+Actual:   38 requests ← WAY less
+Step 3: Profile memory allocation
+
+
+
+Shell
+nsys profile -o mem_debug \
+ --trace-fork-before-exec=true \
+ --gpu-metrics-device=all \
+ vllm serve meta-llama/Llama-3.1-8B-Instruct \
+ --max-model-len 4096
+Show more lines
+Root cause
+KV cache is allocated for max_model_len (4096) per request, even though average actual sequence length is only ~800 tokens. 75% of allocated KV cache is wasted.
+Fix
+Fix	How	Impact
+Reduce max-model-len	--max-model-len 2048 (if prompts fit)	2× more concurrent requests
+Enable prefix caching	--enable-prefix-caching	Shared KV blocks across similar prompts
+Use FP8 KV cache	--kv-cache-dtype fp8	2× more KV cache capacity
+Use PagedAttention block size tuning	Adjust block size for your workload	Less internal fragmentation
+What you learned (CUDA knowledge applied)
+	• KV cache is GPU memory — understanding GPU memory hierarchy matters
+	• PagedAttention uses block-level GPU memory management — like virtual memory
+	• Fix is runtime configuration, informed by understanding of GPU memory layout
+	
+Task 8: "TensorRT-LLM is slower than vLLM for our workload"
+Context
+You tested both runtimes. TensorRT-LLM should be faster (compiled execution), but your specific fraud detection workload is slower.
+What you do
+Step 1: Profile both
+
+
+
+Shell
+# vLLM
+nsys profile -o vllm_run ... vllm serve ...
+
+# TensorRT-LLM
+nsys profile -o trtllm_run ... trtllm-serve ...
+Show more lines
+Step 2: Compare timelines
+vLLM:
+Decode step: 14 ms
+  - attention: 5 ms (Triton paged attention)
+  - GEMM: 7 ms (cuBLAS)
+  - other: 2 ms
+TensorRT-LLM:
+Decode step: 19 ms
+  - attention: 4 ms (TRT fused attention) ← faster
+  - GEMM: 6 ms (cuBLAS) ← faster
+  - graph overhead: 9 ms ← SLOWER (graph rebuild!)
+Root cause
+Your fraud detection workload has highly variable sequence lengths (100–4000 tokens). TensorRT-LLM rebuilds execution graphs when shapes change too much, and the graph compilation overhead exceeds the kernel speedup.
+Fix
+Fix	How	Impact
+Bucket sequence lengths	Pad to fixed buckets (512, 1024, 2048, 4096)	Fewer graph rebuilds
+Stay with vLLM	For variable-length workloads, eager mode is simpler	Avoid graph overhead
+Use TRT-LLM for fixed-shape traffic	Route predictable traffic to TRT-LLM, variable to vLLM	Best of both
+What you learned (CUDA knowledge applied)
+	• CUDA Graph / TensorRT compilation assumes static shapes
+	• Variable shapes cause recompilation — understanding CUDA Graphs explains this
+	• Fix is routing + bucketing, informed by GPU execution model
+	
+	Summary: the 8 practical tasks
+	#	Task	CUDA knowledge used	Fix layer
+	1	TTFT spike after longer prompts	Attention is O(T²), compute-bound prefill	Prompt design, chunked prefill
+	2	CUDA Graphs hurt throughput	Graphs need static memory allocation	Memory budget tuning
+	3	Tiny kernel storms in decode	Kernel launch overhead	Fusion, graph capture, CPU offload
+	4	TP=4 slower than expected	AllReduce cost, NVLink topology	Topology-aware deployment
+	5	FP8 garbage on long prompts	Reduction precision (softmax accumulation)	Mixed precision config
+	6	Latency jitter (P99 >> P50)	GPU can't run prefill + decode simultaneously	Scheduling policy
+	7	KV cache OOM earlier than expected	GPU memory layout, paged attention	Runtime config, FP8 KV cache
+	8	TensorRT-LLM slower than vLLM	CUDA Graph recompilation cost	Shape bucketing, routing
+	
+	One‑sentence takeaway
+		A system engineer's practical CUDA work in LLM serving is NOT writing kernels — it's using Nsight to diagnose latency/throughput/memory issues, understanding GPU execution constraints (memory hierarchy, launch overhead, graph capture, AllReduce, precision), and applying fixes at the configuration/scheduling/topology level.
+
+Optimize LLM integration with GuardRail
+
+The problem you're describing (precisely)
+Today's typical guardrail + LLM pipeline looks like this:
+Request (JSON)
+    ↓ deserialize
+Python: Input Guardrail (NeMo / Guardrails-AI / custom)
+    ↓ serialize → deserialize
+Python: Tokenizer
+    ↓ serialize → copy to GPU
+GPU: LLM Inference (vLLM / TensorRT-LLM)
+    ↓ copy from GPU → deserialize
+Python: Detokenizer
+    ↓ serialize → deserialize
+Python: Output Guardrail
+    ↓ serialize
+Response (JSON)
+Where the "tax" is paid
+Hop	What happens	Cost
+Request → Input Guardrail	JSON parse, Python object creation	~0.5–2 ms
+Input Guardrail → Tokenizer	Python dict → tensor conversion	~0.2–1 ms
+Tokenizer → GPU	CPU→GPU copy, CUDA launch	~0.05–0.5 ms
+GPU → Detokenizer	GPU→CPU copy, Python object creation	~0.1–0.5 ms
+Detokenizer → Output Guardrail	String manipulation, Python overhead	~0.5–2 ms
+Output Guardrail → Response	JSON serialization	~0.2–1 ms
+GIL contention across all of this	Single-threaded ceiling	Dominant at scale
+At small scale: these costs are invisible. At high QPS (thousands of requests/sec on expensive GPUs): the Python overhead becomes the bottleneck, and GPUs sit idle waiting for CPU work. A recent PyTorch blog post from the LightSeek team explicitly confirms this: "In both SGLang and vLLM, tokenization and detokenization had become bottlenecks... the GIL means a single-threaded ceiling on CPU-bound work that sits directly in the serving path. Every microsecond of GIL-bound tokenization is a microsecond where GPUs worth hundreds of thousands of dollars sit idle." citeturn40search7
+
+Approach 1: NVIDIA Triton Inference Server — GPU-resident ensemble pipeline
+This is the most mature, production-proven approach today.
+How it works
+Triton lets you define an ensemble model — a DAG of models/stages that execute as a single pipeline. NVIDIA's technical blog explicitly states the two key efficiency gains:
+	"Data does not need to be copied back and forth between CPU and GPU in between pipeline steps. Strong computational power of the GPU is utilized for the entire inference pipeline." citeturn40search1
+	Your pipeline in Triton
+	Triton Ensemble Pipeline (single deployment)
+├── Stage 1: Input Guardrail Model (GPU)
+│   - Small classifier (e.g., NemoGuard Content Safety NIM)
+│   - Runs on GPU as a TensorRT/ONNX model
+│   - Input: tokenized text
+│   - Output: safe/unsafe flag + pass-through tokens
+│
+├── Stage 2: LLM Inference (GPU)
+│   - TensorRT-LLM or vLLM backend
+│   - Input: tokens (already on GPU from Stage 1)
+│   - Output: generated tokens (stay on GPU)
+│
+└── Stage 3: Output Guardrail Model (GPU)
+    - Another small classifier
+    - Input: generated tokens (already on GPU)
+    - Output: safe/unsafe flag + final text
+	What you eliminate
+	Before (Python hops)	After (Triton ensemble)
+	6 serialize/deserialize	0 (GPU-resident tensors)
+	4 CPU↔GPU copies	1 initial copy in, 1 final copy out
+	Python GIL on every hop	No Python in hot path
+	Multiple network calls	Single Triton request
+	NVIDIA NeMo Guardrails architecture supports this
+	NVIDIA's NeMo Guardrails architecture explicitly places NemoGuard NIMs (GPU-accelerated guardrail models) between the application and the LLM. The architecture docs describe NeMo Guardrails as a central hub routing requests to guardrail NIMs for input/output checks, with the LLM in between. citeturn40search13
+	So the pipeline becomes:
+	Request → Triton → [NemoGuard Input NIM → LLM NIM → NemoGuard Output NIM] → Response
+                    \_______________ all on GPU, zero Python _______________/
+	Practical Triton ensemble config (conceptual)
+	# ensemble_model/config.pbtxt
+name: "fraud_detection_pipeline"
+platform: "ensemble"
+ensemble_scheduling {
+  step {
+    model_name: "input_guardrail"      # TensorRT model
+    model_version: 1
+    input_map { key: "text_tokens"  value: "INPUT_TOKENS" }
+    output_map { key: "safe_flag"   value: "INPUT_SAFE" }
+    output_map { key: "pass_tokens" value: "CHECKED_TOKENS" }
+  }
+  step {
+    model_name: "llama_8b_trtllm"      # TensorRT-LLM engine
+    model_version: 1
+    input_map { key: "input_ids"   value: "CHECKED_TOKENS" }
+    output_map { key: "output_ids" value: "GENERATED_TOKENS" }
+  }
+  step {
+    model_name: "output_guardrail"     # TensorRT model
+    model_version: 1
+    input_map { key: "text_tokens" value: "GENERATED_TOKENS" }
+    output_map { key: "safe_flag"  value: "OUTPUT_SAFE" }
+    output_map { key: "final_text" value: "RESPONSE" }
+  }
+}
+	Triton's ensemble documentation and tutorials provide the DAG-based pipeline configuration pattern. citeturn40search1turn40search3
+	
+Approach 2: Disaggregate CPU from GPU entirely (Rust/C++ gateway)
+This is the approach the LightSeek / Shepherd Model Gateway (SMG) team took, and it's now published on the official PyTorch blog. citeturn40search7
+The idea
+	Move ALL CPU work out of the Python process entirely. GPU processes do ONLY tensor math. A Rust gateway handles everything else.
+	What moves to Rust (zero Python)
+	The SMG team explicitly lists what they moved:
+		○ Tokenization
+		○ Detokenization
+		○ Reasoning output parsing
+		○ Function call extraction
+		○ Tool orchestration
+		○ Multimodal preprocessing
+		○ Chat history management
+		○ Structured output validation
+		○ Stop sequence detection
+		○ Guardrail checks (rule-based)
+		citeturn40search7
+		Architecture
+		Client
+  ↓ (gRPC / HTTP)
+Rust Gateway (SMG)
+  ├── Tokenization (Rust, no GIL)
+  ├── Input Guardrail (rule-based, Rust)
+  ├── Prompt construction (Rust)
+  ↓ (gRPC, preprocessed token IDs)
+GPU Worker (vLLM/SGLang/TensorRT-LLM)
+  ├── LLM inference ONLY
+  ↓ (gRPC, generated token IDs)
+Rust Gateway
+  ├── Detokenization (Rust)
+  ├── Output Guardrail (rule-based, Rust)
+  ├── Response formatting (Rust)
+  ↓
+Client
+		What you eliminate
+			§ 100% of Python GIL contention on the serving path
+			§ All serialization between tokenizer/guardrail/LLM
+			§ All CPU↔GPU copies for non-tensor work
+			§ GPU process is pure tensor math
+			When this works best
+			✅ Rule-based guardrails (regex, blocklist, PII detection, format validation) ✅ High QPS where GIL is the bottleneck ✅ You control the full serving stack
+			When this does NOT work
+			❌ If your guardrails are ML models (classifiers, toxicity detectors) — those still need GPU ❌ Requires significant engineering investment (Rust expertise)
+			
+	Approach 3: Zero-copy data plane with Apache Arrow
+	A recent research paper (AAFLOW) explicitly addresses the serialization overhead problem in agentic/guardrail pipelines. citeturn40search12
+	The idea
+		Use Apache Arrow's columnar format as the shared memory representation across ALL pipeline stages — zero serialization, zero copy.
+		How it works
+		Stage 1 (Input Guardrail):
+  - Reads Arrow buffer (zero copy)
+  - Writes result to Arrow buffer (zero copy)
+		Stage 2 (LLM Inference):
+  - Reads tokens from Arrow buffer
+  - DLPack or CUDA IPC to GPU (minimal copy)
+  - Writes output to Arrow buffer
+		Stage 3 (Output Guardrail):
+  - Reads Arrow buffer (zero copy)
+  - Writes final result
+		The paper reports: "up to 4.64× pipeline speedup and 2.8× gains in embedding and upsert phases" — not from faster models, but from eliminating serialization and communication overhead. citeturn40search12
+		Practical implementation
+		
+		
+		
+		Python
+		import pyarrow as pa
+		
+		# Shared Arrow buffer — no serialization between stages
+		batch = pa.record_batch({
+		 "request_id": [1, 2, 3],
+		 "tokens": [[101, 2003, ...], [101, 4532, ...], [101, 8834, ...]],
+		 "guardrail_passed": [None, None, None],
+		})
+		
+		# Stage 1: Input guardrail (reads Arrow, writes Arrow)
+		# Stage 2: LLM (reads tokens from Arrow, DLPack to GPU)
+		# Stage 3: Output guardrail (reads Arrow, writes Arrow)
+		# NO JSON, NO pickle, NO protobuf between stages
+		Show more lines
+		When this works best
+		✅ Multi-stage pipelines with shared data ✅ When combined with RAPIDS / cuDF for GPU-side Arrow processing ✅ Heterogeneous pipeline (mix of Python, Rust, C++ stages)
+		
+Approach 4: Co-locate guardrail models on the same GPU (single-process)
+The idea
+Instead of separate services, run guardrail models inside the same GPU process as the LLM.
+How it works
+
+
+
+Python
+# Single vLLM/SGLang process manages multiple models
+# on the same GPU, sharing memory
+
+# Input guardrail: small classifier (e.g., 300M params)
+# LLM: Llama 8B
+# Output guardrail: small classifier (e.g., 300M params)
+
+# All three share GPU memory
+# Token tensors stay on GPU between stages
+# No network hop, no serialization
+Show more lines
+Practical options
+Option A: Triton with multiple model instances
+Already covered in Approach 1. citeturn40search1turn40search5
+Option B: Custom co-located serving
+
+
+
+Python
+import torch
+from vllm import LLM
+
+# Load all models on same GPU
+input_guard = torch.jit.load("input_guardrail.pt").cuda()
+llm = LLM("meta-llama/Llama-3.1-8B-Instruct")
+output_guard = torch.jit.load("output_guardrail.pt").cuda()
+
+# Hot path: tensors never leave GPU
+def serve(prompt: str):
+ tokens = tokenize(prompt) # CPU
+ token_tensor = torch.tensor(tokens).cuda() # one CPU→GPU copy
+
+ # Input guardrail (GPU, no copy)
+ safe = input_guard(token_tensor)
+ if not safe:
+ return "blocked"
+
+ # LLM inference (GPU, no copy)
+ output = llm.generate(...)
+
+ # Output guardrail (GPU, no copy)
+ output_safe = output_guard(output.token_ids)
+ if not output_safe:
+ return "blocked"
+
+ return detokenize(output) # one GPU→CPU copy
+Show more lines
+Trade-off
+	• ✅ Zero inter-process overhead
+	• ✅ GPU memory shared efficiently
+	• ❌ Guardrail model competes for GPU compute/memory with LLM
+	• ❌ Guardrail failure can crash LLM process
+	
+Approach 5: Compile the full pipeline into a single execution graph
+The idea
+Use torch.compile or TensorRT to compile the entire pipeline (guardrail + LLM + guardrail) into a single optimized execution graph, then capture it as a CUDA Graph.
+Challenges
+This is the most ambitious approach and has real limitations:
+	• LLM inference has dynamic shapes (variable sequence length)
+	• Guardrail decisions create control flow (if unsafe → block)
+	• CUDA Graphs require static execution paths
+	What IS possible today
+	Compile static portions:
+├── Input guardrail classifier → TensorRT engine
+├── LLM prefill (bucketed shapes) → TensorRT-LLM engine
+├── LLM decode (CUDA Graphed) → captured graph
+└── Output guardrail classifier → TensorRT engine
+	Connect via Triton ensemble (Approach 1)
+	TensorRT-LLM's kernel fusion already combines LayerNorm, matmuls, bias additions, and activations into single CUDA kernels, eliminating intermediate tensor materialization. citeturn40search24
+	
+Recommended architecture for your payment processing service
+Given your constraints (payment processing, low latency, high throughput, vLLM/TensorRT-LLM, geographically distributed):
+                         ┌─────────────────────────────────┐
+  Client ──── gRPC ────→ │   Rust/C++ Gateway (per-region) │
+                         │                                 │
+                         │  • Tokenization (Rust)          │
+                         │  • Rule-based input guardrail   │
+                         │  • Prompt construction          │
+                         │  • Rate limiting                │
+                         └───────────┬─────────────────────┘
+                                     │ preprocessed token IDs (gRPC)
+                                     ↓
+                         ┌─────────────────────────────────┐
+                         │   Triton Inference Server       │
+                         │                                 │
+                         │  ┌──────────────────────────┐   │
+                         │  │ ML Input Guardrail (GPU)  │   │  ← TensorRT model
+                         │  │ (toxicity/jailbreak)      │   │
+                         │  └──────────┬───────────────┘   │
+                         │             │ tensors on GPU     │
+                         │  ┌──────────▼───────────────┐   │
+                         │  │ LLM (TensorRT-LLM)       │   │  ← Llama 8B/70B
+                         │  │ (fraud analysis)          │   │
+                         │  └──────────┬───────────────┘   │
+                         │             │ tensors on GPU     │
+                         │  ┌──────────▼───────────────┐   │
+                         │  │ ML Output Guardrail (GPU) │   │  ← TensorRT model
+                         │  │ (safety/compliance)       │   │
+                         │  └──────────┬───────────────┘   │
+                         └─────────────┼───────────────────┘
+                                       │ generated token IDs (gRPC)
+                                       ↓
+                         ┌─────────────────────────────────┐
+                         │   Rust/C++ Gateway              │
+                         │                                 │
+                         │  • Detokenization (Rust)        │
+                         │  • Rule-based output guardrail  │
+                         │  • Response formatting          │
+                         │  • Audit logging                │
+                         └───────────┬─────────────────────┘
+                                     │
+                                     ↓
+                                  Client
+What this eliminates
+Tax	How it's eliminated
+Python GIL	Rust gateway handles all CPU work
+Serialization between guardrail ↔ LLM	Triton ensemble keeps tensors on GPU
+CPU↔GPU copies between stages	GPU-resident pipeline inside Triton
+Multiple network hops	2 hops total (gateway ↔ Triton)
+Tokenizer/detokenizer Python overhead	Rust tokenizer (HuggingFace tokenizers crate)
+What stays
+	• One CPU→GPU copy (token IDs into Triton)
+	• One GPU→CPU copy (generated token IDs out of Triton)
+	• gRPC between gateway and Triton (unavoidable, but fast)
+	
+	Latency comparison (realistic estimates)
+	Architecture	End-to-end overhead (excluding LLM compute)
+	Python microservices (current)	15–40 ms
+	Python monolith (co-located)	8–15 ms
+	Triton ensemble (GPU-resident)	2–5 ms
+	Rust gateway + Triton ensemble	< 2 ms
+	For a payment processing service with a 50 ms total budget, saving 15–35 ms of overhead is massive.
+	
+	One-sentence summary
+		To eliminate the Python tax in a guardrail + LLM pipeline, use a Rust/C++ gateway for all CPU work (tokenization, rule-based guardrails, formatting) and NVIDIA Triton ensemble models for GPU-resident ML guardrail + LLM execution — keeping tensors on GPU between stages and removing all serialization from the hot path. citeturn40search1turn40search7turn40search13
+
+
+The situation
+I was brought in as a System Engineer to design and build the real-time fraud scoring infrastructure for a large payment processor handling ~12,000 transactions per second across 3 geographic regions. The existing system was a legacy Java microservices stack running on generic Kubernetes with ~35 ms P99 latency for fraud scoring. Business required sub-10 ms P99 end-to-end for the hot-path fraud decision (feature extraction → XGBoost prediction → rule engine → decision) to meet card-network SLA requirements and reduce false declines.
+The scoring pipeline was:
+	• Feature extraction: aggregate 15 features from transaction history (velocity, spend patterns, merchant risk)
+	• Model inference: XGBoost ensemble (CPU) + a small transformer classifier (GPU)
+	• Rule engine: 200+ business rules post-model
+	• Decision: approve / decline / step-up authentication
+	My job was to redesign the infrastructure from host level through Kubernetes through networking through GPU to hit the latency target without sacrificing throughput.
+	
+	Phase 1: Host-level foundation (bare-metal nodes)
+	CPU isolation and NUMA pinning
+	The first thing I did was eliminate noisy-neighbor interference at the kernel level. Our bare-metal nodes were dual-socket systems (2× Intel Xeon 8380, 40 cores each, 2 NUMA nodes).
+	I configured CPU isolation to reserve cores exclusively for the fraud scoring workload:
+	
+	
+	
+	Shell
+	# /etc/default/grub — kernel boot parameters
+	GRUB_CMDLINE_LINUX="isolcpus=4-19,24-39 nohz_full=4-19,24-39 rcu_nocbs=4-19,24-39"
+	Show more lines
+	This did three things:
+		○ isolcpus removed cores 4–19 and 24–39 from the general scheduler, so no OS processes or other containers could land on them
+		○ nohz_full disabled timer interrupts on those cores (adaptive-ticks), eliminating periodic jitter
+		○ rcu_nocbs offloaded RCU callbacks from isolated cores, removing another source of unpredictable latency spikes
+		I verified isolation with:
+		
+		
+		
+	Shell
+	cat /sys/devices/system/cpu/isolated
+	# 4-19,24-39
+	Show more lines
+	For the fraud scoring service, I pinned:
+		○ Feature extraction threads → cores 4–11 (NUMA node 0, close to NIC)
+		○ Model inference threads → cores 12–19 (NUMA node 0, close to GPU)
+		○ Rule engine threads → cores 24–31 (NUMA node 1)
+		The NUMA pinning was critical because our NIC was on PCIe bus attached to NUMA node 0, and the GPU (NVIDIA L4) was also on NUMA node 0. Crossing NUMA boundaries for hot-path memory access would add ~100 ns per access, which at thousands of accesses per request compounds to microseconds of waste.
+		I validated NUMA topology with:
+		
+		
+		
+	Shell
+	numactl --hardware
+	lstopo-no-graphics
+	Show more lines
+	HugePage configuration
+	Next, I configured HugePages to reduce TLB (Translation Lookahead Buffer) misses. The fraud scoring service maintained large in-memory feature stores (~8 GB per node) and model weights (~2 GB). With standard 4 KB pages, these structures span millions of page table entries, causing frequent TLB misses.
+	I allocated 2 MB HugePages at boot:
+	
+	
+	
+	Shell
+	# /etc/default/grub
+	GRUB_CMDLINE_LINUX="... default_hugepagesz=2M hugepagesz=2M hugepages=8192"
+	Show more lines
+	This gave us 16 GB of HugePage-backed memory. I also reserved some 1 GB HugePages for the XGBoost model's feature matrix, which was a single contiguous allocation:
+	
+	
+	
+	Shell
+	# /etc/sysctl.d/hugepages.conf
+	vm.nr_hugepages = 8192
+	vm.hugetlb_shm_group = 1000
+	Show more lines
+	The impact was measurable: TLB miss rate dropped from ~4.2% to ~0.3% on the feature extraction path, verified with perf stat:
+	
+	
+	
+	Shell
+	perf stat -e dTLB-load-misses,dTLB-loads -p <pid>
+	Show more lines
+	Kernel tuning
+	I tuned several kernel parameters for low-latency behavior:
+	
+	
+	
+	Shell
+	# /etc/sysctl.d/99-lowlatency.conf
+	
+	# Disable swap entirely (latency poison)
+	vm.swappiness = 0
+	
+	# Increase network buffer sizes (for burst traffic)
+	net.core.rmem_max = 16777216
+	net.core.wmem_max = 16777216
+	net.ipv4.tcp_rmem = 4096 87380 16777216
+	net.ipv4.tcp_wmem = 4096 65536 16777216
+	
+	# Reduce TCP latency
+	net.ipv4.tcp_nodelay = 1
+	net.ipv4.tcp_low_latency = 1
+	
+	# Increase somaxconn for burst handling
+	net.core.somaxconn = 65535
+	net.core.netdev_max_backlog = 65535
+	
+	# Disable transparent hugepages (causes compaction stalls)
+	# Note: We use EXPLICIT hugepages, not THP
+	echo never > /sys/kernel/mm/transparent_hugepage/enabled
+	Show more lines
+	I explicitly disabled Transparent HugePages (THP) because THP's background compaction daemon (khugepaged) causes unpredictable latency spikes — exactly the opposite of what we want. We used explicit HugePages instead, which are pre-allocated and never compacted.
+	IRQ affinity for NIC interrupts
+	Our fraud scoring traffic came through a Mellanox ConnectX-6 NIC with 16 RX queues. By default, the kernel distributes NIC interrupts across all CPUs, including our isolated cores. This caused interrupt storms on latency-sensitive cores.
+	I pinned NIC IRQs to non-isolated housekeeping cores (cores 0–3, 20–23):
+	
+	
+	
+	Shell
+	# Disable irqbalance (it fights manual affinity)
+	systemctl disable irqbalance
+	systemctl stop irqbalance
+	
+	# Pin each NIC IRQ to housekeeping cores
+	for irq in $(grep mlx5 /proc/interrupts | awk '{print $1}' | tr -d ':'); do
+	 echo 0-3,20-23 > /proc/irq/$irq/smp_affinity_list
+	done
+	Show more lines
+	I also configured NIC ring buffer and multi-queue:
+	
+	
+	
+	Shell
+	# Increase ring buffer for burst absorption
+	ethtool -G eth0 rx 8192 tx 8192
+	
+	# Enable multi-queue (already 16 queues on ConnectX-6)
+	ethtool -l eth0
+	# Combined: 16
+	
+	# Enable RFS (Receive Flow Steering) for socket-to-queue affinity
+	echo 32768 > /proc/sys/net/core/rps_sock_flow_entries
+	for f in /sys/class/net/eth0/queues/rx-*/rps_flow_cnt; do
+	 echo 2048 > $f
+	done
+	Show more lines
+	PREEMPT_RT consideration
+	I evaluated PREEMPT_RT kernel patches for guaranteed worst-case latency. After testing, I found that PREEMPT_RT reduced P99.9 jitter from ~800 µs to ~50 µs, but added ~3% overhead to P50 throughput due to the fully preemptible kernel. Given our SLA was P99 (not P99.9), I chose to not use PREEMPT_RT in production but kept it as a fallback option for future tightening. The isolcpus + nohz_full + IRQ affinity combination was sufficient for our P99 target.
+	
+	Phase 2: Kubernetes configuration (on bare metal)
+	We ran Kubernetes (K8s 1.29) on bare metal using kubeadm with containerd as the runtime. No cloud provider — we needed full control.
+	CPU Manager
+	I enabled the static CPU Manager policy in kubelet so that Guaranteed QoS pods with integer CPU requests would get exclusive CPU sets:
+	
+	
+	
+	YAML
+	# /var/lib/kubelet/config.yaml (KubeletConfiguration)
+	apiVersion: kubelet.config.k8s.io/v1beta1
+	kind: KubeletConfiguration
+	cpuManagerPolicy: static
+	cpuManagerReconcilePeriod: 5s
+	reservedSystemCPUs: "0-3,20-23"
+	topologyManagerPolicy: single-numa-node
+	topologyManagerScope: pod
+	memoryManagerPolicy: Static
+	reservedMemory:
+	 - numaNode: 0
+	 limits:
+	 memory: "2Gi"
+	 hugepages-2Mi: "4Gi"
+	 - numaNode: 1
+	 limits:
+	 memory: "2Gi"
+	 hugepages-2Mi: "4Gi"
+	Show more lines
+	Key decisions:
+		○ cpuManagerPolicy: static → Guaranteed pods get exclusive cores, no time-sharing
+		○ reservedSystemCPUs: "0-3,20-23" → These are housekeeping cores (OS, kubelet, IRQ handling)
+		○ topologyManagerPolicy: single-numa-node → All resources (CPU, memory, GPU, NIC VF) for a pod must come from the same NUMA node — this prevents cross-NUMA access
+		Pod specification for the fraud scoring service
+		
+		
+		
+	YAML
+	apiVersion: v1
+	kind: Pod
+	metadata:
+	 name: fraud-scorer
+	 annotations:
+	 # Pin to NUMA node 0 (where NIC and GPU are)
+	 topologymanager.kubernetes.io/numa-node-affinity: "0"
+	spec:
+	 schedulerName: default-scheduler
+	 priorityClassName: ultra-low-latency
+	 containers:
+	 - name: fraud-scorer
+	 image: fraud-scorer:v2.4
+	 resources:
+	 requests:
+	 cpu: "8" # 8 exclusive cores (static CPU manager)
+	 memory: "16Gi"
+	 hugepages-2Mi: "4Gi" # HugePages for feature store
+	 nvidia.com/gpu: "1" # L4 GPU for transformer classifier
+	 limits:
+	 cpu: "8"
+	 memory: "16Gi"
+	 hugepages-2Mi: "4Gi"
+	 nvidia.com/gpu: "1"
+	 volumeMounts:
+	 - name: hugepage
+	 mountPath: /dev/hugepages
+	 - name: shm
+	 mountPath: /dev/shm
+	 - name: nvme-scratch
+	 mountPath: /scratch
+	 securityContext:
+	 capabilities:
+	 add: ["IPC_LOCK", "SYS_NICE"] # mlock for hugepages, nice for RT priority
+	 volumes:
+	 - name: hugepage
+	 emptyDir:
+	 medium: HugePages-2Mi
+	 - name: shm
+	 emptyDir:
+	 medium: Memory
+	 sizeLimit: "8Gi" # Large shared memory for IPC
+	 - name: nvme-scratch
+	 hostPath:
+	 path: /mnt/nvme0
+	 type: Directory
+	Show more lines
+	Memory Manager and shared memory
+	I increased shared memory (/dev/shm) to 8 GB because:
+		○ The feature extraction service used shared memory IPC between the feature aggregator and the model server (both containers in the same pod)
+		○ PyTorch/CUDA uses /dev/shm for inter-process tensor sharing
+		○ Default 64 MB is completely insufficient
+		I also configured IPC namespace sharing within the pod:
+		
+		
+		
+		YAML
+		spec:
+		 shareProcessNamespace: true # allows shared memory between containers
+		Show more lines
+		Pod Disruption Budget and Preemption Control
+		For the fraud scoring service, I created a strict PodDisruptionBudget:
+		
+		
+		
+		YAML
+		apiVersion: policy/v1
+		kind: PodDisruptionBudget
+		metadata:
+		 name: fraud-scorer-pdb
+		spec:
+		 maxUnavailable: 0 # ZERO pods can be disrupted during voluntary operations
+		 selector:
+		 matchLabels:
+		 app: fraud-scorer
+		Show more lines
+		maxUnavailable: 0 means no voluntary eviction (drain, upgrade, scaling) can remove any fraud-scorer pod. This prevents latency spikes during rolling updates.
+		I also created a PriorityClass:
+		
+		
+		
+		YAML
+		apiVersion: scheduling.k8s.io/v1
+		kind: PriorityClass
+		metadata:
+		 name: ultra-low-latency
+		value: 1000000
+		globalDefault: false
+		preemptionPolicy: PreemptLowerPriority
+		description: "Critical low-latency fraud scoring workloads"
+		Show more lines
+		This ensures fraud-scorer pods preempt lower-priority workloads if resources are tight, rather than being queued.
+		GPU Device Plugin
+		I deployed the NVIDIA GPU device plugin with GPU feature discovery:
+		
+		
+		
+		YAML
+		# NVIDIA device plugin DaemonSet
+		# Enables nvidia.com/gpu resource requests
+		# + GPU Feature Discovery for scheduling by GPU model
+		Show more lines
+		For our L4 GPUs (inference-optimized), I did not use MIG (L4 doesn't support it) or time-slicing. Each fraud-scorer pod gets one dedicated L4 for the transformer classifier.
+		
+		Phase 3: Networking
+		Host-side: DPDK for feature store access
+		The feature extraction service needed to query a remote Redis cluster for user transaction history. Standard TCP/IP added ~2 ms per query. I evaluated DPDK (Data Plane Development Kit) for kernel-bypass networking to the Redis cluster.
+		After testing, I found that DPDK reduced Redis round-trip from ~2.1 ms to ~0.4 ms by bypassing the kernel network stack entirely. However, the operational complexity was high (dedicated NIC ports, userspace driver management, no standard socket API).
+		I compromised: used AF_XDP (XDP sockets) instead of full DPDK, which gave ~0.7 ms round-trip with much simpler operations (still uses kernel, but fast-paths through eBPF/XDP).
+		Kubernetes-side: SR-IOV for direct NIC access
+		For the fraud-scorer pods that needed the lowest possible network latency, I configured SR-IOV (Single Root I/O Virtualization):
+		
+		
+		
+		YAML
+		# SR-IOV Network Node Policy
+		apiVersion: sriovnetwork.openshift.io/v1
+		kind: SriovNetworkNodePolicy
+		metadata:
+		 name: fraud-sriov-policy
+		spec:
+		 nodeSelector:
+		 feature.node.kubernetes.io/network-sriov.capable: "true"
+		 resourceName: mellanox_sriov_netdevice
+		 numVfs: 8 # 8 Virtual Functions per NIC
+		 nicSelector:
+		 vendor: "15b3" # Mellanox
+		 deviceID: "101b" # ConnectX-6
+		 deviceType: netdevice
+		Show more lines
+		Each fraud-scorer pod received a dedicated SR-IOV Virtual Function (VF), giving it direct NIC access without going through the host kernel's network stack or any CNI overlay. This eliminated:
+			§ veth pair overhead
+			§ iptables/nftables traversal
+			§ Bridge/overlay encapsulation
+			For pods that didn't need ultra-low latency (monitoring, logging, batch jobs), I used Cilium (eBPF-based CNI) which provided:
+				□ Efficient network policy enforcement
+				□ L3/L4 load balancing without kube-proxy
+				□ eBPF-based observability (flow logs, latency histograms)
+				RDMA consideration
+				I evaluated RDMA over Converged Ethernet (RoCEv2) for the feature store access path. RoCE would give us true zero-copy, kernel-bypass, sub-microsecond latency. However:
+					® Redis doesn't natively support RDMA verbs
+					® The engineering cost of custom RDMA feature store was too high for Phase 1
+					® AF_XDP + SR-IOV gave us sufficient latency reduction
+					I documented RDMA as a Phase 2 optimization if we needed to go below 500 µs for feature retrieval.
+					Storage: NVMe for model and feature cache
+					Each node had a local NVMe SSD (Intel P5800X, 3.2 TB) used for:
+						◊ Model weight caching (avoid pulling from object storage on pod restart)
+						◊ Transaction log buffering (local write-ahead log before async replication)
+						◊ Feature store snapshot (warm cache on node restart)
+						I mounted NVMe directly into pods via hostPath:
+						
+						
+						
+			YAML
+			volumes:
+			- name: nvme-scratch
+			 hostPath:
+			 path: /mnt/nvme0
+			 type: Directory
+			Show more lines
+			For production, I later moved to local PersistentVolumes with a custom provisioner for better lifecycle management.
+			
+			Results
+			Metric	Before	After
+			P50 latency	12 ms	3.2 ms
+			P99 latency	35 ms	8.7 ms
+			P99.9 latency	120 ms	14.2 ms
+			Throughput	8,000 TPS/node	14,500 TPS/node
+			TLB miss rate	4.2%	0.3%
+			NIC→app latency	2.1 ms	0.7 ms
+			Cross-NUMA accesses	frequent	eliminated
+			
+			
+			📖 Story 2: "Building GPU-Accelerated LLM Fraud Analysis with Guardrails on Multi-Region Kubernetes"
+			
+			The situation
+			After Story 1 stabilized the hot-path scoring at sub-10 ms, the business wanted to add an LLM-powered fraud analysis layer for complex cases. When the XGBoost model flagged a transaction as "medium risk" (score 0.4–0.8), instead of auto-declining, we'd route it to a Llama-3.1-8B model that would analyze the transaction context and produce a natural-language fraud assessment.
+			Requirements:
+				□ < 200 ms end-to-end for the LLM path (including input/output guardrails)
+				□ 500+ concurrent LLM requests across 3 regions
+				□ Input guardrail: block jailbreak/injection attempts in the prompt
+				□ Output guardrail: ensure response contains only approved decision categories
+				□ Run on NVIDIA H100 80GB GPUs (8 per node, NVLink mesh)
+				□ Use vLLM as inference runtime with tensor parallelism for 70B model variant
+				My job was to design the entire GPU infrastructure stack, from host-level GPU configuration through Kubernetes GPU scheduling through the LLM serving pipeline with guardrails.
+				
+				Phase 1: Host-level GPU and system configuration
+				GPU topology and NUMA awareness
+				Each node was an HGX H100 system with:
+					® 8× H100 SXM5 80GB (NVLink 4.0 mesh)
+					® 2× Intel Xeon 8480+ (NUMA node 0 and 1)
+					® GPUs 0–3 on NUMA node 0, GPUs 4–7 on NUMA node 1
+					® 4× ConnectX-7 NICs (2 per NUMA node)
+					I verified topology:
+					
+					
+					
+					Shell
+					nvidia-smi topo -m
+					Show more lines
+					All 8 GPUs had NVLink interconnect (NV18 = 18 NVLink connections). But GPU↔CPU affinity still mattered: GPU 0–3 had fastest PCIe path to NUMA node 0's CPU and memory.
+					CPU isolation for GPU serving
+					For GPU-serving nodes, I isolated differently than the pure-CPU scoring nodes:
+					
+					
+					
+					Shell
+					# GPU serving nodes
+					GRUB_CMDLINE_LINUX="isolcpus=8-31,48-71 nohz_full=8-31,48-71 rcu_nocbs=8-31,48-71 \
+					 default_hugepagesz=2M hugepagesz=2M hugepages=16384 \
+					 iommu=pt intel_iommu=on"
+					Show more lines
+					Key addition: iommu=pt (passthrough mode) — this is critical for:
+						◊ SR-IOV VF assignment to containers
+						◊ GPUDirect RDMA (if used later)
+						◊ Avoiding IOMMU translation overhead on DMA operations
+						I reserved:
+							} Cores 0–7, 32–47: housekeeping (OS, kubelet, NIC IRQs, monitoring)
+							} Cores 8–31: NUMA node 0 workloads (vLLM workers for GPU 0–3)
+							} Cores 48–71: NUMA node 1 workloads (vLLM workers for GPU 4–7)
+							HugePage configuration for LLM serving
+							LLM inference runtime (vLLM) uses large contiguous memory for:
+								– KV cache pool (tens of GB)
+								– Model weight memory mapping
+								– CUDA context and workspace
+								I allocated 32 GB of 2 MB HugePages:
+								
+								
+								
+								Shell
+								hugepages=16384 # 16384 × 2MB = 32 GB
+								Show more lines
+								And verified:
+								
+								
+								
+								Shell
+								cat /proc/meminfo | grep Huge
+								HugePages_Total: 16384
+								HugePages_Free: 16384
+								Hugepagesize: 2048 kB
+								Show more lines
+								Kernel tuning for GPU workloads
+								
+								
+								
+								Shell
+								# /etc/sysctl.d/99-gpu-serving.conf
+								
+								# Increase max locked memory (for CUDA pinned memory)
+								# Set via /etc/security/limits.conf
+								# * hard memlock unlimited
+								# * soft memlock unlimited
+								
+								# Increase max map count (PyTorch/CUDA needs many mappings)
+								vm.max_map_count = 1048576
+								
+								# Disable NUMA balancing (we pin explicitly)
+								kernel.numa_balancing = 0
+								
+								# Increase AIO limits (for NVMe async I/O)
+								fs.aio-max-nr = 1048576
+								
+								# Network tuning for high-throughput model serving
+								net.core.rmem_max = 67108864
+								net.core.wmem_max = 67108864
+								net.ipv4.tcp_rmem = 4096 87380 67108864
+								net.ipv4.tcp_wmem = 4096 65536 67108864
+								Show more lines
+								I specifically disabled kernel.numa_balancing because the automatic NUMA page migration conflicts with our explicit pinning and can cause GPU-serving latency spikes when the kernel moves pages between NUMA nodes.
+								IRQ affinity (same pattern as Story 1)
+								Pinned all NIC IRQs to housekeeping cores, keeping GPU-serving cores interrupt-free.
+								
+								Phase 2: Kubernetes configuration for GPU workloads
+								GPU Device Plugin and Feature Discovery
+								I deployed the NVIDIA GPU Operator which manages:
+									w GPU device plugin (exposes nvidia.com/gpu)
+									w GPU Feature Discovery (labels nodes with GPU model, driver version, MIG capability)
+									w DCGM exporter (Prometheus metrics for GPU health)
+									
+									
+									
+									YAML
+									# Node labels after GPU Feature Discovery
+									nvidia.com/gpu.product: NVIDIA-H100-SXM5-80GB
+									nvidia.com/gpu.memory: 81920
+									nvidia.com/gpu.count: 8
+									nvidia.com/mig.capable: true
+									Show more lines
+									MIG and time-slicing strategy
+									For the Llama-8B model (fits on 1 GPU), I considered:
+										w MIG: split each H100 into multiple instances
+										w Time-slicing: share GPU across pods
+										I chose MIG for the 8B model because:
+											w MIG provides true memory and compute isolation (no interference between instances)
+											w H100 supports 7 MIG instances (1g.10gb each) or 3 instances (3g.40gb each)
+											w For 8B FP8: model weights ~8 GB + KV cache ~15 GB → needs ~25 GB → 3g.40gb MIG profile
+											
+											
+											
+											YAML
+											# MIG configuration
+											apiVersion: nvidia.com/v1
+											kind: MigProfile
+											metadata:
+											 name: h100-3g40gb
+											spec:
+											 profile: "3g.40gb"
+											 count: 2 # 2 MIG instances per H100
+											Show more lines
+											For the Llama-70B model (needs 4 GPUs with TP=4), I used full GPUs (no MIG):
+												w TP=4 requires NVLink communication between GPUs
+												w MIG instances cannot do NVLink peer-to-peer
+												w 4 full H100s per 70B serving instance
+												Kubelet configuration for GPU nodes
+												
+												
+												
+												YAML
+												apiVersion: kubelet.config.k8s.io/v1beta1
+												kind: KubeletConfiguration
+												cpuManagerPolicy: static
+												topologyManagerPolicy: single-numa-node
+												topologyManagerScope: pod
+												memoryManagerPolicy: Static
+												reservedSystemCPUs: "0-7,32-47"
+												reservedMemory:
+												 - numaNode: 0
+												 limits:
+												 memory: "4Gi"
+												 hugepages-2Mi: "8Gi"
+												 - numaNode: 1
+												 limits:
+												 memory: "4Gi"
+												 hugepages-2Mi: "8Gi"
+												Show more lines
+												topologyManagerPolicy: single-numa-node was critical here because it ensures:
+													w CPU cores assigned to the vLLM pod are on the same NUMA node as the GPU
+													w Memory (including HugePages) is on the same NUMA node
+													w NIC VF (if SR-IOV) is on the same NUMA node
+													Without this, a vLLM pod could get GPU 0 (NUMA 0) but CPU cores from NUMA 1, causing every CPU↔GPU interaction to cross the NUMA boundary.
+													Pod spec for Llama-70B TP=4 serving
+													
+													
+													
+													YAML
+													apiVersion: v1
+													kind: Pod
+													metadata:
+													 name: llama70b-server
+													 labels:
+													 app: llama-70b-fraud
+													 tier: llm-inference
+													spec:
+													 priorityClassName: high-priority-llm
+													 containers:
+													 - name: vllm-server
+													 image: vllm/vllm-openai:v0.8.0
+													 args:
+													 - "--model"
+													 - "meta-llama/Llama-3.1-70B-Instruct"
+													 - "--tensor-parallel-size"
+													 - "4"
+													 - "--dtype"
+													 - "float16"
+													 - "--quantization"
+													 - "fp8"
+													 - "--max-model-len"
+													 - "4096"
+													 - "--enable-chunked-prefill"
+													 - "--enable-prefix-caching"
+													 - "--gpu-memory-utilization"
+													 - "0.92"
+													 - "--max-num-seqs"
+													 - "128"
+													 - "--kv-cache-dtype"
+													 - "fp8"
+													 resources:
+													 requests:
+													 cpu: "16"
+													 memory: "64Gi"
+													 hugepages-2Mi: "16Gi"
+													 nvidia.com/gpu: "4"
+													 limits:
+													 cpu: "16"
+													 memory: "64Gi"
+													 hugepages-2Mi: "16Gi"
+													 nvidia.com/gpu: "4"
+													 ports:
+													 - containerPort: 8000
+													 volumeMounts:
+													 - name: shm
+													 mountPath: /dev/shm
+													 - name: hugepage
+													 mountPath: /dev/hugepages
+													 - name: model-cache
+													 mountPath: /models
+													 volumes:
+													 - name: shm
+													 emptyDir:
+													 medium: Memory
+													 sizeLimit: "32Gi"
+													 - name: hugepage
+													 emptyDir:
+													 medium: HugePages-2Mi
+													 - name: model-cache
+													 hostPath:
+													 path: /mnt/nvme0/model-cache
+													 type: Directory
+													Show more lines
+													Key configuration decisions:
+														w /dev/shm at 32 GB: vLLM with TP=4 uses shared memory for NCCL communication between GPU processes
+														w FP8 quantization + FP8 KV cache: maximizes throughput and KV cache capacity
+														w Chunked prefill: prevents prefill from blocking decode (reduces P99 jitter)
+														w Prefix caching: our fraud prompts share a common system prompt prefix (~200 tokens) — caching it saves repeated prefill compute
+														w Model cache on NVMe: local /mnt/nvme0 means model loading on pod restart takes ~15 seconds instead of ~5 minutes from object storage
+														Pod Disruption Budget for LLM pods
+														
+														
+														
+														YAML
+														apiVersion: policy/v1
+														kind: PodDisruptionBudget
+														metadata:
+														 name: llama70b-pdb
+														spec:
+														 maxUnavailable: 0
+														 selector:
+														 matchLabels:
+														 app: llama-70b-fraud
+														Show more lines
+														Zero disruption during voluntary operations. For rolling updates, I used a blue-green deployment pattern: bring up new pods on separate GPUs, shift traffic, then drain old pods.
+														
+									Phase 3: Networking for LLM serving
+									CNI: Cilium (eBPF) for LLM traffic
+									For LLM serving traffic (HTTP/gRPC, not ultra-low-latency like the scoring path), I used Cilium as the CNI:
+										w eBPF-based packet processing (no iptables)
+										w L7 visibility (HTTP request-level metrics)
+										w Network policies for isolating LLM pods from other workloads
+										w kube-proxy replacement (Cilium handles service routing directly in eBPF)
+										SR-IOV for NCCL inter-node communication
+										For the 70B model serving across nodes (when we scaled to TP=8 across 2 nodes), inter-node NCCL traffic needed the fastest possible path. I configured SR-IOV + RDMA:
+										
+										
+										
+										YAML
+										# Secondary network for NCCL
+										apiVersion: k8s.cni.cncf.io/v1
+										kind: NetworkAttachmentDefinition
+										metadata:
+										 name: nccl-sriov-net
+										spec:
+										 config: |
+										 {
+										 "type": "sriov",
+										 "cniVersion": "0.3.1",
+										 "name": "nccl-network",
+										 "ipam": { "type": "host-local", "subnet": "10.56.0.0/16" },
+										 "vlan": 100
+										 }
+										Show more lines
+										Pods received a dedicated SR-IOV VF for NCCL traffic, separate from the primary Cilium-managed interface. NCCL was configured to use this interface:
+										
+										
+										
+										Shell
+										# Environment variables in the vLLM pod
+										NCCL_SOCKET_IFNAME=net1 # SR-IOV interface
+										NCCL_IB_DISABLE=0 # Enable InfiniBand/RoCE
+										NCCL_NET_GDR_LEVEL=5 # GPUDirect RDMA level
+										Show more lines
+										GPUDirect Storage for model loading
+										I configured GPUDirect Storage (GDS) to allow direct NVMe→GPU data transfer for model weight loading, bypassing CPU memory entirely:
+										
+										
+										
+										Shell
+										# Enable GDS
+										modprobe nvidia_fs
+										Show more lines
+										This reduced model loading time from ~15 seconds (NVMe → CPU RAM → GPU) to ~6 seconds (NVMe → GPU directly) for the 70B model.
+										
+								Phase 4: The guardrail pipeline (eliminating Python tax)
+								Architecture: Rust gateway + Triton ensemble
+								Based on the latency analysis, I designed the pipeline to eliminate Python from the hot path:
+								Client request
+    ↓
+Rust Gateway (tokenization + rule-based input guardrail + prompt construction)
+    ↓ gRPC (preprocessed token IDs)
+Triton Inference Server
+    ├── ML Input Guardrail (TensorRT, GPU) — jailbreak/injection classifier
+    ├── Llama-3.1-8B (TensorRT-LLM, GPU) — fraud analysis
+    └── ML Output Guardrail (TensorRT, GPU) — response category validator
+    ↓ gRPC (generated token IDs)
+Rust Gateway (detokenization + rule-based output guardrail + response formatting)
+    ↓
+Client response
+								The Triton ensemble kept all ML model tensors on GPU between stages — zero CPU↔GPU copies between guardrail and LLM.
+								Profiling and optimization cycle
+								I used the profiling methodology from our earlier work:
+								Phase 1: nsys to find bottlenecks
+								
+								
+								
+								Shell
+								nsys profile -o guardrail_pipeline \
+								 --trace-fork-before-exec=true \
+								 --cuda-graph-trace=node \
+								 -t cuda,nvtx,cublas \
+								 tritonserver --model-repository=/models
+								Show more lines
+								Finding 1: The ML input guardrail (a 300M classifier) was launching 47 tiny kernels per request. I worked with the ML team to export it as a single TensorRT engine with all ops fused, reducing to 3 kernel launches.
+								Finding 2: The LLM decode phase showed 12 µs CPU gaps between kernel launches. I enabled CUDA Graphs for the decode steady-state in TensorRT-LLM, eliminating the gaps.
+								Phase 2: ncu on hot kernels
+								
+								
+								
+								Shell
+								ncu -o attn_decode \
+								 -k regex:"flash_attn|paged_attention" -c 5 \
+								 --section SpeedOfLight \
+								 --section MemoryWorkloadAnalysis \
+								 --section WarpStateStats \
+								 tritonserver --model-repository=/models
+								Show more lines
+								Finding 3: Attention kernel during decode showed:
+								SM Throughput:     18%
+DRAM Throughput:   82%
+long_scoreboard:   68%
+								Classic memory-bound decode. I switched KV cache to FP8 (--kv-cache-dtype fp8), which reduced DRAM traffic by ~2× and improved decode TPS by ~45%.
+								Finding 4: FP8 with long fraud analysis prompts (>2048 tokens) showed numerical degradation. I configured mixed precision: FP8 for weights and KV cache, BF16 for attention accumulation. This preserved accuracy while keeping most of the FP8 throughput benefit.
+								
+					Phase 5: Multi-region deployment
+					Region-specific GPU allocation
+					Region	GPU	Model	Reason
+					US-East (primary)	4× H100 nodes	Llama-70B TP=4	Highest traffic, needs best quality
+					US-West	2× H100 nodes	Llama-8B (MIG)	Secondary region, cost-optimized
+					EU-West	2× L40S nodes	Llama-8B FP8	GDPR region, moderate traffic
+					Global load balancing with latency-aware routing
+					
+					
+					
+					YAML
+					# Istio VirtualService for geo-routing
+					apiVersion: networking.istio.io/v1beta1
+					kind: VirtualService
+					metadata:
+					 name: fraud-llm-routing
+					spec:
+					 hosts:
+					 - fraud-llm.internal
+					 http:
+					 - match:
+					 - headers:
+					 x-region:
+					 exact: "us-east"
+					 route:
+					 - destination:
+					 host: llama-70b-server.us-east
+					 - match:
+					 - headers:
+					 x-region:
+					 exact: "us-west"
+					 route:
+					 - destination:
+					 host: llama-8b-server.us-west
+					 - route:
+					 - destination:
+					 host: llama-8b-server.eu-west
+					Show more lines
+					
+					Results
+					Metric	Before (Python pipeline)	After (Rust + Triton + tuned GPU)
+					End-to-end LLM path P50	280 ms	95 ms
+					End-to-end LLM path P99	850 ms	185 ms
+					Guardrail overhead	40 ms	3 ms
+					Python serialization tax	15 ms	0 ms
+					GPU utilization during decode	45%	78%
+					Concurrent requests per H100	32	96
+					Cost per 1M fraud analyses	$847	$312
+					Model loading time	5 min	6 sec (GDS)
+					
+					Summary: what these two stories demonstrate
+					Capability area	Story 1 (CPU scoring)	Story 2 (GPU LLM)
+					CPU isolation	✅ isolcpus, nohz_full, rcu_nocbs	✅ Same + iommu=pt
+					HugePages	✅ 2MB for feature store	✅ 2MB for KV cache/model
+					Kernel tuning	✅ TCP, swap, THP	✅ max_map_count, numa_balancing
+					IRQ affinity	✅ NIC IRQ pinning	✅ Same pattern
+					PREEMPT_RT	✅ Evaluated, decided against	—
+					NUMA pinning	✅ Feature/model/rule on correct node	✅ GPU↔CPU NUMA alignment
+					K8s CPU Manager	✅ Static policy	✅ Static policy
+					Topology Manager	✅ single-numa-node	✅ single-numa-node
+					Memory Manager	✅ HugePages + IPC	✅ HugePages + large /dev/shm
+					PDB / Priority	✅ maxUnavailable=0	✅ Same + blue-green
+					GPU Device Plugin	—	✅ NVIDIA GPU Operator
+					MIG / Time-slice	—	✅ MIG for 8B, full GPU for 70B
+					GPUDirect Storage	—	✅ NVMe→GPU model loading
+					DPDK / AF_XDP	✅ AF_XDP for feature store	—
+					SR-IOV	✅ Direct NIC for scoring	✅ NCCL traffic isolation
+					Cilium (eBPF)	✅ Non-critical traffic	✅ LLM serving traffic
+					RDMA	✅ Evaluated for Phase 2	✅ GPUDirect RDMA for NCCL
+					NVMe storage	✅ Model + log cache	✅ Model cache + GDS
+					Profiling (Nsight)	—	✅ nsys + ncu for pipeline optimization
+
+Story 1 (C++): "Building the Zero-Copy, NUMA-Aware Hot-Path Feature Extraction and Scoring Engine Inside Sentinel Gateway"
+
+The problem
+Sentinel Gateway's hot path (Tier 0) needed to execute feature extraction + XGBoost scoring + transformer classifier inference in < 10 ms P99. The existing implementation was a Python service that:
+	• Deserialized JSON transaction data into Python dicts
+	• Computed 15 features by querying Redis and iterating over transaction history
+	• Serialized features into a NumPy array
+	• Copied the array to GPU for the transformer classifier
+	• Copied the result back
+	• Serialized the decision into JSON
+	The Python path was consuming ~18 ms P99 — nearly all of it in serialization, memory allocation, GIL contention, and cross-boundary copies. The actual compute (feature aggregation + XGBoost predict + transformer forward pass) was < 3 ms. The rest was "glue tax."
+	My task: rewrite the hot-path data pipeline in C++ as a shared library (.so) callable from the Rust Sentinel Gateway via FFI, eliminating all unnecessary copies, allocations, and serialization.
+	
+	Phase 1: NUMA-aware memory architecture
+	The memory layout problem
+	Our bare-metal nodes were dual-socket (2 NUMA nodes). The NIC was on NUMA node 0, the GPU was on NUMA node 0, but the default malloc allocator scattered pages across both NUMA nodes based on Linux's first-touch policy. This meant:
+		○ Transaction data arrived on NUMA 0 (NIC DMA)
+		○ Feature computation might touch NUMA 1 pages (~100 ns extra per access)
+		○ GPU DMA (PCIe) was fastest from NUMA 0 memory
+		○ Every cross-NUMA access added latency that compounded across thousands of memory touches per request
+		What I built: NUMA-pinned memory arena
+		I implemented a custom memory arena that pre-allocates large blocks from a specific NUMA node using libnuma, then sub-allocates from those blocks with zero system calls on the hot path.
+		
+		
+		
+		C++
+		#include <numa.h>
+		#include <cstddef>
+		#include <cstdint>
+		#include <atomic>
+		
+		class NumaArena {
+		public:
+		 // Allocate arena_size bytes on the specified NUMA node
+		 // using 2MB hugepages for TLB efficiency
+		 NumaArena(int numa_node, size_t arena_size)
+		 : numa_node_(numa_node)
+		 , arena_size_(arena_size)
+		 , offset_(0)
+		 {
+		 // Allocate on specific NUMA node with hugepage backing
+		 base_ = static_cast<uint8_t*>(
+		 numa_alloc_onnode(arena_size_, numa_node_)
+		 );
+		 if (!base_) {
+		 throw std::bad_alloc();
+		 }
+		
+		 // Advise kernel to use hugepages
+		 madvise(base_, arena_size_, MADV_HUGEPAGE);
+		
+		 // Pre-fault all pages to avoid page faults on hot path
+		 // (touch every page so the kernel actually maps them)
+		 for (size_t i = 0; i < arena_size_; i += 4096) {
+		 base_[i] = 0;
+		 }
+		 }
+		
+		 ~NumaArena() {
+		 numa_free(base_, arena_size_);
+		 }
+		
+		 // Hot-path allocation: bump pointer, no syscall, no lock
+		 // Aligned to cache line (64 bytes) to prevent false sharing
+		 void* allocate(size_t size) {
+		 size = (size + 63) & ~63; // align to 64-byte cache line
+		 size_t current = offset_.load(std::memory_order_relaxed);
+		 size_t next = current + size;
+		
+		 if (next > arena_size_) return nullptr; // arena exhausted
+		
+		 // Single-threaded per-core arena: no CAS needed
+		 offset_.store(next, std::memory_order_relaxed);
+		 return base_ + current;
+		 }
+		
+		 // Reset arena for next request batch (O(1), no free per object)
+		 void reset() {
+		 offset_.store(0, std::memory_order_relaxed);
+		 }
+		
+		private:
+		 uint8_t* base_;
+		 int numa_node_;
+		 size_t arena_size_;
+		 std::atomic<size_t> offset_;
+		};
+		Show more lines
+		Key design decisions:
+			1. numa_alloc_onnode ensures all pages are on the correct NUMA node — no accidental cross-NUMA access
+			2. MADV_HUGEPAGE + pre-faulting eliminates TLB misses and page faults on the hot path
+			3. Bump-pointer allocation is O(1) with zero fragmentation — no malloc overhead
+			4. Per-core arenas (each processing thread gets its own arena) — no locks, no atomic CAS, no contention
+			5. reset() instead of per-object free() — the entire arena is recycled per request batch, which is safe because request data is short-lived
+			How this connected to Sentinel
+			Each Sentinel Gateway worker thread (pinned to a specific CPU core on NUMA node 0) got its own NumaArena. All transaction parsing, feature computation, and intermediate buffers allocated from this arena. When the request completed, one reset() call recycled everything.
+			
+			Phase 2: Zero-copy transaction parsing with SIMD
+			The parsing problem
+			Each incoming transaction was an ISO 8583–like message (fixed-length fields with variable-length sub-fields). The Python implementation used json.loads() which:
+				□ Allocated dozens of Python objects per transaction
+				□ Copied every field into a new Python string
+				□ Triggered garbage collection unpredictably
+				What I built: SIMD-accelerated zero-copy parser
+				Instead of deserializing into objects, I built a parser that produces field pointers (offset + length) into the original receive buffer — the actual field data is never copied.
+				
+				
+				
+				C++
+				#include <immintrin.h> // AVX2 intrinsics
+				#include <cstring>
+				
+				struct FieldView {
+				 const char* data; // pointer into original buffer (zero-copy)
+				 uint32_t length;
+				};
+				
+				struct TransactionView {
+				 FieldView pan; // Primary Account Number
+				 FieldView amount;
+				 FieldView merchant_id;
+				 FieldView merchant_category;
+				 FieldView timestamp;
+				 FieldView terminal_id;
+				 FieldView country_code;
+				 // ... 20+ fields, all zero-copy views into the original buffer
+				};
+				
+				// SIMD-accelerated delimiter search
+				// Finds the position of delimiter in buffer using AVX2
+				// Processes 32 bytes per iteration instead of 1
+				inline size_t simd_find_delimiter(const char* buf, size_t len, char delim) {
+				 const __m256i delim_vec = _mm256_set1_epi8(delim);
+				 size_t i = 0;
+				
+				 for (; i + 32 <= len; i += 32) {
+				 __m256i chunk = _mm256_loadu_si256(
+				 reinterpret_cast<const __m256i*>(buf + i)
+				 );
+				 __m256i cmp = _mm256_cmpeq_epi8(chunk, delim_vec);
+				 uint32_t mask = _mm256_movemask_epi8(cmp);
+				 if (mask != 0) {
+				 return i + __builtin_ctz(mask); // position of first match
+				 }
+				 }
+				
+				 // Scalar fallback for remaining bytes
+				 for (; i < len; i++) {
+				 if (buf[i] == delim) return i;
+				 }
+				 return len; // not found
+				}
+				
+				// Parse transaction: produces FieldView pointers into original buffer
+				// ZERO allocations, ZERO copies
+				bool parse_transaction(const char* raw_buf, size_t raw_len,
+				 TransactionView* out) {
+				 size_t pos = 0;
+				
+				 // Field 1: PAN (delimited by |)
+				 size_t end = simd_find_delimiter(raw_buf + pos, raw_len - pos, '|');
+				 out->pan = { raw_buf + pos, static_cast<uint32_t>(end) };
+				 pos += end + 1;
+				
+				 // Field 2: Amount
+				 end = simd_find_delimiter(raw_buf + pos, raw_len - pos, '|');
+				 out->amount = { raw_buf + pos, static_cast<uint32_t>(end) };
+				 pos += end + 1;
+				
+				 // ... remaining fields follow same pattern
+				 // Each field is a VIEW into raw_buf, not a copy
+				
+				 return true;
+				}
+				Show more lines
+				Why SIMD matters here:
+					® Each transaction has ~20 fields, each delimited
+					® Scalar search: 20 × avg 15 bytes = ~300 byte-by-byte comparisons
+					® AVX2 search: processes 32 bytes per instruction → ~10 iterations total
+					® At 12,000 TPS, this saves ~3.6 million byte comparisons per second
+					® More importantly: predictable latency (no branch mispredictions in the SIMD path)
+					Integration with NUMA arena
+					The TransactionView struct itself was allocated from the per-core NumaArena. The raw receive buffer was already on NUMA node 0 (NIC DMA landed there). The FieldView pointers pointed directly into that buffer. Zero copies, zero allocations on the hot path.
+					
+					Phase 3: Lock-free SPSC queue for pipeline stages
+					The pipeline problem
+					The hot path had three stages:
+						1. Parse + Feature Extract (CPU-bound)
+						2. XGBoost Score (CPU-bound)
+						3. Transformer Classify (GPU-bound)
+						These ran on different cores (and stage 3 on the GPU). The Python implementation used threading.Queue with mutex locks, causing:
+							} Lock contention at high throughput
+							} Priority inversion
+							} Unpredictable tail latency
+							What I built: Lock-free SPSC ring buffer
+							Each pipeline stage pair communicated through a single-producer single-consumer (SPSC) lock-free ring buffer — the fastest possible inter-thread communication primitive.
+							
+							
+							
+							C++
+							#include <atomic>
+							#include <cstddef>
+							#include <new>
+							
+							// Cache line size for padding
+							static constexpr size_t CACHE_LINE = 64;
+							
+							template <typename T, size_t Capacity>
+							class SPSCQueue {
+							 static_assert((Capacity & (Capacity - 1)) == 0,
+							 "Capacity must be power of 2");
+							
+							public:
+							 SPSCQueue() : head_(0), tail_(0) {}
+							
+							 // Producer: try to push (called from one thread only)
+							 bool try_push(const T& item) {
+							 const size_t head = head_.load(std::memory_order_relaxed);
+							 const size_t next = (head + 1) & (Capacity - 1);
+							
+							 // Check if queue is full
+							 if (next == tail_.load(std::memory_order_acquire)) {
+							 return false; // queue full — apply backpressure
+							 }
+							
+							 slots_[head] = item;
+							 head_.store(next, std::memory_order_release);
+							 return true;
+							 }
+							
+							 // Consumer: try to pop (called from one thread only)
+							 bool try_pop(T& item) {
+							 const size_t tail = tail_.load(std::memory_order_relaxed);
+							
+							 // Check if queue is empty
+							 if (tail == head_.load(std::memory_order_acquire)) {
+							 return false; // queue empty
+							 }
+							
+							 item = slots_[tail];
+							 const size_t next = (tail + 1) & (Capacity - 1);
+							 tail_.store(next, std::memory_order_release);
+							 return true;
+							 }
+							
+							private:
+							 // Pad head and tail to separate cache lines
+							 // Prevents false sharing between producer and consumer
+							 alignas(CACHE_LINE) std::atomic<size_t> head_;
+							 char pad1_[CACHE_LINE - sizeof(std::atomic<size_t>)];
+							
+							 alignas(CACHE_LINE) std::atomic<size_t> tail_;
+							 char pad2_[CACHE_LINE - sizeof(std::atomic<size_t>)];
+							
+							 alignas(CACHE_LINE) T slots_[Capacity];
+							};
+							Show more lines
+							Critical design details:
+								1. Power-of-2 capacity → bitwise AND replaces modulo (branchless wrap-around)
+								2. std::memory_order_acquire/release → minimum necessary ordering (no full barriers, no seq_cst)
+								3. Cache-line padding between head_ and tail_ → eliminates false sharing (producer writes head_, consumer writes tail_ — on different cache lines, so no ping-ponging)
+								4. No locks, no mutexes, no condition variables → pure atomic loads/stores
+								5. Bounded capacity → natural backpressure (if queue is full, producer gets false → Sentinel returns 429)
+								Pipeline wiring
+								
+								
+								
+								C++
+								// Per-core pipeline (all on NUMA node 0)
+								
+								// Stage 1 → Stage 2: parsed transaction + features
+								SPSCQueue<FeatureVector*, 1024> parse_to_score_queue;
+								
+								// Stage 2 → Stage 3: scored transaction (needs GPU classifier)
+								SPSCQueue<ScoredTransaction*, 512> score_to_gpu_queue;
+								
+								// Stage 3 → Response: final decision
+								SPSCQueue<Decision*, 512> gpu_to_response_queue;
+								Show more lines
+								Each queue carried pointers to arena-allocated objects (not the objects themselves), so the queue slots were only 8 bytes each — the actual data stayed in NUMA-local memory.
+								
+								Phase 4: Apache Arrow integration for zero-copy publish boundary
+								The publish boundary problem
+								After the hot-path decision, Sentinel needed to publish the transaction + features + decision to downstream consumers (audit log, retraining pipeline, analytics). The Python implementation serialized everything to JSON and published to Kafka — adding ~3 ms of serialization overhead per request.
+								What I built: Arrow IPC zero-copy publish
+								I structured the hot-path output as an Apache Arrow RecordBatch that was built in-place during processing (not serialized after the fact).
+								
+								
+								
+								C++
+								#include <arrow/api.h>
+								#include <arrow/ipc/api.h>
+								#include <arrow/io/api.h>
+								
+								class ArrowPublisher {
+								public:
+								 ArrowPublisher(int numa_node, size_t batch_size)
+								 : batch_size_(batch_size)
+								 , count_(0)
+								 {
+								 // Pre-allocate Arrow builders on the correct NUMA node
+								 // Arrow supports custom memory pools
+								 pool_ = std::make_shared<NumaMemoryPool>(numa_node);
+								
+								 transaction_id_builder_ =
+								 std::make_unique<arrow::StringBuilder>(pool_.get());
+								 amount_builder_ =
+								 std::make_unique<arrow::DoubleBuilder>(pool_.get());
+								 risk_score_builder_ =
+								 std::make_unique<arrow::FloatBuilder>(pool_.get());
+								 decision_builder_ =
+								 std::make_unique<arrow::Int8Builder>(pool_.get());
+								 latency_us_builder_ =
+								 std::make_unique<arrow::Int64Builder>(pool_.get());
+								 // ... more fields for audit envelope
+								 }
+								
+								 // Called on hot path: append one decision to the batch
+								 // No serialization — just append to columnar builders
+								 void append(const TransactionView& txn,
+								 float risk_score,
+								 int8_t decision,
+								 int64_t latency_us) {
+								 transaction_id_builder_->Append(txn.transaction_id.data,
+								 txn.transaction_id.length);
+								 amount_builder_->Append(txn.parsed_amount);
+								 risk_score_builder_->Append(risk_score);
+								 decision_builder_->Append(decision);
+								 latency_us_builder_->Append(latency_us);
+								
+								 count_++;
+								 if (count_ >= batch_size_) {
+								 flush();
+								 }
+								 }
+								
+								 // Flush: finalize Arrow RecordBatch and publish via IPC
+								 void flush() {
+								 if (count_ == 0) return;
+								
+								 // Finalize arrays (zero-copy — builders own the memory)
+								 auto batch = arrow::RecordBatch::Make(
+								 schema_,
+								 count_,
+								 {
+								 transaction_id_builder_->Finish().ValueOrDie(),
+								 amount_builder_->Finish().ValueOrDie(),
+								 risk_score_builder_->Finish().ValueOrDie(),
+								 decision_builder_->Finish().ValueOrDie(),
+								 latency_us_builder_->Finish().ValueOrDie(),
+								 }
+								 );
+								
+								 // Publish via Arrow IPC (shared memory or socket)
+								 // Downstream consumers read the same memory — ZERO copy
+								 auto stream = arrow::io::FixedSizeBufferWriter(
+								 shared_mem_buffer_);
+								 auto writer = arrow::ipc::MakeStreamWriter(
+								 &stream, schema_).ValueOrDie();
+								 writer->WriteRecordBatch(*batch);
+								 writer->Close();
+								
+								 // Reset builders for next batch
+								 count_ = 0;
+								 // Builders reset internally on Finish()
+								 }
+								
+								private:
+								 std::shared_ptr<NumaMemoryPool> pool_;
+								 size_t batch_size_;
+								 size_t count_;
+								 std::shared_ptr<arrow::Schema> schema_;
+								 std::unique_ptr<arrow::StringBuilder> transaction_id_builder_;
+								 std::unique_ptr<arrow::DoubleBuilder> amount_builder_;
+								 std::unique_ptr<arrow::FloatBuilder> risk_score_builder_;
+								 std::unique_ptr<arrow::Int8Builder> decision_builder_;
+								 std::unique_ptr<arrow::Int64Builder> latency_us_builder_;
+								 std::shared_ptr<arrow::Buffer> shared_mem_buffer_;
+								};
+								Show more lines
+								Why Arrow IPC instead of JSON/Protobuf/Kafka serialization:
+									1. Zero serialization on hot path — Arrow builders append directly into columnar memory
+									2. Zero copy to downstream — consumers read the same shared-memory buffer
+									3. Columnar layout — downstream analytics (Velox, Spark, cuDF) can consume directly without transformation
+									4. NUMA-aware — Arrow memory pool backed by our NumaArena-style allocator
+									5. Batched publish — amortize IPC overhead across many transactions
+									RDMA publish path (for cross-node audit)
+									For publishing to the audit service on a different node, I evaluated RDMA writes over RoCEv2 to avoid kernel network stack overhead. The Arrow RecordBatch buffer was registered as an RDMA memory region, and the publish operation was a single ibv_post_send with IBV_WR_RDMA_WRITE — the remote node received the Arrow batch directly in its memory without any CPU involvement on either side.
+									I implemented this but kept it as an optional path (configurable via Sentinel config), with standard TCP as the default for operational simplicity.
+									
+									Phase 5: FFI boundary to Rust Sentinel Gateway
+									The C++ hot-path engine was compiled as a shared library (.so) and exposed to the Rust Sentinel Gateway via a C-compatible FFI interface:
+									
+									
+									
+									C++
+									// sentinel_hotpath.h — C ABI for Rust FFI
+									extern "C" {
+									
+									 // Initialize the hot-path engine (called once at startup)
+									 // Creates NUMA arenas, thread pools, Arrow publishers
+									 int sentinel_hotpath_init(int numa_node, int num_workers);
+									
+									 // Process a transaction batch (called from Rust on hot path)
+									 // Input: raw transaction buffer (already in NUMA-local memory)
+									 // Output: decisions written into pre-allocated output buffer
+									 // Returns: number of decisions produced
+									 int sentinel_hotpath_process(
+									 const char* raw_buf, // raw transaction bytes
+									 size_t raw_len, // length
+									 int8_t* decisions_out, // pre-allocated output buffer
+									 float* scores_out, // pre-allocated output buffer
+									 size_t max_transactions // max transactions in batch
+									 );
+									
+									 // Shutdown (cleanup arenas, flush Arrow publishers)
+									 void sentinel_hotpath_shutdown();
+									}
+									Show more lines
+									On the Rust side:
+									
+									
+									
+									Rust
+									// Rust FFI binding
+									extern "C" {
+									 fn sentinel_hotpath_init(numa_node: i32, num_workers: i32) -> i32;
+									 fn sentinel_hotpath_process(
+									 raw_buf: *const u8,
+									 raw_len: usize,
+									 decisions_out: *mut i8,
+									 scores_out: *mut f32,
+									 max_transactions: usize,
+									 ) -> i32;
+									 fn sentinel_hotpath_shutdown();
+									}
+									Show more lines
+									The critical design choice: the raw transaction buffer was allocated in Rust using a NUMA-aware allocator (matching the C++ side's NUMA node), and passed by pointer to C++ — no copy across the FFI boundary. The output buffers were similarly pre-allocated in Rust. The FFI call was essentially a pointer handoff, not a data transfer.
+									
+									Results
+									Metric	Python baseline	C++ hot-path engine
+									P50 end-to-end (hot path)	8.2 ms	1.8 ms
+									P99 end-to-end (hot path)	18.4 ms	4.1 ms
+									Memory allocations per request	~340	0 (arena)
+									Cross-NUMA accesses per request	~2,800	0 (NUMA-pinned)
+									Serialization overhead	3.1 ms	0 (Arrow in-place)
+									Inter-stage communication	0.8 ms (mutex queue)	< 0.1 µs (SPSC)
+									TLB miss rate	4.2%	0.15%
+									CPU cache miss rate (L1d)	8.7%	1.2%
+									
+									
+									📖 Story 2 (Rust): "Building the Sentinel Gateway Routing, Circuit Breaker, and Admission Control Layer"
+									
+									The problem
+									Sentinel Gateway needed a high-performance, fault-tolerant routing layer that could:
+										w Route requests to the correct inference backend (vLLM, TensorRT-LLM, XGBoost, ONNX Runtime) based on model, tenant, priority, and GPU health
+										w Consistently hash requests to backends for KV cache locality (same user's requests go to same vLLM instance → prefix cache hits)
+										w Circuit-break degraded backends before they cascade failures
+										w Shed load intelligently when GPU fleet is under pressure
+										w Handle 500+ concurrent requests with sub-millisecond routing overhead
+										w Stream SSE responses from LLM backends to clients without buffering
+										The existing routing was a Python Flask app with requests library calls — synchronous, blocking, no circuit breaking, no health awareness. Under load, one slow backend would block the entire gateway.
+										My task: build the Sentinel Gateway routing layer in Rust using tokio async runtime, with production-grade circuit breaking, consistent hashing, and GPU-aware admission control.
+										
+										Phase 1: Consistent hashing for KV cache locality
+										The cache locality problem
+										vLLM and SGLang support prefix caching — if two requests share the same prompt prefix (e.g., our fraud analysis system prompt), the KV cache for that prefix is reused. But this only works if both requests hit the same vLLM instance.
+										With random load balancing, requests for the same tenant/model scatter across all backends, and prefix cache hit rate drops to near zero.
+										What I built: Consistent hash ring with virtual nodes
+										
+										
+										
+										Rust
+										use std::collections::BTreeMap;
+										use std::hash::{Hash, Hasher};
+										use siphasher::sip::SipHasher13;
+										
+										/// A backend instance (e.g., one vLLM pod)
+										#[derive(Clone, Debug)]
+										pub struct Backend {
+										 pub id: String,
+										 pub address: String,
+										 pub model: String,
+										 pub gpu_memory_free_mb: u64,
+										 pub active_requests: u32,
+										 pub is_healthy: bool,
+										}
+										
+										/// Consistent hash ring with virtual nodes
+										pub struct ConsistentHashRing {
+										 ring: BTreeMap<u64, String>, // hash → backend_id
+										 backends: HashMap<String, Backend>,
+										 virtual_nodes_per_backend: usize,
+										}
+										
+										impl ConsistentHashRing {
+										 pub fn new(virtual_nodes_per_backend: usize) -> Self {
+										 Self {
+										 ring: BTreeMap::new(),
+										 backends: HashMap::new(),
+										 virtual_nodes_per_backend,
+										 }
+										 }
+										
+										 /// Add a backend: places N virtual nodes on the ring
+										 pub fn add_backend(&mut self, backend: Backend) {
+										 for i in 0..self.virtual_nodes_per_backend {
+										 let hash = self.hash_key(
+										 &format!("{}:vn{}", backend.id, i)
+										 );
+										 self.ring.insert(hash, backend.id.clone());
+										 }
+										 self.backends.insert(backend.id.clone(), backend);
+										 }
+										
+										 /// Remove a backend (graceful drain or failure)
+										 pub fn remove_backend(&mut self, backend_id: &str) {
+										 for i in 0..self.virtual_nodes_per_backend {
+										 let hash = self.hash_key(
+										 &format!("{}:vn{}", backend_id, i)
+										 );
+										 self.ring.remove(&hash);
+										 }
+										 self.backends.remove(backend_id);
+										 }
+										
+										 /// Route a request: find the backend for this key
+										 /// Key is typically: "{tenant_id}:{model_name}:{prompt_prefix_hash}"
+										 /// This ensures same-tenant, same-model, same-prefix requests
+										 /// hit the same backend → maximizes prefix cache hits
+										 pub fn route(&self, key: &str) -> Option<&Backend> {
+										 if self.ring.is_empty() {
+										 return None;
+										 }
+										
+										 let hash = self.hash_key(key);
+										
+										 // Find the first backend clockwise from the hash point
+										 let backend_id = self.ring
+										 .range(hash..)
+										 .next()
+										 .or_else(|| self.ring.iter().next()) // wrap around
+										 .map(|(_, id)| id)?;
+										
+										 let backend = self.backends.get(backend_id)?;
+										
+										 // Skip unhealthy backends (walk clockwise to next)
+										 if !backend.is_healthy {
+										 return self.route_skip_unhealthy(hash, backend_id);
+										 }
+										
+										 Some(backend)
+										 }
+										
+										 /// Walk the ring clockwise, skipping unhealthy nodes
+										 fn route_skip_unhealthy(&self, start_hash: u64,
+										 skip_id: &str) -> Option<&Backend> {
+										 for (_, id) in self.ring.range(start_hash..).skip(1) {
+										 if id != skip_id {
+										 if let Some(b) = self.backends.get(id) {
+										 if b.is_healthy {
+										 return Some(b);
+										 }
+										 }
+										 }
+										 }
+										 // Wrap around
+										 for (_, id) in self.ring.iter() {
+										 if id != skip_id {
+										 if let Some(b) = self.backends.get(id) {
+										 if b.is_healthy {
+										 return Some(b);
+										 }
+										 }
+										 }
+										 }
+										 None
+										 }
+										
+										 fn hash_key(&self, key: &str) -> u64 {
+										 let mut hasher = SipHasher13::new();
+										 key.hash(&mut hasher);
+										 hasher.finish()
+										 }
+										}
+										Show more lines
+										Key design decisions:
+											1. Virtual nodes (150 per backend): ensures even distribution even with small backend counts. Without virtual nodes, 4 backends would have very uneven hash space coverage
+											2. Routing key = {tenant_id}:{model}:{prefix_hash}: this ensures same-tenant requests for the same model with the same system prompt prefix always land on the same backend → prefix cache hit rate went from ~5% to ~72%
+											3. Unhealthy skip: if the target backend is circuit-broken, we walk clockwise to the next healthy one — minimal disruption to other tenants' routing
+											4. BTreeMap: O(log N) lookup, naturally ordered, efficient range queries for clockwise walk
+											5. SipHasher13: fast, well-distributed, DoS-resistant hash
+											
+											Phase 2: Circuit breaker (per-backend, per-model)
+											The cascading failure problem
+											When a vLLM instance becomes degraded (GPU OOM, driver hang, slow decode), requests to that instance time out. Without circuit breaking:
+												w Timed-out requests consume gateway threads
+												w Retries amplify load on the degraded backend
+												w Other backends receive less traffic (unfair)
+												w Eventually the entire gateway becomes unresponsive
+												What I built: State-machine circuit breaker
+												
+												
+												
+												Rust
+												use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
+												use std::time::{Duration, Instant};
+												use tokio::sync::RwLock;
+												
+												#[derive(Debug, Clone, Copy, PartialEq)]
+												pub enum CircuitState {
+												 Closed, // normal — requests flow through
+												 Open, // tripped — requests fail fast (503)
+												 HalfOpen, // probing — allow ONE request to test recovery
+												}
+												
+												pub struct CircuitBreaker {
+												 state: RwLock<CircuitState>,
+												
+												 // Sliding window error tracking
+												 window_failures: AtomicU32,
+												 window_successes: AtomicU32,
+												 window_start: RwLock<Instant>,
+												
+												 // Configuration
+												 config: CircuitBreakerConfig,
+												
+												 // When the circuit was opened (for recovery timeout)
+												 opened_at: RwLock<Option<Instant>>,
+												
+												 // Metrics
+												 total_rejections: AtomicU64,
+												 total_trips: AtomicU64,
+												}
+												
+												#[derive(Clone)]
+												pub struct CircuitBreakerConfig {
+												 pub failure_threshold: u32, // failures in window to trip
+												 pub success_threshold: u32, // successes in half-open to close
+												 pub window_duration: Duration, // sliding window size
+												 pub recovery_timeout: Duration, // time in Open before trying HalfOpen
+												 pub error_rate_threshold: f64, // e.g., 0.5 = 50% error rate trips
+												 pub min_requests_in_window: u32, // need at least N requests before evaluating
+												}
+												
+												impl CircuitBreaker {
+												 pub fn new(config: CircuitBreakerConfig) -> Self {
+												 Self {
+												 state: RwLock::new(CircuitState::Closed),
+												 window_failures: AtomicU32::new(0),
+												 window_successes: AtomicU32::new(0),
+												 window_start: RwLock::new(Instant::now()),
+												 config,
+												 opened_at: RwLock::new(None),
+												 total_rejections: AtomicU64::new(0),
+												 total_trips: AtomicU64::new(0),
+												 }
+												 }
+												
+												 /// Called BEFORE sending a request to the backend
+												 /// Returns Ok(permit) if allowed, Err if circuit is open
+												 pub async fn check_request(&self) -> Result<RequestPermit, CircuitOpen> {
+												 let state = *self.state.read().await;
+												
+												 match state {
+												 CircuitState::Closed => {
+												 // Normal flow — check if window needs rotation
+												 self.maybe_rotate_window().await;
+												 Ok(RequestPermit { breaker: self })
+												 }
+												
+												 CircuitState::Open => {
+												 // Check if recovery timeout has elapsed
+												 if let Some(opened_at) = *self.opened_at.read().await {
+												 if opened_at.elapsed() >= self.config.recovery_timeout {
+												 // Transition to HalfOpen — allow one probe
+												 *self.state.write().await = CircuitState::HalfOpen;
+												 tracing::info!("Circuit breaker → HalfOpen (probing)");
+												 Ok(RequestPermit { breaker: self })
+												 } else {
+												 // Still open — fail fast
+												 self.total_rejections.fetch_add(1, Ordering::Relaxed);
+												 Err(CircuitOpen {
+												 retry_after: self.config.recovery_timeout
+												 - opened_at.elapsed(),
+												 })
+												 }
+												 } else {
+												 Err(CircuitOpen {
+												 retry_after: self.config.recovery_timeout,
+												 })
+												 }
+												 }
+												
+												 CircuitState::HalfOpen => {
+												 // Only allow limited probes in half-open
+												 // For simplicity: allow one at a time
+												 Ok(RequestPermit { breaker: self })
+												 }
+												 }
+												 }
+												
+												 /// Called AFTER a request completes (success or failure)
+												 pub async fn record_result(&self, success: bool) {
+												 let state = *self.state.read().await;
+												
+												 match state {
+												 CircuitState::Closed => {
+												 if success {
+												 self.window_successes.fetch_add(1, Ordering::Relaxed);
+												 } else {
+												 let failures = self.window_failures
+												 .fetch_add(1, Ordering::Relaxed) + 1;
+												 let successes = self.window_successes
+												 .load(Ordering::Relaxed);
+												 let total = failures + successes;
+												
+												 // Check trip conditions
+												 if total >= self.config.min_requests_in_window {
+												 let error_rate = failures as f64 / total as f64;
+												 if error_rate >= self.config.error_rate_threshold
+												 || failures >= self.config.failure_threshold
+												 {
+												 self.trip().await;
+												 }
+												 }
+												 }
+												 }
+												
+												 CircuitState::HalfOpen => {
+												 if success {
+												 let successes = self.window_successes
+												 .fetch_add(1, Ordering::Relaxed) + 1;
+												 if successes >= self.config.success_threshold {
+												 // Backend recovered — close circuit
+												 *self.state.write().await = CircuitState::Closed;
+												 self.reset_window().await;
+												 tracing::info!("Circuit breaker → Closed (recovered)");
+												 }
+												 } else {
+												 // Probe failed — back to Open
+												 self.trip().await;
+												 }
+												 }
+												
+												 CircuitState::Open => {
+												 // Shouldn't happen (requests are rejected in Open)
+												 // But handle gracefully
+												 }
+												 }
+												 }
+												
+												 async fn trip(&self) {
+												 *self.state.write().await = CircuitState::Open;
+												 *self.opened_at.write().await = Some(Instant::now());
+												 self.total_trips.fetch_add(1, Ordering::Relaxed);
+												 self.reset_window().await;
+												 tracing::warn!("Circuit breaker TRIPPED → Open");
+												 }
+												
+												 async fn reset_window(&self) {
+												 self.window_failures.store(0, Ordering::Relaxed);
+												 self.window_successes.store(0, Ordering::Relaxed);
+												 *self.window_start.write().await = Instant::now();
+												 }
+												
+												 async fn maybe_rotate_window(&self) {
+												 let start = *self.window_start.read().await;
+												 if start.elapsed() >= self.config.window_duration {
+												 self.reset_window().await;
+												 }
+												 }
+												}
+												Show more lines
+												Key design decisions:
+													1. Per-backend, per-model circuit breakers: a degraded vLLM-70B instance doesn't trip the circuit for XGBoost scoring on the same node
+													2. Error rate threshold (not just count): 5 failures out of 10 requests (50%) trips, but 5 failures out of 10,000 (0.05%) does not
+													3. min_requests_in_window: prevents tripping on the first request after a window reset
+													4. HalfOpen → single probe: sends exactly one request to test recovery, preventing "probe storm"
+													5. recovery_timeout: configurable per-model (XGBoost recovers fast, LLM may need minutes)
+													6. Metrics exposed: total_rejections and total_trips feed directly into Prometheus for alerting
+													
+													Phase 3: GPU-aware admission control and load shedding
+													The overload problem
+													Even with circuit breaking, the gateway could accept more requests than the GPU fleet could handle, leading to:
+														w KV cache OOM on vLLM instances
+														w Increasing queue depth → increasing latency
+														w P99 latency explosion
+														What I built: Token-budget admission controller with GPU headroom policy
+														
+														
+														
+														Rust
+														use std::sync::atomic::{AtomicI64, Ordering};
+														
+														/// Per-model admission controller
+														/// Tracks estimated token budget vs capacity
+														pub struct AdmissionController {
+														 // Current estimated tokens in flight
+														 tokens_in_flight: AtomicI64,
+														
+														 // Maximum tokens allowed (based on GPU memory / KV cache capacity)
+														 max_tokens: i64,
+														
+														 // Per-tenant tracking
+														 tenant_tokens: DashMap<String, AtomicI64>,
+														
+														 // GPU health integration
+														 gpu_monitor: Arc<GpuMonitor>,
+														
+														 // Configuration
+														 config: AdmissionConfig,
+														}
+														
+														#[derive(Clone)]
+														pub struct AdmissionConfig {
+														 pub max_tokens_per_model: i64,
+														 pub max_tokens_per_tenant: i64,
+														 pub gpu_memory_headroom_mb: u64, // deny if GPU free < this
+														 pub gpu_utilization_cap: f32, // throttle if GPU util > this
+														 pub kv_cache_pressure_threshold: f32, // deny if KV usage > this
+														}
+														
+														/// GPU health monitor (reads NVML/DCGM via FFI to C library)
+														pub struct GpuMonitor {
+														 gpu_memory_free_mb: AtomicU64,
+														 gpu_utilization_pct: AtomicU32,
+														 kv_cache_usage_pct: AtomicU32, // from vLLM metrics endpoint
+														}
+														
+														impl AdmissionController {
+														 /// Evaluate whether to admit a request
+														 pub async fn admit(
+														 &self,
+														 tenant_id: &str,
+														 model: &str,
+														 estimated_prompt_tokens: i64,
+														 estimated_max_output_tokens: i64,
+														 priority: Priority,
+														 ) -> AdmissionDecision {
+														 let total_tokens = estimated_prompt_tokens
+														 + estimated_max_output_tokens;
+														
+														 // Check 1: GPU memory headroom
+														 let gpu_free = self.gpu_monitor.gpu_memory_free_mb
+														 .load(Ordering::Relaxed);
+														 if gpu_free < self.config.gpu_memory_headroom_mb {
+														 return AdmissionDecision::Reject {
+														 reason: "GPU memory below headroom threshold",
+														 retry_after_ms: 500,
+														 };
+														 }
+														
+														 // Check 2: KV cache pressure
+														 let kv_pct = self.gpu_monitor.kv_cache_usage_pct
+														 .load(Ordering::Relaxed);
+														 if kv_pct > (self.config.kv_cache_pressure_threshold * 100.0)
+														 as u32 {
+														 // Under KV pressure: only admit high-priority
+														 if priority < Priority::Checkout {
+														 return AdmissionDecision::Degrade {
+														 action: DegradeAction::ClampMaxTokens(256),
+														 reason: "KV cache pressure — clamping output",
+														 };
+														 }
+														 }
+														
+														 // Check 3: Global token budget
+														 let current = self.tokens_in_flight
+														 .load(Ordering::Relaxed);
+														 if current + total_tokens > self.max_tokens {
+														 // Over budget: shed low-priority traffic
+														 if priority <= Priority::Analytics {
+														 return AdmissionDecision::Reject {
+														 reason: "Token budget exceeded",
+														 retry_after_ms: 1000,
+														 };
+														 }
+														 // High-priority: degrade instead of reject
+														 return AdmissionDecision::Degrade {
+														 action: DegradeAction::FallbackToSmallerModel,
+														 reason: "Token budget tight — falling back",
+														 };
+														 }
+														
+														 // Check 4: Per-tenant budget
+														 let tenant_current = self.tenant_tokens
+														 .entry(tenant_id.to_string())
+														 .or_insert_with(|| AtomicI64::new(0))
+														 .load(Ordering::Relaxed);
+														 if tenant_current + total_tokens
+														 > self.config.max_tokens_per_tenant {
+														 return AdmissionDecision::Reject {
+														 reason: "Tenant token quota exceeded",
+														 retry_after_ms: 200,
+														 };
+														 }
+														
+														 // Admit: reserve tokens
+														 self.tokens_in_flight
+														 .fetch_add(total_tokens, Ordering::Relaxed);
+														 self.tenant_tokens
+														 .get(tenant_id)
+														 .unwrap()
+														 .fetch_add(total_tokens, Ordering::Relaxed);
+														
+														 AdmissionDecision::Admit {
+														 reserved_tokens: total_tokens,
+														 tenant_id: tenant_id.to_string(),
+														 }
+														 }
+														
+														 /// Called when request completes: release token budget
+														 pub fn release(&self, tenant_id: &str, tokens: i64) {
+														 self.tokens_in_flight
+														 .fetch_sub(tokens, Ordering::Relaxed);
+														 if let Some(t) = self.tenant_tokens.get(tenant_id) {
+														 t.fetch_sub(tokens, Ordering::Relaxed);
+														 }
+														 }
+														}
+														
+														#[derive(Debug)]
+														pub enum AdmissionDecision {
+														 Admit { reserved_tokens: i64, tenant_id: String },
+														 Degrade { action: DegradeAction, reason: &'static str },
+														 Reject { reason: &'static str, retry_after_ms: u64 },
+														}
+														
+														#[derive(Debug)]
+														pub enum DegradeAction {
+														 ClampMaxTokens(i64),
+														 FallbackToSmallerModel,
+														 FallbackToRulesOnly,
+														 DropNonEssentialContext,
+														}
+														
+														#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+														pub enum Priority {
+														 Analytics = 0,
+														 AgentAssist = 1,
+														 Checkout = 2,
+														}
+														Show more lines
+														Key design decisions:
+															1. Token-based budgeting (not request-based): one request with 4096 tokens consumes 16× more GPU resources than one with 256 tokens — request counting would be wildly inaccurate
+															2. GPU headroom policy via NVML: reads GPU memory and utilization from the C NVML library via FFI — prevents OOM proactively, not reactively
+															3. KV cache pressure from vLLM metrics: polls vllm:gpu_cache_usage_perc and uses it for admission decisions — this is the most accurate predictor of vLLM OOM
+															4. Priority-based shedding: Checkout > AgentAssist > Analytics — under pressure, analytics requests are rejected first, checkout requests are never rejected (only degraded)
+															5. Graceful degradation hierarchy: clamp tokens → fallback to smaller model → fallback to rules-only → reject. This matches the three-path architecture (hot/warm/cold)
+															6. Per-tenant fairness: tenant A can't starve tenant B by consuming the entire token budget
+															
+															Phase 4: The complete request lifecycle (tying it all together)
+															Here is how all the pieces compose inside Sentinel Gateway for a single fraud analysis request:
+															
+															
+															
+															Rust
+															/// Main request handler in Sentinel Gateway
+															pub async fn handle_fraud_request(
+															 req: FraudRequest,
+															 state: Arc<GatewayState>,
+															) -> Result<Response, GatewayError> {
+															 let start = Instant::now();
+															
+															 // ─── Step 1: Admission control ───
+															 let admission = state.admission_controller
+															 .admit(
+															 &req.tenant_id,
+															 &req.model,
+															 req.estimated_prompt_tokens,
+															 req.max_output_tokens,
+															 req.priority,
+															 )
+															 .await;
+															
+															 let (reserved_tokens, max_tokens_override) = match admission {
+															 AdmissionDecision::Admit { reserved_tokens, .. } => {
+															 (reserved_tokens, None)
+															 }
+															 AdmissionDecision::Degrade { action, reason } => {
+															 tracing::warn!(%reason, "Request degraded");
+															 match action {
+															 DegradeAction::ClampMaxTokens(n) =>
+															 (n, Some(n)),
+															 DegradeAction::FallbackToSmallerModel =>
+															 return handle_fallback_model(req, state).await,
+															 DegradeAction::FallbackToRulesOnly =>
+															 return handle_rules_only(req, state).await,
+															 _ => (req.max_output_tokens, None),
+															 }
+															 }
+															 AdmissionDecision::Reject { reason, retry_after_ms } => {
+															 return Ok(Response::overloaded(reason, retry_after_ms));
+															 }
+															 };
+															
+															 // ─── Step 2: Route via consistent hash ───
+															 let route_key = format!(
+															 "{}:{}:{}",
+															 req.tenant_id,
+															 req.model,
+															 req.prompt_prefix_hash
+															 );
+															 let backend = state.hash_ring.read().await
+															 .route(&route_key)
+															 .ok_or(GatewayError::NoBackendAvailable)?;
+															
+															 // ─── Step 3: Circuit breaker check ───
+															 let breaker = state.circuit_breakers
+															 .get(&backend.id)
+															 .ok_or(GatewayError::NoBackendAvailable)?;
+															
+															 let permit = breaker.check_request().await
+															 .map_err(|open| {
+															 // Circuit is open — try next backend on ring
+															 GatewayError::BackendCircuitOpen {
+															 backend_id: backend.id.clone(),
+															 retry_after: open.retry_after,
+															 }
+															 })?;
+															
+															 // ─── Step 4: Forward to backend with timeout ───
+															 let timeout_duration = Duration::from_millis(
+															 req.slo_deadline_ms.unwrap_or(200)
+															 );
+															
+															 let result = tokio::time::timeout(
+															 timeout_duration,
+															 forward_to_backend(
+															 &backend,
+															 &req,
+															 max_tokens_override,
+															 ),
+															 ).await;
+															
+															 // ─── Step 5: Record result for circuit breaker ───
+															 match &result {
+															 Ok(Ok(response)) => {
+															 breaker.record_result(true).await;
+															 state.admission_controller
+															 .release(&req.tenant_id, reserved_tokens);
+															
+															 // ─── Step 6: Publish to Arrow audit boundary ───
+															 state.audit_publisher.publish(
+															 &req,
+															 response,
+															 start.elapsed(),
+															 ).await;
+															
+															 Ok(response.clone())
+															 }
+															 Ok(Err(e)) => {
+															 breaker.record_result(false).await;
+															 state.admission_controller
+															 .release(&req.tenant_id, reserved_tokens);
+															 tracing::error!(?e, "Backend error");
+															 Err(GatewayError::BackendError(e.to_string()))
+															 }
+															 Err(_timeout) => {
+															 breaker.record_result(false).await;
+															 state.admission_controller
+															 .release(&req.tenant_id, reserved_tokens);
+															 tracing::warn!(
+															 backend = %backend.id,
+															 "Request timed out"
+															 );
+															 Err(GatewayError::Timeout)
+															 }
+															 }
+															}
+															Show more lines
+															The flow in one sentence:
+																Admission control (token budget + GPU headroom) → consistent hash routing (prefix cache locality) → circuit breaker check (fail fast if degraded) → forward with SLO timeout → record result → publish audit envelope via Arrow.
+																
+																Phase 5: SSE streaming with cancellation propagation
+																For the LLM warm/cold paths, Sentinel streams tokens back to the client via Server-Sent Events (SSE). If the client disconnects mid-stream, the gateway must propagate cancellation to the backend to free GPU resources immediately.
+																
+																
+																
+																Rust
+																use axum::response::sse::{Event, Sse};
+																use tokio_stream::StreamExt;
+																use tokio_util::sync::CancellationToken;
+																
+																pub async fn handle_streaming_request(
+																 req: FraudRequest,
+																 state: Arc<GatewayState>,
+																) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+																 let cancel = CancellationToken::new();
+																 let cancel_clone = cancel.clone();
+																
+																 // Spawn background task that forwards to backend
+																 // and streams tokens through a channel
+																 let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+																
+																 tokio::spawn(async move {
+																 // Drop guard: if this task is dropped (client disconnect),
+																 // the cancel token fires → backend request is aborted
+																 let _guard = cancel_clone.drop_guard();
+																
+																 let mut backend_stream = forward_streaming(
+																 &backend, &req
+																 ).await.unwrap();
+																
+																 loop {
+																 tokio::select! {
+																 // Backend sends a token
+																 Some(token) = backend_stream.next() => {
+																 if tx.send(token).await.is_err() {
+																 // Client disconnected — tx dropped
+																 // _guard drops → cancel_clone fires
+																 // → backend abort propagates
+																 break;
+																 }
+																 }
+																 // Cancellation requested
+																 _ = cancel.cancelled() => {
+																 // Abort the backend request
+																 // This saves GPU spend immediately
+																 tracing::info!("Client disconnected — aborting backend");
+																 break;
+																 }
+																 }
+																 }
+																 });
+																
+																 // Convert channel to SSE stream
+																 let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+																 .map(|token| {
+																 Ok(Event::default()
+																 .data(format!(r#"{{"choices":[{{"delta":{{"content":"{}"}}}}}]}}"#, token)))
+																 });
+																
+																 Sse::new(stream)
+																}
+																Show more lines
+																Why cancellation propagation matters for GPU economics:
+																	w A 70B model decode at 30 tokens/sec uses ~$0.0001 per token
+																	w If a client disconnects after receiving 10 tokens but the backend generates 500 more before timing out: 
+																		w Wasted: 490 tokens × $0.0001 = $0.049 per abandoned request
+																		w At 10,000 abandonments/day = $490/day wasted
+																		w Cancellation propagation saves this immediately
+																		
+																		Results
+																		Metric	Python Flask baseline	Rust Sentinel Gateway
+																		Routing overhead (P50)	2.1 ms	0.04 ms
+																		Routing overhead (P99)	8.7 ms	0.12 ms
+																		Prefix cache hit rate	5% (random LB)	72% (consistent hash)
+																		Circuit breaker trip → recovery	N/A (no CB)	< 30 sec automatic
+																		Max concurrent requests	~200 (GIL-limited)	50,000+ (tokio async)
+																		Overload behavior	Cascade failure	Graceful 429/503 + degrade
+																		GPU waste from abandoned requests	~$490/day	~$12/day (cancel propagation)
+																		Memory per connection	~2 MB (Python)	~8 KB (tokio task)
+																		
+																		
+																		Summary: what these two stories demonstrate together
+																		Skill	Story 1 (C++)	Story 2 (Rust)
+																		NUMA optimization	✅ NumaArena, per-core allocation	—
+																		Memory allocation	✅ Bump-pointer arena, zero malloc on hot path	—
+																		SIMD	✅ AVX2 field parsing	—
+																		Lock-free SPSC	✅ Cache-line-padded ring buffer	—
+																		Apache Arrow	✅ Zero-copy audit publish	—
+																		RDMA	✅ Arrow IPC over RDMA	—
+																		FFI (C++ ↔ Rust)	✅ C ABI shared library	✅ Calls C++ hot-path engine
+																		Consistent hashing	—	✅ Virtual-node ring with health-aware routing
+																		Proxy / routing / LB	—	✅ Model-aware, tenant-aware, prefix-cache-aware
+																		Circuit breaker	—	✅ Per-backend state machine with sliding window
+																		Admission control	—	✅ Token-budget + GPU headroom + per-tenant quotas
+																		SSE streaming	—	✅ With cancellation propagation
+																		Graceful degradation	—	✅ Clamp → fallback model → rules-only → reject
+																		GPU awareness	—	✅ NVML/DCGM integration, KV pressure estimation
+																		
+																		If you want, I can:
+																			1. Add unit tests and benchmarks for any of these components
+																			2. Create architecture diagrams showing how C++ and Rust components interact
+																			3. Build the Prometheus metrics + Grafana dashboard for circuit breaker / admission / routing
+																			4. Add Story 3: the Helios scheduler / control loop (the simulator + predict-vs-observe feedback system)
+																			Just tell me which one.
+																			
+																			Provide your feedback on BizChat
+																			
+																			
+																			
+																			
+																			You said: 
+																			Are we using anyone of below in above implementation .
+																			POSIX shm_open, mmap, and memory-mapped files Rust (memmap2 or raw mmap)
+																			Copilot said: 
+																			Copilot
+																			Reasoning completed in 1 step
+																			Great catch — the honest answer is:
+																				They are implied in several places but never explicitly shown in the code. And they absolutely should be there. The stories have a gap: I mentioned "shared memory" and "zero-copy IPC" without showing the actual shm_open / mmap plumbing that makes it work.
+																				Let me fix that by showing exactly where these primitives belong and the actual implementation.
+																				
+																				Where shm_open / mmap / memmap2 should appear in the Sentinel architecture
+																				There are 4 concrete places in the two stories where POSIX shared memory and memory-mapped files are the right mechanism:
+																				┌─────────────────────────────────────────────────────────────────┐
+│                     SENTINEL GATEWAY                             │
+│                                                                 │
+│  ① Rust ←→ C++ FFI shared memory region                        │
+│     (hot-path feature engine shares buffers with gateway)       │
+│                                                                 │
+│  ② Arrow IPC publish boundary                                  │
+│     (audit consumer reads Arrow batches from shared memory)     │
+│                                                                 │
+│  ③ Model weight loading via mmap                                │
+│     (XGBoost / ONNX models memory-mapped from NVMe)            │
+│                                                                 │
+│  ④ Inter-pod shared memory for GPU tensor handoff               │
+│     (if guardrail + LLM are separate containers in same pod)   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+																				
+																				① Rust ↔ C++ FFI: shared memory region for zero-copy data handoff
+																				The problem in Story 1
+																				The FFI boundary passed raw pointers:
+																				
+																				
+																				
+																				Rust
+																				extern "C" {
+																				 fn sentinel_hotpath_process(
+																				 raw_buf: *const u8, // where does this memory live?
+																				 raw_len: usize,
+																				 decisions_out: *mut i8, // who allocated this?
+																				 scores_out: *mut f32,
+																				 max_transactions: usize,
+																				 ) -> i32;
+																				}
+																				Show more lines
+																				But I never showed who creates the shared memory and how both sides see it. Here's the actual implementation:
+																				C++ side: create and manage the shared memory region
+																				
+																				
+																				
+																				C++
+																				#include <sys/mman.h>
+																				#include <sys/stat.h>
+																				#include <fcntl.h>
+																				#include <unistd.h>
+																				#include <numa.h>
+																				#include <cstring>
+																				
+																				// Layout of the shared memory region between Rust gateway and C++ engine
+																				// Both sides agree on this layout at compile time
+																				struct HotPathSharedRegion {
+																				 // ─── Input area (Rust writes, C++ reads) ───
+																				 alignas(64) uint8_t input_buffer[4 * 1024 * 1024]; // 4 MB for raw transactions
+																				 alignas(64) uint64_t input_len; // actual bytes written
+																				 alignas(64) uint64_t request_count; // number of transactions
+																				
+																				 // ─── Output area (C++ writes, Rust reads) ───
+																				 alignas(64) int8_t decisions[8192]; // decision per transaction
+																				 alignas(64) float scores[8192]; // risk score per transaction
+																				 alignas(64) uint64_t output_count; // actual results written
+																				
+																				 // ─── Control flags (atomic, cache-line aligned) ───
+																				 alignas(64) volatile uint64_t request_ready; // Rust sets to 1 when input is ready
+																				 alignas(64) volatile uint64_t response_ready; // C++ sets to 1 when output is ready
+																				};
+																				
+																				class SharedMemoryManager {
+																				public:
+																				 // Create a POSIX shared memory region on a specific NUMA node
+																				 SharedMemoryManager(const char* shm_name, int numa_node)
+																				 : shm_name_(shm_name)
+																				 , numa_node_(numa_node)
+																				 , region_(nullptr)
+																				 {
+																				 // Step 1: Create shared memory object
+																				 fd_ = shm_open(shm_name, O_CREAT | O_RDWR, 0600);
+																				 if (fd_ < 0) {
+																				 throw std::runtime_error("shm_open failed");
+																				 }
+																				
+																				 // Step 2: Set size
+																				 size_ = sizeof(HotPathSharedRegion);
+																				 if (ftruncate(fd_, size_) != 0) {
+																				 throw std::runtime_error("ftruncate failed");
+																				 }
+																				
+																				 // Step 3: mmap the region
+																				 void* ptr = mmap(
+																				 nullptr,
+																				 size_,
+																				 PROT_READ | PROT_WRITE,
+																				 MAP_SHARED, // visible to other processes
+																				 fd_,
+																				 0
+																				 );
+																				 if (ptr == MAP_FAILED) {
+																				 throw std::runtime_error("mmap failed");
+																				 }
+																				
+																				 // Step 4: Advise kernel to use hugepages for TLB efficiency
+																				 madvise(ptr, size_, MADV_HUGEPAGE);
+																				
+																				 // Step 5: Pin the pages to the correct NUMA node
+																				 // This is critical: without this, the kernel may place pages
+																				 // on the wrong NUMA node based on first-touch policy
+																				 unsigned long nodemask = 1UL << numa_node;
+																				 if (mbind(ptr, size_, MPOL_BIND, &nodemask,
+																				 sizeof(nodemask) * 8, MPOL_MF_MOVE) != 0) {
+																				 // mbind failed — pages may not be on correct NUMA node
+																				 // Log warning but don't fail (will still work, just slower)
+																				 fprintf(stderr, "WARNING: mbind failed for shm region\n");
+																				 }
+																				
+																				 // Step 6: Pre-fault all pages (avoid page faults on hot path)
+																				 memset(ptr, 0, size_);
+																				
+																				 region_ = static_cast<HotPathSharedRegion*>(ptr);
+																				 }
+																				
+																				 ~SharedMemoryManager() {
+																				 if (region_) {
+																				 munmap(region_, size_);
+																				 }
+																				 if (fd_ >= 0) {
+																				 close(fd_);
+																				 shm_unlink(shm_name_.c_str());
+																				 }
+																				 }
+																				
+																				 HotPathSharedRegion* region() { return region_; }
+																				
+																				private:
+																				 std::string shm_name_;
+																				 int numa_node_;
+																				 int fd_;
+																				 size_t size_;
+																				 HotPathSharedRegion* region_;
+																				};
+																				Show more lines
+																				Rust side: open and use the same shared memory region
+																				
+																				
+																				
+																				Rust
+																				use std::ffi::CString;
+																				use std::ptr;
+																				
+																				// Must match C++ layout exactly
+																				#[repr(C, align(64))]
+																				pub struct HotPathSharedRegion {
+																				 // Input area (Rust writes, C++ reads)
+																				 pub input_buffer: [u8; 4 * 1024 * 1024],
+																				 pub input_len: u64,
+																				 pub request_count: u64,
+																				
+																				 // Output area (C++ writes, Rust reads)
+																				 pub decisions: [i8; 8192],
+																				 pub scores: [f32; 8192],
+																				 pub output_count: u64,
+																				
+																				 // Control flags
+																				 pub request_ready: u64,
+																				 pub response_ready: u64,
+																				}
+																				
+																				pub struct SharedMemoryClient {
+																				 ptr: *mut HotPathSharedRegion,
+																				 fd: i32,
+																				 size: usize,
+																				}
+																				
+																				impl SharedMemoryClient {
+																				 /// Open the shared memory region created by the C++ engine
+																				 pub fn open(shm_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+																				 let c_name = CString::new(shm_name)?;
+																				 let size = std::mem::size_of::<HotPathSharedRegion>();
+																				
+																				 unsafe {
+																				 // Step 1: Open existing shared memory object
+																				 let fd = libc::shm_open(
+																				 c_name.as_ptr(),
+																				 libc::O_RDWR,
+																				 0o600,
+																				 );
+																				 if fd < 0 {
+																				 return Err("shm_open failed".into());
+																				 }
+																				
+																				 // Step 2: mmap the region (same fd, same size → same memory)
+																				 let ptr = libc::mmap(
+																				 ptr::null_mut(),
+																				 size,
+																				 libc::PROT_READ | libc::PROT_WRITE,
+																				 libc::MAP_SHARED,
+																				 fd,
+																				 0,
+																				 );
+																				 if ptr == libc::MAP_FAILED {
+																				 libc::close(fd);
+																				 return Err("mmap failed".into());
+																				 }
+																				
+																				 // Step 3: Advise hugepages
+																				 libc::madvise(ptr, size, libc::MADV_HUGEPAGE);
+																				
+																				 Ok(Self {
+																				 ptr: ptr as *mut HotPathSharedRegion,
+																				 fd,
+																				 size,
+																				 })
+																				 }
+																				 }
+																				
+																				 /// Get a reference to the shared region
+																				 /// SAFETY: caller must ensure proper synchronization
+																				 pub fn region(&self) -> &HotPathSharedRegion {
+																				 unsafe { &*self.ptr }
+																				 }
+																				
+																				 /// Get a mutable reference to the shared region
+																				 pub fn region_mut(&mut self) -> &mut HotPathSharedRegion {
+																				 unsafe { &mut *self.ptr }
+																				 }
+																				
+																				 /// Hot-path: write transaction data and signal C++ engine
+																				 pub fn submit_batch(
+																				 &mut self,
+																				 raw_transactions: &[u8],
+																				 count: u64,
+																				 ) {
+																				 let region = self.region_mut();
+																				
+																				 // Write input data directly into shared memory
+																				 // ZERO COPY: the transaction bytes go straight into the
+																				 // mmap'd region that C++ can see
+																				 region.input_buffer[..raw_transactions.len()]
+																				 .copy_from_slice(raw_transactions);
+																				 region.input_len = raw_transactions.len() as u64;
+																				 region.request_count = count;
+																				
+																				 // Memory fence: ensure all writes are visible before signaling
+																				 std::sync::atomic::fence(std::sync::atomic::Ordering::Release);
+																				
+																				 // Signal C++ engine that input is ready
+																				 region.request_ready = 1;
+																				 }
+																				
+																				 /// Hot-path: wait for C++ engine to produce results
+																				 pub fn wait_results(&self) -> (&[i8], &[f32], u64) {
+																				 let region = self.region();
+																				
+																				 // Spin-wait for response (hot path — spinning is appropriate)
+																				 // In production: use futex or eventfd for sleeping wait
+																				 while region.response_ready == 0 {
+																				 std::hint::spin_loop();
+																				 }
+																				
+																				 // Memory fence: ensure we see all C++ writes
+																				 std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
+																				
+																				 let count = region.output_count as usize;
+																				 (
+																				 &region.decisions[..count],
+																				 &region.scores[..count],
+																				 region.output_count,
+																				 )
+																				 }
+																				}
+																				
+																				impl Drop for SharedMemoryClient {
+																				 fn drop(&mut self) {
+																				 unsafe {
+																				 libc::munmap(self.ptr as *mut libc::c_void, self.size);
+																				 libc::close(self.fd);
+																				 // Don't unlink — C++ side owns the lifecycle
+																				 }
+																				 }
+																				}
+																				Show more lines
+																				What this achieves
+																				Before (FFI with buffer copy):
+  Rust allocates buffer → copies transaction data →
+  passes pointer to C++ → C++ processes →
+  C++ writes results → Rust copies results back
+																				After (shared memory):
+  Rust writes directly into mmap'd region →
+  sets flag →
+  C++ reads from same physical pages (ZERO copy) →
+  C++ writes results into same region →
+  sets flag →
+  Rust reads results (ZERO copy)
+																				Total copies on hot path: ZERO. Both processes see the same physical memory pages through their own virtual address mappings.
+																				
+																				② Arrow IPC publish via shared memory
+																				In Story 1, I mentioned Arrow IPC for the audit boundary but didn't show the actual shared memory transport. Here's the real implementation:
+																				C++ side: Arrow writer to shared memory
+																				
+																				
+																				
+																				C++
+																				#include <arrow/api.h>
+																				#include <arrow/ipc/api.h>
+																				#include <arrow/io/api.h>
+																				#include <sys/mman.h>
+																				#include <fcntl.h>
+																				
+																				class ArrowShmPublisher {
+																				public:
+																				 ArrowShmPublisher(const char* shm_name,
+																				 size_t buffer_size,
+																				 int numa_node)
+																				 : buffer_size_(buffer_size)
+																				 {
+																				 // Create shared memory for Arrow IPC
+																				 fd_ = shm_open(shm_name, O_CREAT | O_RDWR, 0600);
+																				 ftruncate(fd_, buffer_size_);
+																				
+																				 base_ = static_cast<uint8_t*>(mmap(
+																				 nullptr, buffer_size_,
+																				 PROT_READ | PROT_WRITE,
+																				 MAP_SHARED, fd_, 0
+																				 ));
+																				
+																				 madvise(base_, buffer_size_, MADV_HUGEPAGE);
+																				
+																				 // NUMA-pin the shared memory pages
+																				 unsigned long nodemask = 1UL << numa_node;
+																				 mbind(base_, buffer_size_, MPOL_BIND, &nodemask,
+																				 sizeof(nodemask) * 8, MPOL_MF_MOVE);
+																				
+																				 // Pre-fault
+																				 memset(base_, 0, buffer_size_);
+																				 }
+																				
+																				 // Write an Arrow RecordBatch directly into shared memory
+																				 // The downstream consumer (audit service) reads from
+																				 // the same shm region — zero copy, zero serialization
+																				 void publish(const std::shared_ptr<arrow::RecordBatch>& batch) {
+																				 // Wrap the mmap'd region as an Arrow OutputStream
+																				 auto buffer = std::make_shared<arrow::MutableBuffer>(
+																				 base_, buffer_size_
+																				 );
+																				 auto sink = arrow::io::FixedSizeBufferWriter(buffer);
+																				
+																				 // Write Arrow IPC format directly into shared memory
+																				 auto writer = arrow::ipc::MakeStreamWriter(
+																				 &sink, batch->schema()
+																				 ).ValueOrDie();
+																				
+																				 writer->WriteRecordBatch(*batch);
+																				 writer->Close();
+																				
+																				 // Signal consumer (write the actual bytes written)
+																				 auto* header = reinterpret_cast<volatile uint64_t*>(
+																				 base_ + buffer_size_ - 64 // last cache line = control
+																				 );
+																				 *header = sink.bytes_written();
+																				
+																				 // Fence to ensure consumer sees all data
+																				 __atomic_thread_fence(__ATOMIC_RELEASE);
+																				 }
+																				
+																				 ~ArrowShmPublisher() {
+																				 munmap(base_, buffer_size_);
+																				 close(fd_);
+																				 }
+																				
+																				private:
+																				 int fd_;
+																				 uint8_t* base_;
+																				 size_t buffer_size_;
+																				};
+																				Show more lines
+																				Rust side: Arrow reader from shared memory (audit consumer)
+																				
+																				
+																				
+																				Rust
+																				use memmap2::{MmapMut, MmapOptions};
+																				use std::fs::OpenOptions;
+																				use arrow::ipc::reader::StreamReader;
+																				use std::io::Cursor;
+																				
+																				pub struct ArrowShmConsumer {
+																				 mmap: MmapMut,
+																				 buffer_size: usize,
+																				}
+																				
+																				impl ArrowShmConsumer {
+																				 /// Open the shared memory region published by C++ Arrow writer
+																				 pub fn open(shm_path: &str, buffer_size: usize)
+																				 -> Result<Self, Box<dyn std::error::Error>>
+																				 {
+																				 // Using memmap2 crate for safe mmap abstraction
+																				 let file = OpenOptions::new()
+																				 .read(true)
+																				 .write(true)
+																				 .open(format!("/dev/shm/{}", shm_path))?;
+																				
+																				 let mmap = unsafe {
+																				 MmapOptions::new()
+																				 .len(buffer_size)
+																				 .map_mut(&file)?
+																				 };
+																				
+																				 Ok(Self { mmap, buffer_size })
+																				 }
+																				
+																				 /// Read the latest Arrow RecordBatch from shared memory
+																				 /// ZERO COPY: Arrow reads directly from the mmap'd pages
+																				 /// No deserialization — Arrow IPC format IS the in-memory format
+																				 pub fn read_batch(&self)
+																				 -> Result<arrow::record_batch::RecordBatch, Box<dyn std::error::Error>>
+																				 {
+																				 // Read control header (last cache line = bytes written)
+																				 let control_offset = self.buffer_size - 64;
+																				 let bytes_written = u64::from_ne_bytes(
+																				 self.mmap[control_offset..control_offset + 8]
+																				 .try_into()?
+																				 ) as usize;
+																				
+																				 if bytes_written == 0 {
+																				 return Err("No data available".into());
+																				 }
+																				
+																				 // Memory fence: ensure we see all data from producer
+																				 std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
+																				
+																				 // Read Arrow IPC from the mmap'd buffer
+																				 // Arrow's StreamReader can read directly from a byte slice
+																				 // — it does NOT copy the data, it creates zero-copy ArrayRef
+																				 // views into the underlying buffer
+																				 let cursor = Cursor::new(&self.mmap[..bytes_written]);
+																				 let mut reader = StreamReader::try_new(cursor, None)?;
+																				
+																				 let batch = reader.next()
+																				 .ok_or("No batches in stream")??;
+																				
+																				 Ok(batch)
+																				 }
+																				}
+																				Show more lines
+																				Why memmap2 specifically
+																				The Rust memmap2 crate is the maintained successor to memmap and provides:
+																					w Safe abstractions over mmap / munmap
+																					w MmapMut for read-write mappings
+																					w Automatic munmap on drop
+																					w Cross-platform support (though we only need Linux)
+																					w No unsafe in user code (the crate handles it internally)
+																					It's used here instead of raw libc::mmap because:
+																						w The audit consumer is a pure Rust service (no C++ dependency)
+																						w memmap2 handles edge cases (partial maps, alignment, drop semantics)
+																						w Code is more maintainable
+																						
+																						③ Model weight loading via mmap (memory-mapped files)
+																						The problem
+																						XGBoost model files (~200 MB) and ONNX models (~500 MB) were loaded into memory using standard file I/O:
+																						
+																						
+																						
+																						C++
+																						// Naive: read entire file into heap
+																						std::vector<char> model_data(file_size);
+																						file.read(model_data.data(), file_size); // copies entire file into RAM
+																						Show more lines
+																						This is wasteful because:
+																							w The entire model is copied from page cache into heap memory
+																							w Two copies exist in RAM (page cache + heap)
+																							w Loading takes seconds for large models
+																							w Memory usage doubles
+																							The fix: mmap the model file directly from NVMe
+																							
+																							
+																							
+																							C++
+																							#include <sys/mman.h>
+																							#include <fcntl.h>
+																							
+																							class MmapModelLoader {
+																							public:
+																							 // Memory-map a model file from NVMe
+																							 // The kernel maps NVMe pages directly into our address space
+																							 // NO COPY into heap — we read directly from page cache
+																							 static MmapModelLoader load(const char* path, int numa_node) {
+																							 int fd = open(path, O_RDONLY);
+																							 if (fd < 0) throw std::runtime_error("open failed");
+																							
+																							 struct stat st;
+																							 fstat(fd, &st);
+																							 size_t size = st.st_size;
+																							
+																							 void* ptr = mmap(
+																							 nullptr,
+																							 size,
+																							 PROT_READ, // read-only (model weights don't change)
+																							 MAP_PRIVATE | MAP_POPULATE, // MAP_POPULATE: pre-fault all pages
+																							 fd,
+																							 0
+																							 );
+																							
+																							 if (ptr == MAP_FAILED) {
+																							 close(fd);
+																							 throw std::runtime_error("mmap failed");
+																							 }
+																							
+																							 // Advise kernel about access pattern
+																							 madvise(ptr, size, MADV_SEQUENTIAL); // we'll read linearly
+																							 madvise(ptr, size, MADV_HUGEPAGE); // use hugepages if possible
+																							
+																							 // NUMA-pin the model pages to the correct node
+																							 unsigned long nodemask = 1UL << numa_node;
+																							 mbind(ptr, size, MPOL_BIND, &nodemask,
+																							 sizeof(nodemask) * 8, MPOL_MF_MOVE);
+																							
+																							 close(fd); // fd can be closed after mmap — mapping persists
+																							
+																							 return MmapModelLoader{
+																							 static_cast<const uint8_t*>(ptr), size
+																							 };
+																							 }
+																							
+																							 const uint8_t* data() const { return data_; }
+																							 size_t size() const { return size_; }
+																							
+																							 ~MmapModelLoader() {
+																							 if (data_) munmap(const_cast<uint8_t*>(data_), size_);
+																							 }
+																							
+																							private:
+																							 MmapModelLoader(const uint8_t* data, size_t size)
+																							 : data_(data), size_(size) {}
+																							
+																							 const uint8_t* data_;
+																							 size_t size_;
+																							};
+																							Show more lines
+																							Rust equivalent using memmap2
+																							
+																							
+																							
+																							C++
+																							use memmap2::Mmap;
+																							use std::fs::File;
+																							
+																							pub struct MmapModel {
+																							 mmap: Mmap,
+																							}
+																							
+																							impl MmapModel {
+																							 /// Memory-map a model file from NVMe
+																							 /// Zero-copy: kernel maps file pages directly into our address space
+																							 pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+																							 let file = File::open(path)?;
+																							
+																							 // Safety: file must not be modified while mapped
+																							 // (model files are read-only, so this is safe)
+																							 let mmap = unsafe { Mmap::map(&file)? };
+																							
+																							 // Advise kernel: we'll read sequentially, use hugepages
+																							 mmap.advise(memmap2::Advice::Sequential)?;
+																							 mmap.advise(memmap2::Advice::HugePage)?;
+																							
+																							 Ok(Self { mmap })
+																							 }
+																							
+																							 /// Get a byte slice view of the model weights
+																							 /// ZERO COPY: this IS the page cache, not a copy
+																							 pub fn as_bytes(&self) -> &[u8] {
+																							 &self.mmap[..]
+																							 }
+																							}
+																							Show more lines
+																							Benefits
+																							Metric	read() into heap	mmap from NVMe
+																							Memory copies	1 (page cache → heap)	0 (read from page cache directly)
+																							RAM usage	2× model size	1× model size
+																							Load time (500 MB)	~1.2 sec	~0.3 sec (with MAP_POPULATE)
+																							Multiple processes	Each gets its own copy	Share same physical pages
+																							Pod restart	Full reload	Instant if pages still cached
+																							
+																							④ Inter-container shared memory (Kubernetes pod)
+																							If the input guardrail and LLM inference run in separate containers within the same pod, they can share data via /dev/shm (which is a tmpfs mount backed by shared memory).
+																							In our pod spec (from Story 2):
+																							
+																							
+																							
+																							YAML
+																							volumes:
+																							- name: shm
+																							 emptyDir:
+																							 medium: Memory
+																							 sizeLimit: "32Gi"
+																							Show more lines
+																							This creates a shared tmpfs at /dev/shm visible to all containers in the pod. Combined with shareProcessNamespace: true, both containers can use shm_open to create/open named shared memory objects that both can mmap.
+																							
+																							
+																							
+																							YAML
+																							// Container 1 (input guardrail): writes checked tokens to shm
+																							let mut shm = SharedMemoryClient::open("guardrail_to_llm")?;
+																							shm.region_mut().input_buffer[..tokens.len()]
+																							 .copy_from_slice(&tokens);
+																							shm.region_mut().request_ready = 1;
+																							
+																							// Container 2 (vLLM): reads tokens from same shm
+																							// ZERO network hop, ZERO serialization, ZERO copy
+																							let shm = SharedMemoryClient::open("guardrail_to_llm")?;
+																							let tokens = &shm.region().input_buffer[..len];
+																							Show more lines
+																							
+																							Summary: where each primitive is used
+																							Primitive	Where in Sentinel	Why
+																							shm_open	Rust ↔ C++ FFI region	Zero-copy data handoff between gateway and scoring engine
+																							shm_open	Arrow IPC publish boundary	Audit consumer reads Arrow batches without network or serialization
+																							shm_open	Inter-container communication	Guardrail → LLM tensor handoff within same pod
+																							mmap (MAP_SHARED)	All shm_open uses above	Maps shared memory into each process's address space
+																							mmap (MAP_PRIVATE)	Model weight loading from NVMe	Zero-copy model access, shared page cache across pods
+																							mbind	All mmap regions	NUMA-pin shared memory pages to correct node
+																							madvise(MADV_HUGEPAGE)	All mmap regions	Reduce TLB misses on large mappings
+																							madvise(MADV_SEQUENTIAL)	Model loading	Kernel prefetches pages linearly
+																							MAP_POPULATE	Model loading	Pre-fault all pages at mmap time (avoid runtime faults)
+																							memmap2 (Rust)	Arrow consumer, model loading	Safe Rust abstraction over raw mmap
+																							Raw libc::mmap (Rust)	Hot-path shared region	When we need exact control over flags and NUMA binding
+																							
+																							Updated architecture diagram with shared memory regions marked
+																							┌──────────────────────────────────────────────────────────────┐
+│                    SENTINEL GATEWAY (Rust)                     │
+│                                                              │
+│   ┌──────────────┐     shm_open("hotpath")      ┌──────────┐│
+│   │ Request       │ ──── mmap (SHARED) ────────→ │ C++ Hot  ││
+│   │ Handler       │     zero-copy FFI            │ Path     ││
+│   │ (tokio async) │ ←── mmap (SHARED) ────────── │ Engine   ││
+│   └──────┬───────┘     results: zero-copy        └──────────┘│
+│          │                                                    │
+│          │  shm_open("arrow_audit")                          │
+│          ├──── mmap (SHARED) ────→ [Audit Consumer (Rust)]   │
+│          │     Arrow IPC: zero-copy                          │
+│          │                                                    │
+│   ┌──────┴───────┐                                           │
+│   │ Model Loader  │──── mmap (PRIVATE, NVMe file) ──→ [GPU] │
+│   │               │     MAP_POPULATE + HUGEPAGE              │
+│   └──────────────┘                                           │
+│                                                              │
+│   [Pod /dev/shm (tmpfs 32 GB)]                               │
+│    ├── /dev/shm/hotpath          (Rust ↔ C++)               │
+│    ├── /dev/shm/arrow_audit      (C++ → Audit consumer)     │
+│    └── /dev/shm/guardrail_llm    (Guardrail → vLLM)         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+																							
+																							I
