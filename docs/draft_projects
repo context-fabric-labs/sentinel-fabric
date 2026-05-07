@@ -731,7 +731,7 @@ What stays
 	One-sentence summary
 		To eliminate the Python tax in a guardrail + LLM pipeline, use a Rust/C++ gateway for all CPU work (tokenization, rule-based guardrails, formatting) and NVIDIA Triton ensemble models for GPU-resident ML guardrail + LLM execution — keeping tensors on GPU between stages and removing all serialization from the hot path. citeturn40search1turn40search7turn40search13
 
-======================================
+==================================================================================================================
 The situation
 I was brought in as a System Engineer to design and build the real-time fraud scoring infrastructure for a large payment processor handling ~12,000 transactions per second across 3 geographic regions. The existing system was a legacy Java microservices stack running on generic Kubernetes with ~35 ms P99 latency for fraud scoring. Business required sub-10 ms P99 end-to-end for the hot-path fraud decision (feature extraction → XGBoost prediction → rule engine → decision) to meet card-network SLA requirements and reduce false declines.
 The scoring pipeline was:

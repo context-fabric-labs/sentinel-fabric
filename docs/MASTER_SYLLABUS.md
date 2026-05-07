@@ -2,8 +2,8 @@
 
 **Comprehensive Guide for Sr. Staff / Principal / Distinguished Engineer Roles**
 
-**Target Companies:** NVIDIA, Apple, Broadcom, HPE, Capital One, Google, Meta, Microsoft  
-**Domains:** GPU/Inference Platforms, HPC Systems, Low-Latency Distributed Systems, Agentic AI  
+**Target Companies:** NVIDIA, Apple, Broadcom, HPE, Capital One, Google, Meta, Microsoft
+**Domains:** GPU/Inference Platforms, HPC Systems, Low-Latency Distributed Systems, Agentic AI
 **Candidate Profile:** 15+ years experience in AI Systems & Low-Latency Infrastructure
 
 ---
@@ -14,12 +14,13 @@
 2. [Project Portfolio](#project-portfolio)
 3. [Technology Decision Matrix](#technology-decision-matrix)
 4. [System Architecture Reference](#system-architecture-reference)
-5. [GPU & CUDA Mastery](#gpu--cuda-mastery)
-6. [Systems Programming Patterns](#systems-programming-patterns)
-7. [Infrastructure & Platform Guide](#infrastructure--platform-guide)
-8. [Troubleshooting Runbooks](#troubleshooting-runbooks)
-9. [Interview Preparation](#interview-preparation)
-10. [Study Plan & Progress Tracking](#study-plan--progress-tracking)
+5. [GPU &amp; CUDA Mastery](#gpu--cuda-mastery)
+6. [LLM &amp; ML Inference Mastery](#llm--ml-inference-mastery)
+7. [Systems Programming Patterns](#systems-programming-patterns)
+8. [Infrastructure &amp; Platform Guide](#infrastructure--platform-guide)
+9. [Troubleshooting Runbooks](#troubleshooting-runbooks)
+10. [Interview Preparation](#interview-preparation)
+11. [Study Plan &amp; Progress Tracking](#study-plan--progress-tracking)
 
 ---
 
@@ -118,19 +119,19 @@ The key architectural insight was **separating decisioning from reasoning** — 
 
 ### Drill-Down Q&A
 
-**Q: Why per-core arena allocators instead of jemalloc/mimalloc?**  
+**Q: Why per-core arena allocators instead of jemalloc/mimalloc?**
 A: At 24K TPS, even jemalloc's thread-local caches have occasional cross-arena migrations. A per-core slab with bulk reset (set offset=0) means zero allocation overhead and zero fragmentation. The slab is sized for worst-case request and reset after each one.
 
-**Q: Why not send raw JSON between tiers?**  
+**Q: Why not send raw JSON between tiers?**
 A: JSON serialization of a feature vector (512 floats + 20 scores + metadata) costs ~200µs and produces garbage for GC. Arrow wraps existing memory as columnar arrays — same bytes feed Tier 2 reasoning, analytics (Spark reads Arrow natively), and model retraining (PyTorch reads Arrow via datasets).
 
-**Q: How do CUDA Graphs help at Tier 1?**  
+**Q: How do CUDA Graphs help at Tier 1?**
 A: The GPU MLP has 20–50 small kernels (matmul, bias, activation). Without graphs, each kernel costs 5µs CPU launch overhead = 100–250µs. With CUDA Graph capture at startup, the entire sequence is a single graph launch = 5µs. This fits within the 5ms budget alongside CPU scoring.
 
-**Q: What happens when a core's arena overflows?**  
+**Q: What happens when a core's arena overflows?**
 A: The slab is sized at startup for max request size (configurable, typically 64KB). If a request exceeds it (malformed or attack), we reject with a fast-path error — no allocation, no OOM.
 
-**Q: How do you handle model updates without downtime?**  
+**Q: How do you handle model updates without downtime?**
 A: Blue-green deployment at the model layer. New model loads into a shadow CUDA Graph. Traffic switches atomically by swapping the graph_exec pointer. Old graph is freed after drain.
 
 ---
@@ -214,13 +215,13 @@ For multi-turn loan workflows, I designed **session-aware KV-cache management** 
 
 ### Drill-Down Q&A
 
-**Q: Why hierarchical context instead of one large prompt?**  
+**Q: Why hierarchical context instead of one large prompt?**
 A: A loan package is 50–200 pages. Stuffing everything into a 70B prompt wastes tokens (cost + latency) and dilutes attention. The 8B classifier identifies document types in <100ms, field extraction pulls structured data, and the composer builds a focused prompt. The 70B model sees only what matters — better accuracy at 40% of the tokens.
 
-**Q: How does session-aware KV cache work?**  
+**Q: How does session-aware KV cache work?**
 A: Loan applications are multi-turn (applicant submits docs over days). Sticky routing sends the same applicant to the same pod. If KV cache for their session is still resident, we skip prefill for the shared context prefix — that's a 70% hit rate. On miss, we reprefill but it's still faster than cold start because the hierarchical context is compact.
 
-**Q: What's GPU-headroom scheduling?**  
+**Q: What's GPU-headroom scheduling?**
 A: Each pod reports available GPU memory and SM utilization via Prometheus. The control plane routes 70B requests only to pods with >20GB free KV cache headroom. This prevents OOM-driven evictions that would destroy cache hit rates.
 
 ---
@@ -299,16 +300,16 @@ The second innovation was **session-affine routing**: each session is pinned to 
 
 ### Drill-Down Q&A
 
-**Q: Why shared memory instead of a message queue (Kafka, Redis)?**  
+**Q: Why shared memory instead of a message queue (Kafka, Redis)?**
 A: At millions of concurrent sessions, a message queue adds network RTT + serialization + deserialization per hop. Shared memory is mapped once at session start; subsequent stage reads are a pointer dereference (nanoseconds). The 5-stage pipeline saves 200–350ms of serialization — that's the entire latency budget.
 
-**Q: How do you handle stage failures with shared memory?**  
+**Q: How do you handle stage failures with shared memory?**
 A: Each stage writes atomically (stage_mask bitfield). If a stage crashes, the orchestrator detects missing bit in stage_mask within the deadline_ns window and either retries the stage or routes to a fallback. The shared memory is never corrupted because writes are append-only to the arena.
 
-**Q: Why session-affine routing?**  
+**Q: Why session-affine routing?**
 A: The ConversationalState struct is 64KB. Moving it per request across servers would cost the very serialization we're avoiding. Sticky routing means the state stays mapped in the same server group for the session lifetime (seconds to minutes).
 
-**Q: How do buffer pools prevent allocation in the gRPC path?**  
+**Q: How do buffer pools prevent allocation in the gRPC path?**
 A: At startup, we preallocate N buffers (64KB each) into a free list. gRPC handlers acquire from the pool (lock + pop = ~100ns), use the buffer for the request lifetime, then release back. No malloc/free in the hot path.
 
 ---
@@ -393,16 +394,16 @@ Model serving uses TensorFlow Serving for deep learning, ONNX Runtime for cross-
 
 ### Drill-Down Q&A
 
-**Q: How do 6 models share a RequestContext without contention?**  
+**Q: How do 6 models share a RequestContext without contention?**
 A: Models write to disjoint fields (`model_outputs.malware_score`, `model_outputs.phishing_score`, etc.). Reads are shared (URL features, content). The struct is cacheline-aligned per section to prevent false sharing. No mutex needed — single-writer per field, multiple-reader for features.
 
-**Q: How does early-exit work?**  
+**Q: How does early-exit work?**
 A: If the malware detector returns >0.99 confidence within 5ms, we short-circuit — skip DLP/content analysis and immediately block. The `model_mask` bitfield tracks which models have completed. Decision engine can act as soon as a high-confidence threat is detected.
 
-**Q: Why custom C++ inference for XGBoost instead of using the XGBoost library?**  
+**Q: Why custom C++ inference for XGBoost instead of using the XGBoost library?**
 A: The official XGBoost library has Python bindings overhead and isn't optimized for single-request latency. Our C++ engine traverses trees with AVX2 SIMD (8 trees in parallel), uses branch-free comparison, and avoids the library's batch-oriented API. Result: <5ms for 500-tree ensemble vs 20ms with the library.
 
-**Q: How did you achieve 99.99% availability?**  
+**Q: How did you achieve 99.99% availability?**
 A: Multi-region active-active deployment. Each request is served by the nearest region with automatic failover. Model serving uses rolling blue-green deployments (never more than 25% of capacity upgrading at once). Circuit breakers on each model with fallback to rule-based scoring if ML is unavailable.
 
 ---
@@ -616,7 +617,7 @@ A: Multi-region active-active deployment. Each request is served by the nearest 
 │  │  (228KB) │ │  (228KB) │ │  (228KB) │     │  (228KB) │  │
 │  └──────────┘ └──────────┘ └──────────┘     └──────────┘  │
 │                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
+│  ┌─────────────────────────────────────────────────────────┐   │
 │  │              L2 Cache (50 MB on H100)                │   │
 │  └─────────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -625,23 +626,222 @@ A: Multi-region active-active deployment. Each request is served by the nearest 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Memory Hierarchy
+### Physical Layout — Inside One SM (H100)
 
-| Level         | Size (H100)        | Bandwidth                            | Latency     | Use Case                                     |
-| ------------- | ------------------ | ------------------------------------ | ----------- | -------------------------------------------- |
-| Registers     | 256KB/SM           | —                                   | 0 cycles    | Thread-local variables                       |
-| Shared Memory | 228KB/SM           | ~19 TB/s                             | ~20 cycles  | Block-level cooperation (reductions, tiling) |
-| L1 Cache      | Combined w/ shared | ~19 TB/s                             | ~30 cycles  | Automatic caching                            |
-| L2 Cache      | 50 MB              | ~12 TB/s                             | ~200 cycles | Cross-SM data sharing                        |
-| HBM (Global)  | 80 GB              | 3.35 TB/s                            | ~400 cycles | Model weights, KV cache, activations         |
-| Host (CPU)    | TB-scale           | 50 GB/s (PCIe5) / 900 GB/s (NVLink4) | µs-scale   | Input data, orchestration                    |
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                     STREAMING MULTIPROCESSOR (SM)                      │
+│                                                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                    4 × Processing Blocks (Sub-partitions)       │  │
+│  │                                                                 │  │
+│  │  ┌───────────────────┐   ┌───────────────────┐                │  │
+│  │  │  Processing Block 0│   │  Processing Block 1│                │  │
+│  │  │                   │   │                   │                │  │
+│  │  │  • Warp Scheduler │   │  • Warp Scheduler │                │  │
+│  │  │  • Dispatch Unit  │   │  • Dispatch Unit  │                │  │
+│  │  │  • 16 FP32 cores  │   │  • 16 FP32 cores  │                │  │
+│  │  │  • 16 INT32 cores │   │  • 16 INT32 cores │                │  │
+│  │  │  • 1 Tensor Core  │   │  • 1 Tensor Core  │                │  │
+│  │  │  • 4 Load/Store   │   │  • 4 Load/Store   │                │  │
+│  │  │  • 4 SFU (sin/cos)│   │  • 4 SFU (sin/cos)│                │  │
+│  │  │  • 16,384 Regs    │   │  • 16,384 Regs    │                │  │
+│  │  └───────────────────┘   └───────────────────┘                │  │
+│  │  ┌───────────────────┐   ┌───────────────────┐                │  │
+│  │  │  Processing Block 2│   │  Processing Block 3│                │  │
+│  │  │  (same as above)   │   │  (same as above)   │                │  │
+│  │  └───────────────────┘   └───────────────────┘                │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                       │
+│  ┌────────────────────────────────────────────────────┐               │
+│  │  Register File: 65,536 × 32-bit registers (256 KB) │               │
+│  └────────────────────────────────────────────────────┘               │
+│  ┌────────────────────────────────────────────────────┐               │
+│  │  L1 Data Cache / Shared Memory: 228 KB (configurable split)        │
+│  │    └── Default: 128 KB Shared + 100 KB L1 (adjustable)            │
+│  └────────────────────────────────────────────────────┘               │
+│  ┌────────────────────────────────────────────────────┐               │
+│  │  Tensor Cores: 4 per SM (4th gen on H100)          │               │
+│  │    └── Support: FP64, TF32, BF16, FP16, FP8, INT8 │               │
+│  │    └── Throughput: 256 FP16 FMA ops/clock/SM       │               │
+│  └────────────────────────────────────────────────────┘               │
+│  ┌────────────────────────────────────────────────────┐               │
+│  │  Texture / L1 Instruction Cache                    │               │
+│  └────────────────────────────────────────────────────┘               │
+└───────────────────────────────────────────────────────────────────────┘
+```
 
-### Key Concepts for Interviews
+**H100 SM totals:** 132 SMs × 128 FP32 cores/SM = **16,896 FP32 cores** total
 
-- **Warp (32 threads):** Execution unit. All threads in warp execute same instruction (SIMT). Divergent branches serialize.
-- **Occupancy:** Ratio of active warps to max warps per SM. Higher occupancy hides memory latency but isn't always optimal (register pressure tradeoff).
-- **Coalescing:** Adjacent threads should access adjacent memory addresses. Coalesced access = single memory transaction. Strided access = multiple transactions (bandwidth waste).
-- **Bank conflicts:** Shared memory has 32 banks. If multiple threads access same bank, accesses serialize. Pad arrays to avoid.
+### Physical Specs by Generation
+
+| Resource (per SM)    | Turing (T4) | Ampere (A100) | Hopper (H100) |
+| -------------------- | ----------- | ------------- | ------------- |
+| FP32 CUDA Cores      | 64          | 64            | 128           |
+| INT32 Cores          | 64          | 64            | 128           |
+| Tensor Cores         | 8 (2nd gen) | 4 (3rd gen)   | 4 (4th gen)   |
+| Register File        | 256 KB      | 256 KB        | 256 KB        |
+| Max Registers/Thread | 255         | 255           | 255           |
+| Shared Memory        | 96 KB       | 164 KB        | 228 KB        |
+| Max Threads/SM       | 1024        | 2048          | 2048          |
+| Max Warps/SM         | 32          | 64            | 64            |
+| Warp Schedulers      | 4           | 4             | 4             |
+| Total SMs            | 40          | 108           | 132           |
+| Max Thread Blocks/SM | 16          | 32            | 32            |
+
+### Logical Layout — CUDA Programming Model
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CUDA PROGRAMMING HIERARCHY                        │
+│                                                                     │
+│  ┌──── Grid (kernel launch) ─────────────────────────────────────┐ │
+│  │                                                                │ │
+│  │   ┌── Block (0,0) ──┐  ┌── Block (1,0) ──┐  ┌── Block ──┐  │ │
+│  │   │                  │  │                  │  │    ...     │  │ │
+│  │   │  ┌── Warp 0 ──┐ │  │  ┌── Warp 0 ──┐ │  │            │  │ │
+│  │   │  │ T0 T1 .. T31│ │  │  │ T0 T1 .. T31│ │  │            │  │ │
+│  │   │  └─────────────┘ │  │  └─────────────┘ │  │            │  │ │
+│  │   │  ┌── Warp 1 ──┐ │  │  ┌── Warp 1 ──┐ │  │            │  │ │
+│  │   │  │ T32 .. T63  │ │  │  │ T32 .. T63  │ │  │            │  │ │
+│  │   │  └─────────────┘ │  │  └─────────────┘ │  │            │  │ │
+│  │   │       ...         │  │       ...         │  │            │  │ │
+│  │   │  ┌── Warp N ──┐ │  │  ┌── Warp N ──┐ │  │            │  │ │
+│  │   │  │ T(N*32)..   │ │  │  │ T(N*32)..   │ │  │            │  │ │
+│  │   │  └─────────────┘ │  │  └─────────────┘ │  │            │  │ │
+│  │   └──────────────────┘  └──────────────────┘  └────────────┘  │ │
+│  │                                                                │ │
+│  │   Grid dimensions: gridDim.x × gridDim.y × gridDim.z          │ │
+│  │   Block dimensions: blockDim.x × blockDim.y × blockDim.z      │ │
+│  │   Threads per block: max 1024                                  │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Physical ↔ Logical Mapping
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│             LOGICAL (programmer)  →  PHYSICAL (hardware)            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Grid                          →  Distributed across ALL SMs        │
+│   │                                 (scheduler assigns blocks)      │
+│   │                                                                 │
+│   ├─ Thread Block              →  Runs on ONE SM (never split)      │
+│   │   │                             Multiple blocks can share SM    │
+│   │   │                                                             │
+│   │   ├─ Warp (32 threads)    →  Scheduled on one Processing Block │
+│   │   │   │                         (warp scheduler picks each clk) │
+│   │   │   │                                                         │
+│   │   │   └─ Thread           →  Executes on one FP32/INT32 core   │
+│   │   │                             Registers: private per thread   │
+│   │   │                                                             │
+│   │   └─ Shared Memory        →  SM's shared memory (228 KB on H100)│
+│   │       (declared in block)       Visible to ALL threads in block │
+│   │                                                                 │
+│   └─ Global Memory            →  HBM (80 GB, accessible by all)    │
+│       (cudaMalloc)                  Goes through L2 → L1 caches     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+IMPORTANT RULES:
+  • One Thread Block → exactly ONE SM (blocks are never split across SMs)
+  • Multiple Thread Blocks → CAN run on same SM (if resources allow)
+  • Block scheduling order → UNDEFINED (cannot depend on block execution order)
+  • Warps within a block → time-sliced on SM's warp schedulers (4 per SM)
+  • Threads within a warp → execute in LOCKSTEP (SIMT)
+```
+
+### Resource Limits & Occupancy
+
+```
+Max occupancy calculation (H100):
+  SM has: 65,536 registers, 228 KB shared memory, 2048 max threads, 64 max warps
+
+  Your kernel uses: 64 registers/thread, 48 KB shared memory, 256 threads/block
+
+  Register limit:  65,536 / (64 regs × 256 threads) = 4 blocks/SM → 1024 threads
+  Shared mem limit: 228 KB / 48 KB = 4 blocks/SM → 1024 threads
+  Thread limit:     2048 / 256 = 8 blocks/SM → 2048 threads
+  Warp limit:       64 / (256/32) = 8 blocks/SM → 2048 threads
+
+  BOTTLENECK: Registers + Shared Memory → 4 blocks → 1024 threads
+  Occupancy: 1024 / 2048 = 50%
+
+  Trade-offs:
+    Reduce registers (--maxrregcount=32) → more blocks but may spill to L1
+    Reduce shared memory → more blocks but may need more HBM accesses
+    Increase block size → fewer blocks but better intra-block cooperation
+```
+
+| Factor                 | Increases Occupancy | Decreases Occupancy | Impact                                       |
+| ---------------------- | ------------------- | ------------------- | -------------------------------------------- |
+| Fewer registers/thread | ✅ More threads fit |                     | May spill to local memory (slow)             |
+| Less shared mem/block  | ✅ More blocks fit  |                     | May need more HBM accesses                   |
+| Smaller block size     | ✅ More blocks fit  |                     | Less intra-block cooperation                 |
+| More registers/thread  |                     | ❌ Fewer threads    | Better for compute-heavy (keep data in regs) |
+| More shared mem/block  |                     | ❌ Fewer blocks     | Better for data reuse (tiling)               |
+
+**Interview insight:** "High occupancy doesn't always mean high performance. A kernel using 255 registers per thread at 25% occupancy can outperform a 100% occupancy kernel with spills to local memory — because register access is free but local memory goes through the cache hierarchy."
+
+### Warp Execution Details
+
+```
+WARP = 32 threads executing the SAME instruction in LOCKSTEP
+
+Clock 0:  All 32 threads execute: LOAD R1, [addr + tid*4]
+Clock 1:  All 32 threads execute: MUL R2, R1, R3
+Clock 2:  All 32 threads execute: ADD R4, R2, R5
+Clock 3:  All 32 threads execute: STORE [addr + tid*4], R4
+
+DIVERGENCE (branch within a warp):
+  if (threadIdx.x < 16) {   ← threads 0-15 take this path
+      doA();
+  } else {                   ← threads 16-31 take this path
+      doB();
+  }
+
+  Execution: doA() runs (threads 16-31 MASKED/idle)
+             doB() runs (threads 0-15 MASKED/idle)
+  Cost: BOTH paths execute sequentially → 2× time
+
+  Rule: Minimize divergence within a warp. Across warps is FREE.
+```
+
+**Warp-level primitives (important for CUDA/Triton interviews):**
+
+| Primitive                              | What                                      | Use Case                       |
+| -------------------------------------- | ----------------------------------------- | ------------------------------ |
+| `__shfl_sync(mask, val, src)`        | Read `val` from lane `src`            | Broadcast, butterfly reduction |
+| `__shfl_down_sync(mask, val, delta)` | Read from lane + delta                    | Parallel reduction (sum)       |
+| `__shfl_xor_sync(mask, val, mask)`   | Read from lane XOR mask                   | Butterfly pattern              |
+| `__ballot_sync(mask, pred)`          | 32-bit mask of which lanes have pred=true | Count, compress                |
+| `__any_sync(mask, pred)`             | 1 if any lane has pred=true               | Early exit                     |
+| `__all_sync(mask, pred)`             | 1 if all lanes have pred=true             | Convergence check              |
+| `__activemask()`                     | Which lanes are active                    | Divergent code introspection   |
+
+### Thread → Core → SM → GPU Summary Table
+
+| Logical (CUDA) |       Physical (Hardware) | Size                | Scope                             |
+| -------------- | ------------------------: | ------------------- | --------------------------------- |
+| Thread         |           FP32/INT32 Core | 1                   | Private registers                 |
+| Warp           | Warp Scheduler + 32 cores | 32 threads          | Lockstep execution, shuffle       |
+| Thread Block   |                    One SM | Up to 1024 threads  | Shared memory,`__syncthreads()` |
+| Grid           |      Entire GPU (all SMs) | Millions of threads | Global memory, atomics            |
+
+### Memory Scope Mapping
+
+| Memory Type | CUDA Declaration                | Hardware Location   | Scope       | Lifetime   | Bandwidth             |
+| ----------- | ------------------------------- | ------------------- | ----------- | ---------- | --------------------- |
+| Register    | Automatic variables             | Register file       | Thread      | Thread     | Unlimited (0 cycles)  |
+| Local       | Spilled registers, arrays       | HBM (cached in L1)  | Thread      | Thread     | L1 speed (with cache) |
+| Shared      | `__shared__`                  | SM SRAM             | Block       | Block      | ~19 TB/s              |
+| L1 Cache    | Automatic                       | SM (same as shared) | SM          | Kernel     | ~19 TB/s              |
+| L2 Cache    | Automatic                       | On-chip             | GPU         | Persistent | ~12 TB/s              |
+| Global      | `cudaMalloc` / `__device__` | HBM                 | All threads | App        | 3.35 TB/s (H100)      |
+| Constant    | `__constant__`                | HBM (cached)        | All threads | App        | Broadcast (cache hit) |
+| Texture     | `tex1Dfetch`                  | HBM (spatial cache) | All threads | App        | Good for 2D locality  |
 
 ---
 
@@ -817,6 +1017,391 @@ stream.synchronize();
 
 ---
 
+## OpenAI Triton — GPU Kernel Programming in Python
+
+> OpenAI Triton is a Python-based language and compiler for writing GPU kernels without needing to write CUDA C++. It's NOT the same as NVIDIA Triton Inference Server. Triton powers `torch.compile`, FlashAttention fused kernels in vLLM, and many custom ops in production LLM serving.
+
+### Why Triton Matters for System Engineers
+
+| Context                        | Role of Triton                                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| **vLLM**                 | Core fused kernels (PagedAttention, RMSNorm, rotary embeddings) written in Triton |
+| **torch.compile**        | Default backend (Inductor) generates Triton kernels automatically                 |
+| **FlashAttention**       | Reference implementation uses Triton; productionized in CUDA                      |
+| **Custom ops**           | 10× faster to prototype than CUDA C++; often sufficient for production           |
+| **Quantization kernels** | FP8/INT4 dequantize-fused-GEMM implemented in Triton                              |
+| **Interviews**           | "Write a fused kernel" questions increasingly accept Triton                       |
+
+### Triton vs CUDA — When to Use What
+
+| Dimension                     | Triton                                    | CUDA C++                                |
+| ----------------------------- | ----------------------------------------- | --------------------------------------- |
+| **Language**            | Python (with decorators)                  | C++/C with NVIDIA extensions            |
+| **Abstraction level**   | Block-level (tiles)                       | Thread-level (warps, lanes)             |
+| **Memory management**   | Automatic (compiler handles shared mem)   | Manual (`__shared__`, bank conflicts) |
+| **Occupancy tuning**    | Auto-tuning (`@triton.autotune`)        | Manual (register pressure, block size)  |
+| **Compile time**        | JIT (first call slow, then cached)        | AOT (nvcc, separate build step)         |
+| **Performance ceiling** | ~90–95% of hand-tuned CUDA               | 100% (full hardware control)            |
+| **Development speed**   | 3–5× faster to write/iterate            | Slower, more boilerplate                |
+| **Debugging**           | Python-native (print, assert)             | cuda-gdb, printf (harder)               |
+| **Best for**            | Fused element-wise, attention, custom ops | Library-grade GEMM, extreme perf        |
+| **Who uses**            | vLLM, PyTorch Inductor, research          | cuBLAS, cuDNN, TensorRT, NCCL           |
+
+### Triton Programming Model
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                   TRITON EXECUTION MODEL                            │
+│                                                                     │
+│   Python Code          Triton Compiler (MLIR-based)     GPU        │
+│                                                                     │
+│   @triton.jit    →    Triton IR    →    LLVM IR    →    PTX/SASS   │
+│   def kernel():       (tile-level)      (thread-level)   (GPU asm) │
+│                                                                     │
+│   Key abstraction: BLOCK (tile) not individual threads             │
+│                                                                     │
+│   Programmer thinks:  "Load a BLOCK_SIZE×BLOCK_SIZE tile,          │
+│                        do computation, store result tile"           │
+│                                                                     │
+│   Compiler handles:   Thread mapping, shared memory allocation,    │
+│                        memory coalescing, bank conflict avoidance,  │
+│                        register allocation, instruction scheduling  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Example 1: Fused RMSNorm (Used in Llama/vLLM)
+
+```python
+import triton
+import triton.language as tl
+import torch
+
+@triton.jit
+def rms_norm_kernel(
+    X_ptr, W_ptr, Out_ptr,
+    stride_x,          # Row stride for X
+    N: tl.constexpr,   # Hidden dimension (compile-time constant)
+    eps: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    # Each program instance handles one row (one token)
+    row_idx = tl.program_id(0)
+  
+    # Pointer to start of this row
+    row_start = X_ptr + row_idx * stride_x
+  
+    # Load entire row in tiles (handles N > BLOCK_SIZE)
+    # Phase 1: Compute variance
+    variance = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+    for off in range(0, N, BLOCK_SIZE):
+        cols = off + tl.arange(0, BLOCK_SIZE)
+        mask = cols < N
+        x = tl.load(row_start + cols, mask=mask, other=0.0).to(tl.float32)
+        variance += x * x
+  
+    variance = tl.sum(variance) / N
+    rstd = 1.0 / tl.sqrt(variance + eps)
+  
+    # Phase 2: Normalize and scale
+    for off in range(0, N, BLOCK_SIZE):
+        cols = off + tl.arange(0, BLOCK_SIZE)
+        mask = cols < N
+        x = tl.load(row_start + cols, mask=mask, other=0.0).to(tl.float32)
+        w = tl.load(W_ptr + cols, mask=mask, other=0.0).to(tl.float32)
+        out = x * rstd * w
+        tl.store(Out_ptr + row_idx * stride_x + cols, out, mask=mask)
+
+
+def rms_norm(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6):
+    """Launch the Triton RMSNorm kernel."""
+    out = torch.empty_like(x)
+    M, N = x.shape  # M = num_tokens, N = hidden_dim
+  
+    # Grid: one program per row (token)
+    grid = (M,)
+    BLOCK_SIZE = triton.next_power_of_2(N)
+  
+    rms_norm_kernel[grid](
+        x, weight, out,
+        x.stride(0),
+        N=N, eps=eps,
+        BLOCK_SIZE=min(BLOCK_SIZE, 4096),
+    )
+    return out
+```
+
+**Why this is faster than PyTorch native:**
+
+- PyTorch `rms_norm` = 3 separate kernels (square, mean, multiply) = 3 HBM round-trips
+- Triton fused = 1 kernel, data stays in registers/SRAM = 1 HBM round-trip
+- Typical speedup: 2–3× for hidden_dim=4096
+
+### Example 2: Vector Addition (Minimal Complete Example to Get Started)
+
+```python
+import triton
+import triton.language as tl
+import torch
+
+@triton.jit
+def add_kernel(
+    x_ptr, y_ptr, output_ptr,
+    n_elements,
+    BLOCK_SIZE: tl.constexpr,
+):
+    # Which block of elements this program instance handles
+    pid = tl.program_id(axis=0)
+  
+    # Compute pointers for this block
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+  
+    # Mask for out-of-bounds (last block may be partial)
+    mask = offsets < n_elements
+  
+    # Load, compute, store
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    output = x + y
+    tl.store(output_ptr + offsets, output, mask=mask)
+
+
+def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    output = torch.empty_like(x)
+    n_elements = x.numel()
+  
+    # Grid: how many program instances to launch
+    grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']),)
+  
+    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+    return output
+
+# Usage
+x = torch.rand(1_000_000, device='cuda')
+y = torch.rand(1_000_000, device='cuda')
+result = add(x, y)
+assert torch.allclose(result, x + y)
+```
+
+### Example 3: Fused Softmax (Attention Building Block)
+
+```python
+@triton.jit
+def softmax_kernel(
+    input_ptr, output_ptr,
+    n_cols: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    row_idx = tl.program_id(0)
+    row_start = input_ptr + row_idx * n_cols
+    out_start = output_ptr + row_idx * n_cols
+  
+    # Load row
+    col_offsets = tl.arange(0, BLOCK_SIZE)
+    mask = col_offsets < n_cols
+    row = tl.load(row_start + col_offsets, mask=mask, other=-float('inf'))
+  
+    # Numerically stable softmax: subtract max, exp, normalize
+    row_max = tl.max(row, axis=0)
+    numerator = tl.exp(row - row_max)
+    denominator = tl.sum(numerator, axis=0)
+    softmax_out = numerator / denominator
+  
+    tl.store(out_start + col_offsets, softmax_out, mask=mask)
+```
+
+### Example 4: Auto-Tuning (Production Pattern)
+
+```python
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 128, 'BLOCK_K': 32}, num_warps=8),
+        triton.Config({'BLOCK_M': 128, 'BLOCK_N': 64,  'BLOCK_K': 32}, num_warps=4),
+        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 128, 'BLOCK_K': 32}, num_warps=4),
+        triton.Config({'BLOCK_M': 64,  'BLOCK_N': 64,  'BLOCK_K': 64}, num_warps=4),
+    ],
+    key=['M', 'N', 'K'],  # Re-tune when these change
+)
+@triton.jit
+def matmul_kernel(
+    A_ptr, B_ptr, C_ptr,
+    M, N, K,
+    stride_am, stride_ak,
+    stride_bk, stride_bn,
+    stride_cm, stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+):
+    # Tiled matmul: each program computes one BLOCK_M × BLOCK_N tile of C
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+  
+    # Accumulator (in registers, FP32 for precision)
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+  
+    # Loop over K dimension in tiles
+    for k in range(0, K, BLOCK_K):
+        # Load A tile [BLOCK_M, BLOCK_K]
+        a_offsets = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M))[:, None] * stride_am + \
+                    (k + tl.arange(0, BLOCK_K))[None, :] * stride_ak
+        a = tl.load(A_ptr + a_offsets, mask=..., other=0.0)
+    
+        # Load B tile [BLOCK_K, BLOCK_N]
+        b_offsets = (k + tl.arange(0, BLOCK_K))[:, None] * stride_bk + \
+                    (pid_n * BLOCK_N + tl.arange(0, BLOCK_N))[None, :] * stride_bn
+        b = tl.load(B_ptr + b_offsets, mask=..., other=0.0)
+    
+        # Tile matmul (maps to Tensor Core wmma instructions)
+        acc += tl.dot(a, b)
+  
+    # Store result tile
+    c_offsets = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M))[:, None] * stride_cm + \
+                (pid_n * BLOCK_N + tl.arange(0, BLOCK_N))[None, :] * stride_cn
+    tl.store(C_ptr + c_offsets, acc.to(tl.float16), mask=...)
+
+
+# Auto-tuning: first call benchmarks all configs, caches best
+# Subsequent calls use cached optimal configuration
+```
+
+**Auto-tuning insight:** The `@triton.autotune` decorator benchmarks all `Config` entries on first call, selects the fastest for the given `key` dimensions, and caches the result. This replaces manual occupancy tuning in CUDA.
+
+### Key Triton Language Primitives
+
+| Primitive                    | Purpose                     | CUDA Equivalent                    |
+| ---------------------------- | --------------------------- | ---------------------------------- |
+| `tl.program_id(axis)`      | Block index                 | `blockIdx.x`                     |
+| `tl.arange(0, N)`          | Thread offsets within block | `threadIdx.x`                    |
+| `tl.load(ptr, mask)`       | Coalesced memory read       | `__global__ load + bounds check` |
+| `tl.store(ptr, val, mask)` | Coalesced memory write      | Global store + bounds check        |
+| `tl.dot(a, b)`             | Tile matrix multiply        | `wmma` / Tensor Core intrinsics  |
+| `tl.sum(x, axis)`          | Block-level reduction       | `__shfl_down_sync` + shared mem  |
+| `tl.max(x, axis)`          | Block-level max             | Warp shuffle reduction             |
+| `tl.exp(x)`                | Element-wise exp            | `__expf()`                       |
+| `tl.where(cond, a, b)`     | Conditional select          | Ternary operator                   |
+| `tl.atomic_add(ptr, val)`  | Atomic accumulate           | `atomicAdd()`                    |
+| `tl.constexpr`             | Compile-time constant       | Template parameter                 |
+| `tl.cdiv(a, b)`            | Ceiling division            | `(a + b - 1) / b`                |
+
+### Triton in vLLM — Where It's Used
+
+```
+vLLM kernel stack (simplified):
+                                            
+┌─────────────────────────────────────────────────┐
+│  Python API (vLLM engine)                       │
+├─────────────────────────────────────────────────┤
+│  Custom Triton Kernels (vLLM/vllm/triton_ops/)  │
+│  ├── paged_attention_v1/v2.py   ← PagedAttention│
+│  ├── layernorm.py               ← Fused RMSNorm │
+│  ├── rotary_embedding.py        ← RoPE          │
+│  ├── activation.py              ← SiLU/GELU     │
+│  ├── quantization/              ← FP8 dequant   │
+│  └── moe/                       ← Expert routing│
+├─────────────────────────────────────────────────┤
+│  cuBLAS / cuBLASLt (GEMM — too complex for Triton) │
+├─────────────────────────────────────────────────┤
+│  NCCL (collectives — hardware-specific)         │
+└─────────────────────────────────────────────────┘
+
+Rule of thumb:
+  GEMM → cuBLAS (mature, optimal)
+  Attention + fused ops → Triton (flexible, fast iteration)
+  Collectives → NCCL (hardware-aware, NVLink/IB optimized)
+```
+
+### Practical: Getting Started with Triton
+
+```bash
+# ─── Installation ───
+pip install triton          # Comes bundled with PyTorch ≥2.0
+# Or for latest:
+pip install triton-nightly
+
+# ─── Verify installation ───
+python -c "import triton; print(triton.__version__)"
+
+# ─── Run the vector add example ───
+python examples/vector_add.py
+
+# ─── Benchmark against PyTorch native ───
+python -c "
+import torch, triton, triton.language as tl
+from triton.testing import do_bench
+
+# Compare fused vs unfused softmax
+x = torch.randn(1024, 4096, device='cuda')
+torch_time = do_bench(lambda: torch.softmax(x, dim=-1))
+# triton_time = do_bench(lambda: triton_softmax(x))  # your kernel
+print(f'PyTorch softmax: {torch_time:.2f} ms')
+"
+
+# ─── Profile a Triton kernel with ncu ───
+ncu --set full python my_triton_kernel.py
+# Triton kernels show up as regular SASS in ncu (fully compiled)
+
+# ─── Inspect generated PTX/SASS ───
+# Set env var to see compiled code:
+TRITON_PRINT_AUTOTUNING=1 python my_kernel.py
+# Or programmatically:
+kernel.warmup(torch.float32, grid=(1,))
+print(kernel.asm['ptx'])  # View PTX assembly
+print(kernel.asm['cubin'])  # Binary
+```
+
+### Performance Tips & Gotchas
+
+| Tip                                               | Why                                                                      |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| Make `BLOCK_SIZE` a power of 2                  | GPU hardware prefers aligned accesses; compiler can optimize better      |
+| Use `tl.constexpr` for all size parameters      | Enables compile-time optimization (unrolling, static allocation)         |
+| Accumulate in `tl.float32` even for FP16 inputs | Avoids precision loss in reductions (same as CUDA best practice)         |
+| Use `@triton.autotune` in production            | Auto-selects optimal block sizes per hardware; replaces manual tuning    |
+| Minimize `tl.atomic_add`                        | Atomic contention kills throughput; restructure to avoid if possible     |
+| Fuse element-wise ops into one kernel             | Each separate kernel = 1 HBM round-trip; fusing eliminates intermediates |
+| Use `tl.dot` for matrix ops                     | Maps to Tensor Cores automatically (FP16/BF16/FP8)                       |
+| Pin `num_warps` in autotune configs             | More warps = better latency hiding, but more register pressure           |
+| Profile with `ncu` not Python `time`          | Triton JIT cost is amortized; steady-state perf is what matters          |
+| Cache Triton compiled kernels                     | Set `TRITON_CACHE_DIR` for persistent cache across runs                |
+
+### Triton vs torch.compile (Inductor)
+
+```
+Developer writes PyTorch code:
+    y = torch.softmax(x, dim=-1)
+    z = y * weight + bias
+
+torch.compile with Inductor backend:
+    1. Trace → FX graph (symbolic representation)
+    2. Fuse ops → Identify fusible sequences
+    3. Generate Triton kernel automatically:
+         @triton.jit
+         def fused_softmax_mul_add(...):
+             ...
+    4. Compile → PTX → SASS → execute
+
+Key insight: You don't always need to write Triton manually.
+  torch.compile handles ~80% of fusion opportunities automatically.
+  Custom Triton is for the 20% that torch.compile can't optimize
+  (e.g., PagedAttention with block tables, custom quantization layouts).
+```
+
+### Interview Quick-Reference: Triton
+
+| Question                                 | Answer                                                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| What is OpenAI Triton?                   | Python-based GPU kernel language + compiler. Write at block/tile level; compiler handles thread mapping, shared memory, coalescing. |
+| Triton vs CUDA?                          | Triton: 3–5× faster to write, ~90-95% CUDA perf. CUDA: full control, needed for library-grade GEMM/NCCL.                          |
+| Where is Triton used in production?      | vLLM (PagedAttention, fused ops), PyTorch Inductor (torch.compile backend), FlashAttention prototyping.                             |
+| How does auto-tuning work?               | `@triton.autotune` benchmarks multiple tile/warp configurations on first call, caches optimal choice per input shape.             |
+| When NOT to use Triton?                  | GEMM (cuBLAS is better), NCCL collectives (hardware-specific), anything needing inline PTX or warp-level intrinsics.                |
+| How does Triton relate to torch.compile? | Inductor backend auto-generates Triton kernels from PyTorch FX graphs. Manual Triton is for ops Inductor can't handle.              |
+| What's the memory model?                 | Block-level loads/stores. Compiler decides shared memory usage. User controls tile sizes via `constexpr` params.                  |
+| How do you debug Triton?                 | `print()` inside kernel (works!), `tl.device_assert()`, `ncu` for hardware metrics, `TRITON_INTERPRET=1` for CPU emulation. |
+
+---
+
 ## 8 Practical Profiling Tasks (Summary)
 
 | # | Symptom                                      | Root Cause                                            | CUDA Knowledge Applied                           | Fix                                                  |
@@ -833,6 +1418,921 @@ stream.synchronize();
 ### One-Liner Takeaway
 
 > A system engineer's practical CUDA work in LLM serving is NOT writing kernels — it's using Nsight to diagnose latency/throughput/memory issues, understanding GPU execution constraints, and applying fixes at the configuration/scheduling/topology level.
+
+---
+
+# LLM & ML INFERENCE MASTERY
+
+> One-stop reference covering transformer internals, serving runtimes, optimization techniques, parallelism strategies, traditional ML inference, and production deployment patterns. Designed to cover ~90% of LLM/ML serving interview needs at the Staff+ level.
+
+---
+
+## Part I: Transformer Architecture for Inference
+
+### The Transformer Block (Inference Perspective)
+
+```
+Input Tokens
+    │
+    ▼
+┌──────────────────────────────────────────────────────────────┐
+│                  TRANSFORMER LAYER (× N layers)              │
+│                                                              │
+│   ┌──────────────────────────────────┐                      │
+│   │   Multi-Head Self-Attention       │                      │
+│   │                                   │                      │
+│   │   Q = X·Wq   K = X·Wk   V = X·Wv │  ← Linear projections│
+│   │   Attn = softmax(QKᵀ/√d)·V       │  ← O(T²) in prefill │
+│   │   Output = Attn·Wo               │                      │
+│   └──────────────────────────────────┘                      │
+│                    │                                         │
+│               [+ Residual] → LayerNorm                      │
+│                    │                                         │
+│   ┌──────────────────────────────────┐                      │
+│   │   Feed-Forward Network (FFN)      │                      │
+│   │                                   │                      │
+│   │   FFN(x) = GELU(x·W₁)·W₂        │  ← 2/3 of params    │
+│   │   (SwiGLU variant in Llama)       │                      │
+│   └──────────────────────────────────┘                      │
+│                    │                                         │
+│               [+ Residual] → LayerNorm                      │
+│                    │                                         │
+└──────────────────────────────────────────────────────────────┘
+    │
+    ▼
+LM Head → Logits → Sampling → Next Token
+```
+
+### Model Anatomy by Size
+
+| Model          | Params | Layers | Heads | Hidden | KV Heads (GQA) | Weights (FP16) | Weights (FP8) |
+| -------------- | ------ | ------ | ----- | ------ | -------------- | -------------- | ------------- |
+| Llama 3.1 8B   | 8B     | 32     | 32    | 4096   | 8              | ~16 GB         | ~8 GB         |
+| Llama 3.1 70B  | 70B    | 80     | 64    | 8192   | 8              | ~140 GB        | ~70 GB        |
+| Llama 3.1 405B | 405B   | 126    | 128   | 16384  | 8              | ~810 GB        | ~405 GB       |
+| Mixtral 8×7B  | 46.7B  | 32     | 32    | 4096   | 8 (MoE)        | ~93 GB         | ~47 GB        |
+
+### Prefill vs Decode — The Two Phases of LLM Inference
+
+```
+┌──────────────────────────────────────┐    ┌──────────────────────────────────────┐
+│           PREFILL PHASE              │    │           DECODE PHASE               │
+│                                      │    │                                      │
+│  Process: All prompt tokens at once  │    │  Process: One token at a time        │
+│  Attention: O(T²) — full QKᵀ matrix │    │  Attention: O(T) — append 1 row     │
+│  Bound by: COMPUTE (FLOPS)          │    │  Bound by: MEMORY BANDWIDTH          │
+│  Output: KV cache for all T tokens  │    │  Output: 1 new token per step        │
+│  Metric: TTFT (Time to First Token) │    │  Metric: TPOT (Time Per Output Token)│
+│  Parallelism: High (all T at once)  │    │  Parallelism: Low (1 token)          │
+│  GPU utilization: High (saturated)  │    │  GPU utilization: Low (batch=1)      │
+│                                      │    │                                      │
+│  Bottleneck: GEMMs + attention comp │    │  Bottleneck: Loading entire model     │
+│              for long sequences      │    │              weights per step         │
+└──────────────────────────────────────┘    └──────────────────────────────────────┘
+```
+
+**Why this matters for system engineers:**
+
+| Decision                               | Driven By                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------- |
+| When to use chunked prefill            | Prefill O(T²) dominates GPU, blocks decode for other requests                |
+| Why increase batch size                | Decode is memory-bound → batching amortizes weight loading                   |
+| Why KV cache is critical               | Without it, decode would re-compute all T tokens every step = O(T²) per step |
+| Why FP8 helps decode more than prefill | Decode is memory-bound → smaller weights = faster loading                    |
+| Why TTFT spikes with longer prompts    | Prefill compute grows quadratically with sequence length                      |
+
+### GPU Memory Budget for LLM Serving
+
+```
+H100 80GB Memory Layout (Llama 70B, FP8, TP=4):
+
+┌─────────────────────────────────────────┐
+│ Model Weights (FP8):     ~17.5 GB/GPU   │  70GB / 4 GPUs
+├─────────────────────────────────────────┤
+│ CUDA Context + Activations: ~3 GB       │  Fixed overhead
+├─────────────────────────────────────────┤
+│ CUDA Graph Workspace:      ~4 GB        │  If graphs enabled
+├─────────────────────────────────────────┤
+│ KV Cache Pool:             ~55.5 GB     │  ← This determines
+│  ├── Per-token KV (FP8):                │     max concurrent
+│  │   2 × layers × kv_heads × head_dim  │     requests
+│  │   × sizeof(fp8)                      │
+│  │   = 2 × 80 × 2 × 128 × 1 byte      │
+│  │   = ~40 KB per token per GPU         │
+│  ├── At max_model_len=4096:             │
+│  │   ~160 MB per request per GPU        │
+│  └── Max concurrent: ~346 requests      │
+└─────────────────────────────────────────┘
+```
+
+**Interview insight:** "When someone says they ran out of KV cache at 60% of expected capacity, the first thing I check is whether CUDA Graph workspace is stealing memory, whether max_model_len is set too high, and whether FP8 KV cache is enabled." (Task 7 from profiling section)
+
+---
+
+## Part II: Attention Mechanisms
+
+### Standard Multi-Head Attention (MHA)
+
+```
+MHA: Each head has its own Q, K, V projections
+
+Head 0: Q₀, K₀, V₀  →  Attn₀
+Head 1: Q₁, K₁, V₁  →  Attn₁
+   ...
+Head N: Qₙ, Kₙ, Vₙ  →  Attnₙ
+
+KV Cache Size = 2 × num_layers × num_heads × head_dim × seq_len × dtype_size
+```
+
+- Full KV per head → maximum expressiveness but **largest KV cache footprint**
+
+### Multi-Query Attention (MQA)
+
+```
+MQA: All heads share ONE K, V set; each head has its own Q
+
+Head 0: Q₀, K_shared, V_shared  →  Attn₀
+Head 1: Q₁, K_shared, V_shared  →  Attn₁
+   ...
+Head N: Qₙ, K_shared, V_shared  →  Attnₙ
+
+KV Cache Size = 2 × num_layers × 1 × head_dim × seq_len × dtype_size
+```
+
+- **KV cache reduced by num_heads×** (e.g., 32× for 32-head model)
+- Minor quality loss; used in PaLM, Falcon
+
+### Grouped-Query Attention (GQA) — The Modern Standard
+
+```
+GQA: Heads grouped; each group shares K, V  (Llama 3, Mistral, Gemma)
+
+Group 0 (heads 0–3):  Q₀,Q₁,Q₂,Q₃, K_g0, V_g0
+Group 1 (heads 4–7):  Q₄,Q₅,Q₆,Q₇, K_g1, V_g1
+   ...
+Group G:              Qₙ₋₃..Qₙ,    K_gG, V_gG
+
+KV Cache Size = 2 × num_layers × num_kv_heads × head_dim × seq_len × dtype_size
+```
+
+- **Best tradeoff:** Llama 3.1 70B has 64 Q-heads but only 8 KV-heads → **8× KV cache reduction** vs MHA
+- Negligible quality loss; default in all modern LLMs
+
+### FlashAttention (v2/v3)
+
+**Problem:** Standard attention materializes the full $T \times T$ attention matrix in HBM → O(T²) memory.
+
+**FlashAttention insight:** Tile the computation into SRAM-sized blocks, never materializing the full matrix.
+
+```
+Standard Attention:
+  Q·Kᵀ → [T×T matrix in HBM] → softmax → × V → output
+  Memory: O(T²)  |  IO: O(T² × d)
+
+FlashAttention:
+  For each block of Q:
+    For each block of K, V:
+      Compute partial attention in SRAM (shared memory)
+      Accumulate with online softmax
+      Write only final output to HBM
+  Memory: O(T)   |  IO: O(T² × d / SRAM_size)
+```
+
+**Impact:**
+
+| Metric            | Standard Attention | FlashAttention v2      |
+| ----------------- | ------------------ | ---------------------- |
+| Memory            | O(T²)             | O(T)                   |
+| Speed (T=2048)    | 1×                | 2–4× faster          |
+| Speed (T=8192)    | OOM                | Works                  |
+| Exact computation | Yes                | Yes (not approximate!) |
+
+**Key point for interviews:** FlashAttention is **exact** (not an approximation). It computes the same result as standard attention but avoids materializing the full matrix. The speedup comes from reduced HBM reads/writes, not from skipping computation.
+
+### Sliding Window Attention (SWA)
+
+```
+Standard:  Each token attends to ALL previous tokens → O(T) KV per token
+SWA:       Each token attends to last W tokens only → O(W) KV per token
+
+           Token positions:  1  2  3  4  5  6  7  8  9  10
+Standard:  Token 10 attends: 1  2  3  4  5  6  7  8  9  10  (all 10)
+SWA(W=4):  Token 10 attends:                   7  8  9  10  (last 4)
+```
+
+- Used in Mistral (W=4096) — enables arbitrarily long sequences without linear KV growth
+- **KV cache is bounded:** max KV = W × per-token-KV, regardless of sequence length
+- Tradeoff: cannot attend to early context beyond window (mitigated by interleaving SWA + full-attention layers)
+
+---
+
+## Part III: Optimization Techniques
+
+### A. Batching Strategies
+
+#### Static Batching (Naive)
+
+```
+Batch = [Req1, Req2, Req3, Req4]
+All requests padded to max_length
+Wait for ALL requests to complete before accepting new batch
+→ GPU idle time when short requests finish early
+```
+
+- Simple but highly wasteful; suitable only for offline batch inference
+
+#### Dynamic Batching
+
+```
+Accumulate requests for T_wait (e.g., 5ms)
+Form batch from all accumulated requests
+Pad to max length in batch (not global max)
+Execute batch
+```
+
+- Better than static: batch formation adapts to traffic
+- Still wastes GPU when requests finish at different times
+- Used in Triton Inference Server, TF Serving
+
+#### Continuous Batching (In-Flight Batching)
+
+```
+Time  │ GPU executing
+──────┼────────────────────────────────────────
+t=0   │ [Req1 step 5][Req2 step 3][Req3 step 1]
+t=1   │ [Req1 step 6][Req2 step 4][Req3 step 2][Req4 step 1] ← Req4 joins!
+t=2   │ [Req1 DONE]  [Req2 step 5][Req3 step 3][Req4 step 2]
+t=3   │ [Req5 step 1][Req2 step 6][Req3 step 4][Req4 step 3] ← Req5 replaces Req1
+```
+
+- **No waiting for batch boundaries** — new requests join mid-iteration, completed requests exit immediately
+- vLLM, TensorRT-LLM, SGLang all implement this
+- **10× throughput improvement** over static batching (Broadcom story: 1K→10K req/sec/GPU)
+
+**Interview insight:** "The difference between dynamic and continuous batching is that dynamic still waits for a batch to form and processes it as a unit. Continuous batching operates at the decode-step level — every decode step is an opportunity to admit new requests or retire completed ones."
+
+### B. KV Cache Management
+
+#### PagedAttention (vLLM)
+
+```
+Traditional:                      PagedAttention:
+┌──────────────────────┐          ┌────────────┐
+│ Request 1: 4096 slots│          │ Block Table│
+│ [used: 800]          │          │ Req1 → [B5, B12, B3, ...]
+│ [wasted: 3296]       │          │ Req2 → [B8, B15, B1, ...]
+└──────────────────────┘          └────────────┘
+┌──────────────────────┐    
+│ Request 2: 4096 slots│          Physical blocks allocated
+│ [used: 1200]         │          on demand (like VM pages)
+│ [wasted: 2896]       │          Only 800 blocks for Req1,
+└──────────────────────┘          1200 blocks for Req2
+                                  Waste: ~0%
+Waste: ~75%
+```
+
+**Key operations:**
+
+| Operation               | What It Does                                   | When                  |
+| ----------------------- | ---------------------------------------------- | --------------------- |
+| **Allocate**      | Grab a free physical block                     | New token generated   |
+| **Free**          | Return block to free pool                      | Request completes     |
+| **Copy-on-Write** | Share blocks between requests with same prefix | Prefix caching        |
+| **Swap**          | Move blocks GPU↔CPU                           | Under memory pressure |
+| **Preempt**       | Evict lowest-priority request's blocks         | OOM prevention        |
+
+#### Prefix Caching
+
+```
+Without prefix caching:
+  Req1: [System Prompt (200 tokens)] [User Query A] → compute KV for all
+  Req2: [System Prompt (200 tokens)] [User Query B] → recompute same 200 tokens!
+
+With prefix caching:
+  First request: compute KV for system prompt → CACHE in KV blocks
+  Req2: [CACHED prefix] [User Query B] → skip 200-token prefill!
+  Req3: [CACHED prefix] [User Query C] → skip again!
+```
+
+- **Savings:** Skip prefill for shared prefix (200 tokens × hundreds of requests)
+- vLLM: `--enable-prefix-caching`
+- Works with PagedAttention's copy-on-write: cached prefix blocks are shared read-only
+
+#### Prompt Caching (Anthropic / OpenAI Style)
+
+- Server-side: hash the prompt prefix, cache KV states across requests
+- Useful for RAG patterns where system prompt + retrieved context is stable across turns
+- Reduces cost (fewer input tokens billed) and latency (skip prefill)
+
+### C. Quantization
+
+#### Weight-Only Quantization
+
+```
+Full Precision:           Quantized:
+W (FP16): 2 bytes/param   W (INT4): 0.5 bytes/param
+70B model: 140 GB          70B model: 35 GB (fits 1 GPU!)
+
+Dequantize on-the-fly during GEMM:
+  W_fp16 = (W_int4 - zero_point) × scale
+```
+
+**Popular methods:**
+
+| Method                    | Bits         | Approach                                   | Quality                     | Speed                       |
+| ------------------------- | ------------ | ------------------------------------------ | --------------------------- | --------------------------- |
+| **GPTQ**            | 4-bit        | Post-training, layer-wise                  | Good (perplexity +0.1–0.5) | Fast inference              |
+| **AWQ**             | 4-bit        | Activation-aware (protect salient weights) | Better than GPTQ            | Fast inference              |
+| **SmoothQuant**     | 8-bit (W8A8) | Smooth activation outliers into weights    | Near-FP16                   | Fastest (INT8 Tensor Cores) |
+| **FP8 (E4M3/E5M2)** | 8-bit        | Native H100 format                         | Near-FP16                   | Optimal for Hopper          |
+
+#### KV Cache Quantization
+
+- Separate from weight quantization — quantize the cached K, V tensors
+- `--kv-cache-dtype fp8` in vLLM → **2× more concurrent requests**
+- Risk: precision loss in attention at long sequences (Task 5 from profiling: softmax accumulation in FP8 E4M3 loses accuracy at T>2048)
+- Fix: accumulate softmax in BF16, store KV in FP8
+
+#### Activation Quantization
+
+- Quantize intermediate activations (not just weights)
+- W8A8: both weights and activations in INT8 → use INT8 Tensor Cores
+- Challenge: activation outliers (some channels have values 10-100× larger)
+- SmoothQuant: mathematically migrate difficulty from activations to weights
+
+**Interview cheat sheet:**
+
+| Question                          | Answer                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------- |
+| "How do you fit 70B on one GPU?"  | FP8 or INT4 quantization (70GB → 35GB in INT4)                                          |
+| "Does quantization hurt quality?" | Weight-only INT4: minimal (<0.5 perplexity); KV FP8 at long context: can degrade softmax |
+| "GPTQ vs AWQ?"                    | AWQ protects salient weights (activation-aware), slightly better quality                 |
+| "FP8 vs INT8?"                    | FP8 is native on Hopper (no dequantize overhead); INT8 on Turing/Ampere                  |
+
+### D. Knowledge Distillation
+
+```
+Teacher Model (70B, high quality)
+        │
+        │ Generate soft labels (probability distributions)
+        │ on training data
+        ▼
+Student Model (8B, fast)
+        │
+        │ Train to match teacher's soft labels
+        │ (+ hard labels from ground truth)
+        ▼
+Deployed Student: 8B speed with 70B-like quality
+```
+
+- **Use case:** Fiserv story — 8B classifier trained via distillation from 70B reasoner
+- Typical quality retention: 90–95% of teacher at 5–10× inference speed
+- Key: soft labels carry more information than hard labels (inter-class relationships)
+
+### E. Pruning
+
+#### Structured Pruning
+
+```
+Before:  [H1][H2][H3][H4][H5][H6][H7][H8]  (8 attention heads)
+Prune:   [H1][  ][H3][  ][H5][  ][H7][  ]  (remove 4 heads)
+After:   [H1][H3][H5][H7]                    (4 heads, actual speedup)
+```
+
+- Remove entire heads, layers, or channels → actual tensor size reduction
+- Models remain dense (no sparse matrix operations needed)
+- Requires retraining/fine-tuning to recover accuracy
+
+#### Unstructured Pruning
+
+```
+Weight matrix:  [0.3  0.01  0.8  0.001]
+Pruned (50%):   [0.3  0     0.8  0    ]  ← set small weights to zero
+```
+
+- Creates sparse matrices; needs sparse GPU kernels for speedup
+- Higher compression but harder to accelerate (sparse × dense GEMM support is limited)
+- NVIDIA Ampere+ supports 2:4 structured sparsity (2 zeros in every 4 elements)
+
+### F. Kernel Fusion
+
+```
+Without fusion:                        With fusion:
+  LayerNorm → write to HBM             ┌─────────────────────┐
+  Read from HBM → Bias Add             │ Fused Kernel:       │
+  Write to HBM → Activation            │ LayerNorm + Bias +  │
+  Read from HBM → next op              │ Activation          │
+                                        │ (one HBM read/write)│
+4 HBM round-trips                      └─────────────────────┘
+                                        1 HBM round-trip
+```
+
+- TensorRT-LLM fuses: LayerNorm + bias + activation, QKV projection, attention + softmax
+- vLLM uses Triton kernels for fused operations
+- **Impact:** 2–3× speedup for element-wise ops (memory-bound → compute-bound)
+
+---
+
+## Part IV: Advanced Optimization Techniques
+
+### Prefill-Decode Disaggregation
+
+**Problem:** Prefill is compute-heavy; decode is memory-bound. On same GPU, prefill blocks decode.
+
+```
+Shared GPU:
+  Decode: |--tokens--|--tokens--|  BLOCKED  |--tokens--|
+  Prefill:                       |--PREFILL--|
+
+P99 TPOT spikes when prefill interrupts decode (Task 6 from profiling)
+
+Disaggregated:
+  Prefill GPU:  |--prefill req1--|--prefill req2--|--prefill req3--|
+  Decode GPU:   |--decode tokens smoothly, never interrupted--|
+                     KV cache transferred via NVLink/network
+```
+
+- **vLLM:** `--enable-chunked-prefill` (lightweight disaggregation — chunks prefill into small pieces interleaved with decode)
+- **Full disaggregation:** Separate GPU pools for prefill vs decode (used by Splitwise, DistServe)
+- Tradeoff: KV cache must be transferred from prefill GPU to decode GPU (NVLink: fast; network: adds latency)
+
+### Speculative Decoding
+
+```
+Without speculation:
+  Step 1: Run 70B model → token A
+  Step 2: Run 70B model → token B
+  Step 3: Run 70B model → token C
+  Total: 3 × 70B forward passes
+
+With speculation:
+  Step 1: Run 8B draft model → tokens A, B, C, D (4 speculative tokens)
+  Step 2: Run 70B model on [A, B, C, D] in ONE forward pass (parallel verification)
+  Step 3: Accept A, B, C (correct). Reject D → regenerate from 70B
+  Total: 1 × 8B pass + 1 × 70B pass for 3 tokens (vs 3 × 70B passes)
+```
+
+- **Speedup:** 2–3× for well-matched draft models (draft accepts 60–80% of tokens)
+- **Quality:** Mathematically equivalent output (rejection sampling guarantees same distribution)
+- **Requirement:** Draft model must be fast and reasonably aligned with target
+- **Variants:** Medusa (parallel draft heads on same model), Eagle (feature-level speculation)
+
+### Preemption and Cancellation
+
+**Preemption (vLLM):**
+
+```
+High-priority request arrives, GPU fully loaded:
+  Option 1: SWAP — move low-priority request's KV cache to CPU RAM
+  Option 2: RECOMPUTE — discard KV cache, re-prefill when resources free
+```
+
+- vLLM automatically preempts lowest-priority requests when KV cache is full
+- Swap is faster to resume (no recompute) but requires CPU memory
+- Recompute wastes GPU but doesn't need CPU memory
+
+**Cancellation (from Sentinel Gateway story):**
+
+```
+Client disconnects mid-generation:
+  Without cancellation: GPU generates 500 more tokens (wasted $0.049/request)
+  With cancellation: CancellationToken propagates → backend aborts immediately
+  Savings at 10K abandonments/day: ~$478/day
+```
+
+- Sentinel implements `CancellationToken` in Rust/tokio — propagates through the full pipeline
+- Critical for cost control in production LLM serving
+
+---
+
+## Part V: LLM Serving Runtimes
+
+### Runtime Comparison
+
+| Feature                  | vLLM                            | TensorRT-LLM                   | SGLang                          |
+| ------------------------ | ------------------------------- | ------------------------------ | ------------------------------- |
+| **Architecture**   | Python + C++ kernels            | C++ compiled engine            | Python + C++                    |
+| **Batching**       | Continuous (PagedAttention)     | In-flight batching             | Continuous (RadixAttention)     |
+| **KV Cache**       | PagedAttention (block tables)   | Paged KV cache                 | RadixAttention (prefix tree)    |
+| **Quantization**   | FP8, INT4 (GPTQ, AWQ)           | FP8, INT4, INT8, W4A16         | FP8, INT4 (GPTQ, AWQ)           |
+| **CUDA Graphs**    | Decode phase                    | Full pipeline                  | Decode phase                    |
+| **Prefix Caching** | Hash-based block sharing        | Implicit in compiled graphs    | Radix tree (most advanced)      |
+| **Parallelism**    | TP, PP                          | TP, PP, EP (MoE)               | TP, DP                          |
+| **Best For**       | Variable workloads, flexibility | Fixed shapes, max throughput   | Structured output, prefix-heavy |
+| **Weakness**       | Python overhead at high QPS     | Shape changes → recompilation | Younger ecosystem               |
+
+### vLLM Deep Dive
+
+**Key configuration flags (from stories):**
+
+```bash
+vllm serve meta-llama/Llama-3.1-70B-Instruct \
+  --tensor-parallel-size 4 \           # TP across 4 GPUs (need NVLink)
+  --dtype float16 \                     # Model precision
+  --quantization fp8 \                  # Weight quantization
+  --kv-cache-dtype fp8 \                # KV cache quantization (2× capacity)
+  --max-model-len 4096 \                # Max sequence length (affects KV allocation)
+  --enable-chunked-prefill \            # Prevent prefill blocking decode
+  --enable-prefix-caching \             # Cache shared prefixes (system prompts)
+  --gpu-memory-utilization 0.92 \       # How much GPU memory vLLM can use
+  --max-num-seqs 128                    # Max concurrent sequences
+```
+
+**Key vLLM internals:**
+
+| Component                | What It Does                                                      |
+| ------------------------ | ----------------------------------------------------------------- |
+| **Scheduler**      | Decides which requests to run, preempt, or swap each step         |
+| **Block Manager**  | Allocates/frees physical KV cache blocks (like OS page allocator) |
+| **Worker**         | Runs model forward pass on GPU; manages CUDA context              |
+| **Tokenizer Pool** | Async tokenization to avoid blocking GPU                          |
+| **Engine**         | Coordinates scheduler + workers; handles API requests             |
+
+### TensorRT-LLM Deep Dive
+
+**Key advantage:** Compiled execution — entire model is an optimized TensorRT engine.
+
+```
+Model (PyTorch/HF) → TRT-LLM Build → TensorRT Engine (.engine file)
+                                        │
+                                        ├── All ops fused (LayerNorm+bias+activation)
+                                        ├── INT8/FP8 calibrated
+                                        ├── CUDA Graphs for full pipeline
+                                        └── Static shapes (bucketed)
+```
+
+**When to choose TensorRT-LLM over vLLM (Task 8 lesson):**
+
+| Scenario                                | Choose  | Why                                                |
+| --------------------------------------- | ------- | -------------------------------------------------- |
+| Fixed prompt lengths (e.g., always 512) | TRT-LLM | Compiled graphs optimal; no recompilation          |
+| Variable prompt lengths (100–4000)     | vLLM    | Eager mode handles dynamic shapes without overhead |
+| Maximum throughput, fixed workload      | TRT-LLM | Compiled kernels are faster per-op                 |
+| Rapid experimentation, new models       | vLLM    | No build step; load HF model directly              |
+| Hybrid workload                         | Both    | Route fixed-shape to TRT-LLM, variable to vLLM     |
+
+### SGLang and RadixAttention
+
+**RadixAttention:** Organizes all KV cache entries in a radix tree (prefix tree).
+
+```
+                    [System Prompt KV]
+                    /                \
+          [User query A KV]    [User query B KV]
+          /          \
+   [Follow-up 1]  [Follow-up 2]
+
+Any request sharing a prefix reuses cached KV blocks automatically.
+No explicit "enable prefix caching" — it's the default data structure.
+```
+
+- **Best for:** Multi-turn chat, structured output (JSON mode), tool-use patterns where prefix sharing is high
+- Achieves highest prefix cache hit rates of any runtime
+
+---
+
+## Part VI: Parallelism Strategies
+
+### Tensor Parallelism (TP)
+
+```
+Single GPU:          W (full weight matrix)
+                     [4096 × 4096]
+
+TP=4 (split columns):
+GPU 0: W[:, 0:1024]     GPU 1: W[:, 1024:2048]
+GPU 2: W[:, 2048:3072]  GPU 3: W[:, 3072:4096]
+
+Each GPU computes partial result → AllReduce to combine
+```
+
+- **Communication:** AllReduce after every attention + MLP layer
+- **Requirement:** Fast interconnect (NVLink). PCIe is ~10× slower → kills performance (Task 4)
+- **Scaling:** TP=2 (minimal communication), TP=4 (good on NVLink mesh), TP=8 (DGX/HGX only)
+- **Rule:** Only use TP across GPUs connected by NVLink
+
+**Cost per decode step (from Task 4):**
+
+```
+TP=4 with full NVLink mesh:
+  AllReduce: 80 layers × 2 per layer = 160 AllReduces
+  NVLink AllReduce: ~0.1 ms each → 16 ms total
+  
+TP=4 with PCIe between some pairs:
+  Some AllReduce via PCIe: ~0.8 ms each → 128 ms total  ← 8× worse!
+```
+
+### Pipeline Parallelism (PP)
+
+```
+PP=4 (split by layers):
+GPU 0: Layers  0–19   →  activations sent to GPU 1
+GPU 1: Layers 20–39   →  activations sent to GPU 2
+GPU 2: Layers 40–59   →  activations sent to GPU 3
+GPU 3: Layers 60–79   →  output
+```
+
+- **Communication:** Point-to-point (send activations to next GPU), NOT AllReduce
+- **Works over PCIe:** Only sends one activation tensor between stages (not weight-sized)
+- **Problem:** Pipeline bubbles — GPU 0 idles while GPU 3 computes
+- **Fix:** Micro-batching fills the pipeline (multiple requests in flight)
+
+### Data Parallelism (DP)
+
+```
+DP=4 (replicate model):
+GPU 0: Full model copy → processes Batch 0
+GPU 1: Full model copy → processes Batch 1
+GPU 2: Full model copy → processes Batch 2
+GPU 3: Full model copy → processes Batch 3
+```
+
+- **No communication during inference** (each GPU independent)
+- **Requirement:** Model must fit on one GPU (or combined with TP)
+- **Best for:** High-throughput serving with model replicas
+- **Scaling:** Linear throughput scaling with GPU count
+
+### Expert Parallelism (EP) — For MoE Models
+
+```
+Mixtral 8×7B (Mixture of Experts):
+Each layer has 8 expert FFNs; router selects top-2 per token
+
+EP=4:
+GPU 0: Experts 0, 1     GPU 1: Experts 2, 3
+GPU 2: Experts 4, 5     GPU 3: Experts 6, 7
+
+Token routing: router decides which GPU(s) process each token
+→ All-to-all communication for routing tokens to correct expert GPU
+```
+
+- TensorRT-LLM supports EP natively
+- Challenge: load imbalance (some experts activated more than others)
+
+### Combined Strategies
+
+```
+405B model on 8× H100 (NVLink mesh):
+
+Option A: TP=8
+  Each GPU gets 1/8 of every layer
+  160 AllReduces per decode step → communication overhead
+
+Option B: TP=4 × PP=2
+  GPUs 0–3: Layers 0–62 (TP=4 within, NVLink)
+  GPUs 4–7: Layers 63–125 (TP=4 within, NVLink)
+  Only 1 point-to-point transfer between PP stages per step
+
+Option C: TP=2 × DP=4 (if model fits in 2 GPUs)
+  4 replicas of TP=2 pairs → 4× throughput
+  No inter-replica communication
+```
+
+**Decision framework:**
+
+| Model Size            | GPUs | Strategy             | Why                               |
+| --------------------- | ---- | -------------------- | --------------------------------- |
+| 8B (FP8 = 8GB)        | 1    | None (single GPU)    | Fits easily                       |
+| 70B (FP8 = 70GB)      | 1    | INT4 quantization    | Fits on 80GB                      |
+| 70B (FP16 = 140GB)    | 2    | TP=2 (NVLink pair)   | Minimal communication             |
+| 70B (FP16)            | 4    | TP=4 (NVLink mesh)   | Standard deployment               |
+| 405B                  | 8    | TP=4 × PP=2         | Balance communication vs pipeline |
+| 405B (max throughput) | 16   | TP=4 × PP=2 × DP=2 | 2 full replicas                   |
+
+---
+
+## Part VII: Traditional ML Model Inference
+
+> Not all inference is LLM inference. Fraud scoring, security classification, and risk assessment use tree models, ensembles, and small neural networks at microsecond latency.
+
+### Model Types and Latency Targets
+
+| Model Type                      | Typical Latency   | Use Case (from stories)                              | Serving Pattern                   |
+| ------------------------------- | ----------------- | ---------------------------------------------------- | --------------------------------- |
+| XGBoost / GBDT                  | 50–200 µs       | CapitalOne fraud scoring, Broadcom malware detection | CPU-native, SIMD-optimized        |
+| Logistic Regression / Scorecard | 10–50 µs        | CapitalOne regulatory scorecard                      | CPU, often hand-tuned             |
+| Small Neural Network (MLP)      | 50–500 µs       | CapitalOne GPU MLP scorer                            | GPU + CUDA Graphs                 |
+| BERT / DistilBERT               | 5–30 ms          | Broadcom URL classification, Apple NLU               | GPU (TensorRT / ONNX RT)          |
+| CNN (image/binary)              | 10–50 ms         | Broadcom malware detection                           | GPU (TF Serving / TRT)            |
+| Ensemble (8–20 models)         | < 1 ms (parallel) | CapitalOne Tier 1                                    | All models read same FeatureBlock |
+
+### Serving Patterns
+
+#### Pattern 1: CPU Ensemble (CapitalOne)
+
+```
+FeatureBlock (cacheline-aligned, all features)
+    │
+    ├── XGBoost Model 1  (< 100µs)
+    ├── XGBoost Model 2  (< 100µs)
+    ├── GBDT Model 1     (< 100µs)
+    ├── Logistic Scorecard (< 50µs)
+    ├── Rule Engine       (< 50µs)
+    └── Velocity Checker  (< 50µs)
+    │
+    ▼
+Weighted Ensemble Score → GO / NO_GO decision
+Total: < 1 ms for all models
+```
+
+- All models read from **same FeatureBlock** — no per-model data conversion
+- Per-core workers — no cross-core contention
+- Arena allocation — zero malloc in hot path
+
+#### Pattern 2: GPU + CPU Hybrid (CapitalOne)
+
+```
+CPU Path (< 1 ms):                    GPU Path (< 500µs):
+  XGBoost ensemble                      MLP classifier
+  Rule engine                           via CUDA Graph
+  Velocity checker                      (pinned buffers)
+                    \                  /
+                     ↘              ↙
+                   Merge → Final Score → Decision
+```
+
+- CPU and GPU score **in parallel** — GPU path uses CUDA Graph, CPU path uses SIMD-optimized tree traversal
+- GPU overhead (without graphs): 150µs launch overhead; with graphs: 5µs
+
+#### Pattern 3: Multi-Model GPU Pipeline (Broadcom)
+
+```
+RequestContext (1MB shared arena)
+    │
+    ├── URL Classifier (BERT + GBRT)      → GPU (TF Serving)    < 15ms
+    ├── Malware Detector (XGBoost + CNN)  → CPU + GPU           < 20ms
+    ├── DLP Engine (NER + Patterns)       → CPU (ONNX RT)       < 25ms
+    ├── Content Analyzer (NLP + CV)       → GPU (TF Serving)    < 30ms
+    ├── Behavioral Analyzer (Time-series) → CPU                 < 10ms
+    └── Threat Intel (Graph + Rules)      → CPU                 < 5ms
+    │
+    ▼  (parallel execution, early-exit on high confidence)
+Decision Engine → ALLOW / BLOCK / WARN / QUARANTINE
+Total: < 100ms p99
+```
+
+### Tree Model Optimization (XGBoost / GBDT)
+
+| Technique                        | What                                           | Impact                                       |
+| -------------------------------- | ---------------------------------------------- | -------------------------------------------- |
+| **AVX2/AVX-512 traversal** | Process 8–16 trees in parallel using SIMD     | 3–5× speedup                               |
+| **Branch-free comparison** | Conditional moves instead of branches          | Eliminates mispredictions                    |
+| **Flat array layout**      | Trees as contiguous arrays (not pointer-based) | Cache-friendly traversal                     |
+| **Quantized thresholds**   | INT16 thresholds instead of FP32               | Smaller tree, more in L1 cache               |
+| **Custom C++ engine**      | Skip Python/library overhead                   | <5ms for 500-tree ensemble (vs 20ms library) |
+
+### Serving Infrastructure Comparison
+
+| Framework                         | Best For                      | Latency     | Languages   | GPU Support                |
+| --------------------------------- | ----------------------------- | ----------- | ----------- | -------------------------- |
+| **ONNX Runtime**            | Cross-framework portability   | Medium      | C++, Python | Yes (TensorRT backend)     |
+| **TensorFlow Serving**      | TF models at scale            | Medium      | C++         | Yes (batching, versioning) |
+| **Triton Inference Server** | Multi-model orchestration     | Low         | C++         | Yes (ensemble DAGs)        |
+| **Custom C++ engine**       | Ultra-low-latency tree models | Lowest      | C++         | Optional                   |
+| **TorchServe**              | PyTorch models                | Medium-High | Python/Java | Yes                        |
+
+---
+
+## Part VIII: Production Deployment Patterns
+
+### Model Deployment Checklist
+
+```
+□ Model format chosen (ONNX / TensorRT / HF / custom)
+□ Quantization applied and validated (quality + latency)
+□ Memory budget calculated (weights + KV cache + activations + CUDA workspace)
+□ Parallelism strategy decided (TP / PP / DP)
+□ Batch size / max_model_len tuned for workload
+□ Prefix caching evaluated (shared system prompts?)
+□ GPU topology verified (NVLink mesh for TP)
+□ Health checks configured (GPU + model + pod)
+□ Autoscaling metrics selected (GPU util + queue depth + KV pressure)
+□ Circuit breakers in place (per-backend, per-model)
+□ Admission control configured (token budget + GPU headroom)
+□ Monitoring dashboards live (TTFT, TPOT, P99, GPU util, KV usage)
+□ Rollback procedure tested (blue-green swap)
+```
+
+### Guardrail + LLM Pipeline Optimization
+
+**The Python tax problem:**
+
+```
+Traditional:
+  Request → [Python] Input Guardrail → [Python] Tokenizer → [GPU] LLM →
+  [Python] Detokenizer → [Python] Output Guardrail → Response
+  
+  Tax: 6 ser/deser hops, 4 CPU↔GPU copies, Python GIL on every hop
+  Overhead: 15–40 ms (excluding LLM compute)
+```
+
+**Solution architecture (from stories):**
+
+```
+Client → Rust Gateway (tokenization + rule guardrails + rate limiting)
+                │ preprocessed token IDs (gRPC)
+                ▼
+         Triton Ensemble (all on GPU, zero Python):
+           ├── ML Input Guardrail (TensorRT) ─ tensors on GPU ─→
+           ├── LLM (TensorRT-LLM / vLLM)   ─ tensors on GPU ─→
+           └── ML Output Guardrail (TensorRT)
+                │ generated token IDs (gRPC)
+                ▼
+       Rust Gateway (detokenization + formatting + audit)
+                │
+                ▼
+              Client
+
+Overhead: < 2 ms (vs 15–40 ms)
+```
+
+| Approach                       | Overhead  | Best For            |
+| ------------------------------ | --------- | ------------------- |
+| Python microservices           | 15–40 ms | Prototyping         |
+| Python monolith                | 8–15 ms  | Small scale         |
+| Triton ensemble (GPU-resident) | 2–5 ms   | ML-based guardrails |
+| Rust gateway + Triton          | < 2 ms    | Production at scale |
+
+### GPU Fleet Cost Optimization
+
+| Technique                  | Savings                       | How                                    |
+| -------------------------- | ----------------------------- | -------------------------------------- |
+| FP8 quantization           | 2× throughput                | Same GPU, half the memory per token    |
+| KV cache FP8               | 2× concurrent requests       | `--kv-cache-dtype fp8`               |
+| Prefix caching             | 30–70% prefill reduction     | `--enable-prefix-caching`            |
+| Cancellation propagation   | ~$500/day at 10K abandonments | Abort backend on client disconnect     |
+| Right-sizing max_model_len | 2–4× more requests          | Match max_model_len to actual workload |
+| Session-affine routing     | 70% KV cache hit rate         | Sticky routing for multi-turn          |
+| Hierarchical models        | 60% token reduction           | 8B classifier → 70B only when needed  |
+| MIG partitioning           | Better GPU utilization        | Split H100 for small models (8B)       |
+
+### Key Metrics to Monitor in Production
+
+| Metric             | Source          | Alert Threshold | Action                                  |
+| ------------------ | --------------- | --------------- | --------------------------------------- |
+| TTFT p99           | vLLM metrics    | > SLO target    | Scale up, enable chunked prefill        |
+| TPOT p99           | vLLM metrics    | > 50ms          | Check prefill interference, KV pressure |
+| GPU utilization    | DCGM            | < 50% or > 95%  | Scale down / scale up                   |
+| KV cache usage     | vLLM metrics    | > 90%           | Enable FP8 KV, reduce max_model_len     |
+| Preemption count   | vLLM metrics    | > 10/min        | Increase capacity or reduce load        |
+| Queue depth        | Gateway metrics | > 50            | Scale up or shed low-priority traffic   |
+| Request errors     | Gateway metrics | > 1%            | Check circuit breakers, GPU health      |
+| Model loading time | Custom          | > 60s           | Use NVMe cache, GPUDirect Storage       |
+
+---
+
+## Part IX: Interview Quick-Reference for LLM/ML Inference
+
+### Top 15 Questions and 1-Line Answers
+
+| #  | Question                               | Answer                                                                                                                  |
+| -- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1  | Prefill vs decode?                     | Prefill is compute-bound O(T²); decode is memory-bound O(T). Different optimization strategies for each.               |
+| 2  | What is PagedAttention?                | OS-style virtual memory for KV cache: non-contiguous block allocation, copy-on-write, swap to CPU.                      |
+| 3  | Continuous vs dynamic batching?        | Dynamic batches requests then processes as unit; continuous inserts/removes requests at every decode step.              |
+| 4  | When to use TP vs PP?                  | TP for NVLink-connected GPUs (AllReduce); PP for PCIe (point-to-point only).                                            |
+| 5  | How does FlashAttention work?          | Tiles attention computation into SRAM-sized blocks; never materializes full T×T matrix in HBM. Exact, not approximate. |
+| 6  | GQA vs MHA?                            | GQA shares K,V across head groups (e.g., 8 KV-heads for 64 Q-heads). 8× less KV cache, negligible quality loss.        |
+| 7  | GPTQ vs AWQ?                           | Both INT4. AWQ is activation-aware (protects salient weights), slightly better quality.                                 |
+| 8  | Why does FP8 fail at long context?     | Softmax accumulation loses precision with 3-bit mantissa (E4M3) at T>2048. Fix: accumulate in BF16.                     |
+| 9  | Speculative decoding?                  | Draft model generates N tokens; target model verifies in one pass. 2–3× speedup, mathematically equivalent output.    |
+| 10 | How to handle prefill blocking decode? | Chunked prefill (break prefill into small pieces) or disaggregation (separate GPUs).                                    |
+| 11 | vLLM vs TensorRT-LLM?                  | vLLM for variable workloads (eager mode); TRT-LLM for fixed shapes (compiled, faster per-op).                           |
+| 12 | How to fit 405B on 8 GPUs?             | TP=4 × PP=2 with FP8 quantization. TP within NVLink groups, PP across.                                                 |
+| 13 | Prefix caching benefit?                | Skip prefill for shared prompt prefix. With system prompts: 30–70% prefill compute saved.                              |
+| 14 | KV cache OOM at 60% capacity?          | Check: max_model_len over-allocation, CUDA Graph workspace stealing memory, FP8 KV not enabled.                         |
+| 15 | Why custom C++ for XGBoost?            | Library has Python overhead + batch API. Custom: AVX2 SIMD (8 trees parallel), branch-free, <5ms for 500 trees vs 20ms. |
+
+### System Design: "Design an LLM Serving Platform"
+
+```
+1. REQUIREMENTS (30 sec)
+   Latency SLO? Model size? Throughput? Availability?
+
+2. ARCHITECTURE (2 min)
+   ┌── Control Plane (Rust/Go): routing, admission, circuit breakers
+   ├── Data Plane: GPU inference (vLLM/TRT-LLM)
+   └── Observability: Prometheus + DCGM + custom dashboards
+
+3. KEY DECISIONS (3 min)
+   Runtime: vLLM (variable) vs TRT-LLM (fixed shapes)
+   Parallelism: TP (NVLink) vs PP (PCIe)
+   Quantization: FP8 weights + FP8 KV cache (2× capacity)
+   Batching: Continuous batching (vLLM default)
+   Caching: Prefix caching for shared system prompts
+
+4. OPTIMIZATIONS (2 min)
+   Chunked prefill (protect decode latency)
+   Session-affine routing (KV cache reuse)
+   Hierarchical models (8B fast → 70B when needed)
+   Cancellation propagation (save GPU cost)
+
+5. FAILURE HANDLING (1 min)
+   OOM → admission control with token budget
+   Latency spike → circuit breaker + fallback
+   GPU failure → health checks + auto-replacement
+   Model update → blue-green deployment
+```
 
 ---
 
@@ -1127,6 +2627,19 @@ struct RequestContext {
 | MIG (optional)   | `nvidia-smi mig -cgi 9,9,9 -C`    | Partition H100 for multi-tenant            |
 | Compute mode     | `nvidia-smi -c EXCLUSIVE_PROCESS` | One process per GPU (prevent interference) |
 
+### Storage I/O
+
+| Setting           | Command                                              | Purpose                                                 |
+| ----------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| I/O scheduler     | `echo none > /sys/block/nvme0n1/queue/scheduler`   | Disable scheduler for NVMe (already has internal queue) |
+| Read-ahead        | `blockdev --setra 4096 /dev/nvme0n1`               | 2MB readahead for sequential model loading              |
+| nr_requests       | `echo 1024 > /sys/block/nvme0n1/queue/nr_requests` | Deep queue for parallel I/O                             |
+| Lustre readahead  | `lctl set_param llite.*.max_read_ahead_mb=256`     | Large prefetch for sequential model reads               |
+| Lustre RPCs       | `lctl set_param osc.*.max_rpcs_in_flight=32`       | Maximize parallel I/O to OSTs                           |
+| GDS enable        | `modprobe nvidia_fs`                               | Load GPUDirect Storage kernel module                    |
+| Page cache bypass | `O_DIRECT` in application                          | Avoid polluting page cache with model weights           |
+| io_uring          | Application-level (liburing)                         | Async batched I/O for parallel shard loading            |
+
 ---
 
 ## Kubernetes Reference (GPU Inference)
@@ -1218,14 +2731,321 @@ spec:
 
 ## Storage Reference
 
-| Workload      | Storage Choice                    | Why                                    |
-| ------------- | --------------------------------- | -------------------------------------- |
-| Model weights | Local NVMe (or cached)            | Fast loading; avoid network on startup |
-| KV cache      | GPU HBM (managed by vLLM)         | Must be in GPU memory                  |
-| Checkpoints   | S3/GCS with local cache           | Durable; load on pod startup           |
-| Logs/metrics  | EBS/PD → shipped to object store | Cost-effective long-term               |
-| Training data | Object store (S3/GCS)             | Scalable; read-heavy                   |
-| Feature cache | Redis / in-memory                 | Sub-millisecond reads                  |
+### Storage Workload Mapping
+
+| Workload                       | Storage Choice                          | Why                                           |
+| ------------------------------ | --------------------------------------- | --------------------------------------------- |
+| Model weights (serving)        | Local NVMe (or cached from GPFS/Lustre) | Fast loading; avoid network I/O on startup    |
+| Model weights (shared cluster) | GPFS / Lustre → NVMe cache tier        | Single source of truth; local cache for speed |
+| KV cache                       | GPU HBM (managed by vLLM)               | Must be in GPU memory                         |
+| Checkpoints (training)         | GPFS / Lustre (parallel write)          | Saturate aggregate bandwidth; fault tolerance |
+| Checkpoints (cloud)            | S3/GCS with local NVMe staging          | Durable; stage locally for fast resume        |
+| Training data                  | Lustre / GPFS / WekaFS                  | Parallel reads across thousands of GPUs       |
+| Logs/metrics                   | EBS/PD → shipped to object store       | Cost-effective long-term                      |
+| Feature cache                  | Redis / in-memory                       | Sub-millisecond reads                         |
+| Scratch / temp                 | Node-local NVMe (tmpfs for tiny)        | Zero network hops; ephemeral                  |
+
+---
+
+### HPC Parallel Filesystems
+
+> In HPC-style GPU clusters, storage I/O is often the bottleneck that limits model loading time, checkpoint frequency, and data pipeline throughput. Parallel filesystems solve this by striping data across many Object Storage Targets (OSTs).
+
+#### Architecture Comparison
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         LUSTRE ARCHITECTURE                             │
+│                                                                         │
+│   Clients (compute nodes with GPU)                                     │
+│     │         │         │         │                                     │
+│     └────┬────┴────┬────┴────┬────┘                                     │
+│          │         │         │     ← High-speed network (IB/RoCE)      │
+│     ┌────┴────┐ ┌──┴──┐ ┌───┴───┐                                      │
+│     │  MDS    │ │ OSS │ │  OSS  │   MDS = Metadata Server              │
+│     │(metadata)│ │     │ │       │   OSS = Object Storage Server        │
+│     └─────────┘ │ OST │ │  OST  │   OST = Object Storage Target (disk) │
+│                 │ OST │ │  OST  │                                       │
+│                 └─────┘ └───────┘                                       │
+│                                                                         │
+│   File striped across OSTs → parallel I/O from all OSS simultaneously  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         GPFS (Spectrum Scale) ARCHITECTURE              │
+│                                                                         │
+│   Clients (compute nodes with GPU)                                     │
+│     │         │         │         │                                     │
+│     └────┬────┴────┬────┴────┬────┘                                     │
+│          │         │         │     ← High-speed network (IB/RoCE)      │
+│     ┌────┴────────────────────┐                                         │
+│     │    NSD Servers           │   NSD = Network Shared Disk            │
+│     │  (serve disk blocks      │   All nodes can be NSD servers         │
+│     │   over network)          │   (symmetric architecture)             │
+│     └──┬──────┬──────┬────────┘                                         │
+│        │      │      │                                                  │
+│     [Disk] [Disk] [Disk]  (NVMe/SSD/HDD arrays)                       │
+│                                                                         │
+│   Distributed lock manager → byte-range locking for concurrent access  │
+│   Token-based caching → client-side read cache for repeated reads      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Detailed Comparison
+
+| Feature                     | Lustre                                 | GPFS (Spectrum Scale)               | WekaFS                             | BeeGFS                        |
+| --------------------------- | -------------------------------------- | ----------------------------------- | ---------------------------------- | ----------------------------- |
+| **Architecture**      | Asymmetric (MDS + OSS)                 | Symmetric (any node = server)       | Distributed (all-flash optimized)  | Asymmetric (meta + storage)   |
+| **Max bandwidth**     | 2+ TB/s (large clusters)               | 2+ TB/s                             | 1+ TB/s (NVMe-native)              | 500+ GB/s                     |
+| **Metadata**          | Dedicated MDS (bottleneck risk)        | Distributed across nodes            | Distributed                        | Dedicated meta servers        |
+| **Locking**           | LDLM (limited)                         | Distributed token-based             | POSIX-compliant                    | Relaxed POSIX                 |
+| **Small file perf**   | Weak (metadata bottleneck)             | Better (distributed metadata)       | Excellent (flash-native)           | Good                          |
+| **POSIX compliance**  | Full                                   | Full                                | Full                               | Partial                       |
+| **Tiering**           | HSM (Lustre/HSM)                       | Policy-based ILM                    | Auto-tiering (NVMe→SSD)           | Manual                        |
+| **GPUDirect Storage** | Yes (GDS plugin)                       | Yes (GDS plugin)                    | Yes (native)                       | Limited                       |
+| **Cloud support**     | On-prem mostly                         | IBM Cloud + hybrid                  | AWS/Azure/GCP native               | On-prem mostly                |
+| **Best for**          | Large HPC clusters, training at scale  | Enterprise HPC, mixed workloads     | All-flash AI clusters, low-latency | Mid-size clusters, easy setup |
+| **Used by**           | Most TOP500 sites, NVIDIA DGX SuperPOD | IBM HPC, financial services, genome | AI startups, cloud-adjacent HPC    | European HPC sites            |
+
+#### Lustre Tuning for AI/LLM Workloads
+
+```bash
+# Stripe across all available OSTs for large model files
+lfs setstripe -c -1 -S 4M /lustre/models/llama-405b/
+#   -c -1   → use ALL OSTs (maximum parallelism)
+#   -S 4M   → 4MB stripe size (matches typical read pattern)
+
+# Check current striping
+lfs getstripe /lustre/models/llama-405b/model-00001-of-00082.safetensors
+
+# For checkpoint writes (large sequential)
+lfs setstripe -c 32 -S 16M /lustre/checkpoints/
+#   Larger stripe (16M) for sequential write throughput
+
+# For small metadata-heavy dirs (tokenizer configs, etc.)
+lfs setstripe -c 1 /lustre/models/tokenizer/
+#   Single OST avoids metadata overhead for small files
+
+# Monitor OST balance (avoid hotspots)
+lfs df -h    # Check OST utilization
+lctl get_param osc.*.stats  # I/O stats per OST
+
+# Client-side tuning
+lctl set_param llite.*.max_read_ahead_mb=256   # Prefetch for sequential
+lctl set_param osc.*.max_pages_per_rpc=4096    # Larger RPCs
+lctl set_param osc.*.max_rpcs_in_flight=32     # More parallel I/O
+```
+
+#### GPFS (Spectrum Scale) Tuning for AI Workloads
+
+```bash
+# Set large block size for model weight files (up to 16MB)
+mmchfs /dev/gpfs_models -B 16M
+
+# Create fileset for LLM models with optimized policy
+mmcrfileset gpfs_models llm_weights --inode-space=new
+
+# Policy-based tiering: hot models on NVMe, cold on HDD
+mmapplypolicy gpfs_models -P /etc/gpfs/ai_tiering.policy
+#   RULE: IF access_age < 1 day THEN NVMe_pool
+#   RULE: IF access_age > 7 days THEN HDD_pool
+
+# Prefetch hint for model loading
+mmfsd: prefetchAggressiveness=2  # Aggressive readahead
+
+# Tune for large sequential I/O (model loading)
+mmchconfig maxMBpS=8000 maxFilesToCache=10000
+mmchconfig prefetchPct=80  # Use 80% of cache for prefetch
+
+# Monitor throughput
+mmpmon -p  # Real-time I/O monitoring
+mmdiag --iostats  # Detailed I/O diagnostics
+```
+
+---
+
+### GPUDirect Storage (GDS)
+
+> GPUDirect Storage bypasses the CPU and system memory entirely — DMA transfers data directly from NVMe/NFS/Lustre into GPU HBM.
+
+```
+Traditional I/O Path (bounce buffer):
+  Storage → PCIe → CPU/System RAM → PCIe → GPU HBM
+  Latency: ~500 µs for 1 GB  |  CPU involved (copies, interrupts)
+
+GPUDirect Storage Path:
+  Storage → PCIe/NVLink → GPU HBM (direct DMA)
+  Latency: ~200 µs for 1 GB  |  CPU free for other work
+
+Bandwidth comparison (H100 + NVMe array):
+  Traditional:  ~6 GB/s (CPU bottleneck on memcpy)
+  GDS:          ~25 GB/s (saturates PCIe Gen5 x16)
+```
+
+**When GDS matters:**
+
+| Scenario                            | Without GDS            | With GDS                  | Impact                    |
+| ----------------------------------- | ---------------------- | ------------------------- | ------------------------- |
+| Load 70B FP8 model (70GB) to 4 GPUs | ~12s (CPU bounce)      | ~3s (direct DMA)          | 4× faster cold start     |
+| Checkpoint 405B model (200GB)       | ~35s                   | ~9s                       | More frequent checkpoints |
+| Stream training data to GPU         | CPU saturated at 8 GPU | CPU free, scales linearly | Enables larger clusters   |
+| KV cache swap to NVMe (future)      | 2-hop latency          | 1-hop, GPU-initiated      | Feasible for overflow     |
+
+**Configuration:**
+
+```bash
+# Verify GDS support
+/usr/local/cuda/gds/tools/gdscheck -p
+
+# Mount filesystem with GDS enabled
+mount -t lustre -o gds 10.0.0.1@tcp:/lustre /mnt/lustre_gds
+
+# For GPFS
+mmchconfig gdsEnabled=yes
+
+# Verify in application
+cuFileDriverOpen()    # Initialize GDS driver
+cuFileRead()          # Direct GPU read (bypasses CPU)
+cuFileBufRegister()   # Register GPU buffer for DMA
+```
+
+---
+
+### Storage Tiering for LLM Serving
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    STORAGE TIERING STRATEGY                      │
+│                                                                  │
+│  Tier 0: GPU HBM (3.35 TB/s)                                   │
+│    └── Active KV cache, model weights (loaded)                  │
+│                                                                  │
+│  Tier 1: Local NVMe (7–14 GB/s per drive, ~25 GB/s with GDS)   │
+│    └── Cached model weights, checkpoint staging, KV overflow    │
+│                                                                  │
+│  Tier 2: GPFS / Lustre over RDMA (50–200 GB/s aggregate)       │
+│    └── Shared model repository, training datasets, checkpoints  │
+│                                                                  │
+│  Tier 3: Object Store — S3/GCS (1–10 GB/s per client)          │
+│    └── Cold models, archived checkpoints, raw datasets          │
+│                                                                  │
+│  Model Loading Path:                                            │
+│    Cold start: Tier 3 → Tier 2 → Tier 1 → Tier 0              │
+│    Warm start: Tier 1 → Tier 0 (NVMe cache hit)                │
+│    Hot swap:   Tier 0 (already loaded, blue-green on GPU)       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Cache warming strategy (from production):**
+
+```bash
+# Pre-stage model to NVMe before pod scheduling (DaemonSet)
+#!/bin/bash
+MODEL_PATH="/gpfs/models/llama-3.1-70b-fp8"
+NVME_CACHE="/nvme/model-cache/llama-3.1-70b-fp8"
+
+if [ ! -d "$NVME_CACHE" ]; then
+  # Parallel copy from GPFS to NVMe (saturate NVMe bandwidth)
+  tar -C "$MODEL_PATH" -cf - . | tar -C "$NVME_CACHE" -xf -
+  # Or with multiple streams:
+  find "$MODEL_PATH" -name '*.safetensors' | \
+    xargs -P 8 -I {} cp {} "$NVME_CACHE/"
+fi
+
+# Signal readiness to scheduler
+touch /nvme/model-cache/.ready
+```
+
+---
+
+### Checkpoint I/O Patterns (Training & Fine-Tuning)
+
+> For large model training, checkpoint I/O dominates storage requirements. A 405B model in FP32 = ~1.6 TB per checkpoint. Without parallel I/O, checkpointing stalls training.
+
+#### Distributed Checkpoint Strategies
+
+| Strategy                               | How                                 | Bandwidth                            | Use Case                                |
+| -------------------------------------- | ----------------------------------- | ------------------------------------ | --------------------------------------- |
+| **Naive (single writer)**        | Rank 0 gathers all → writes        | Limited by 1 node's NVMe (~7 GB/s)   | Small models (<10B)                     |
+| **Parallel write (1 file/rank)** | Each rank writes its shard          | N × 7 GB/s (scales with ranks)      | Standard distributed training           |
+| **Lustre striped**               | Single file, striped across OSTs    | Aggregate OST bandwidth (~100+ GB/s) | Large shared checkpoints                |
+| **GPFS parallel**                | mmfsd handles parallelism           | Aggregate NSD bandwidth              | Enterprise HPC                          |
+| **Async checkpoint**             | Copy to CPU RAM → background write | Training not blocked                 | When checkpoint time > acceptable pause |
+| **Incremental/delta**            | Only save changed layers            | 10–50% of full size                 | Frequent saves, LoRA fine-tuning        |
+
+#### Checkpoint I/O Example (PyTorch FSDP + Lustre)
+
+```python
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.filesystem import FileSystemWriter
+
+# Parallel checkpoint write — each rank writes its shard
+writer = FileSystemWriter(
+    path="/lustre/checkpoints/llama-70b/step-10000",
+    single_file_per_rank=True,     # One file per rank (max parallelism)
+    sync_files=False,              # Don't fsync each file (Lustre handles)
+    thread_count=4,                # Parallel writes within rank
+)
+
+dcp.save(state_dict={"model": model.state_dict()}, storage_writer=writer)
+
+# Lustre setup for checkpoint dir:
+# lfs setstripe -c 16 -S 16M /lustre/checkpoints/
+# → Each rank's file striped across 16 OSTs with 16MB chunks
+```
+
+---
+
+### I/O Optimization for Model Loading
+
+| Technique                        | What                                 | Impact                                        | When                                   |
+| -------------------------------- | ------------------------------------ | --------------------------------------------- | -------------------------------------- |
+| **mmap + MAP_POPULATE**    | Prefault all pages on load           | Avoids page faults during inference           | Safetensors format                     |
+| **O_DIRECT**               | Bypass page cache                    | Avoid polluting OS cache; predictable latency | Dedicated model server                 |
+| **io_uring**               | Async I/O with ring buffers          | Batch I/O submissions; reduce syscalls        | High-throughput loading                |
+| **Parallel shard loading** | Load model shards concurrently       | N× speedup for sharded models                | Multi-file models (82 shards for 405B) |
+| **NUMA-local I/O**         | Read into memory on same NUMA as GPU | Avoid cross-socket copies on pin              | Multi-socket servers                   |
+| **GDS (cuFileRead)**       | Bypass CPU entirely                  | NVMe → GPU direct; frees CPU                 | GPU-heavy workloads                    |
+| **Prefetch/readahead**     | OS or app-level readahead            | Hide I/O latency behind compute               | Sequential model loading               |
+
+**Model loading timeline optimization:**
+
+```
+Naive loading (70B FP8 = 70GB, single NVMe):
+  Read from NVMe:     70 GB / 7 GB/s  = 10.0 s
+  CPU→GPU copy:       70 GB / 25 GB/s =  2.8 s  (PCIe Gen5)
+  Total:              ~12.8 s
+
+Optimized loading (4× NVMe RAID0 + GDS + parallel shards):
+  Read via GDS:       70 GB / 25 GB/s =  2.8 s  (direct to GPU)
+  No CPU copy:        0 s
+  Total:              ~2.8 s  (4.6× faster)
+
+With NVMe cache warm (already on local NVMe):
+  Skip network:       0 s
+  GDS to GPU:         2.8 s
+  Total:              ~2.8 s (vs 12.8s cold from Lustre)
+
+With Lustre/GPFS (cold, no local cache):
+  Network read:       70 GB / 50 GB/s  = 1.4 s  (aggregate from 32 OSTs)
+  CPU→GPU copy:       70 GB / 25 GB/s  = 2.8 s
+  Total:              ~4.2 s (parallel filesystem advantage)
+```
+
+---
+
+### Storage Interview Quick-Reference
+
+| # | Question                             | Answer                                                                                                                                        |
+| - | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | Lustre vs GPFS?                      | Lustre: asymmetric (dedicated MDS), best for large sequential I/O. GPFS: symmetric (any node = server), better metadata, token-based locking. |
+| 2 | Why not just NFS for GPU clusters?   | NFS is single-server; can't stripe files across targets. Max ~3 GB/s vs Lustre/GPFS at 100+ GB/s aggregate.                                   |
+| 3 | What is GPUDirect Storage?           | DMA path from storage directly to GPU HBM, bypassing CPU bounce buffer. 3–4× faster model loads.                                            |
+| 4 | How to speed up 405B model load?     | Shard across 8 files + 4× NVMe RAID0 + GDS + parallel reads. Or pre-cache on local NVMe (warm start).                                        |
+| 5 | Checkpoint I/O bottleneck?           | Use parallel writes (1 file/rank), stripe on Lustre (-c -1 -S 16M), async checkpointing to avoid stalling training.                           |
+| 6 | Lustre stripe settings for models?   | `-c -1 -S 4M` (all OSTs, 4MB stripes) for large files. `-c 1` for small metadata files.                                                   |
+| 7 | Storage tiering strategy?            | Tier 0: GPU HBM → Tier 1: Local NVMe (cache) → Tier 2: GPFS/Lustre (shared) → Tier 3: Object store (cold).                                 |
+| 8 | Why does small file I/O kill Lustre? | Every open/stat hits single MDS. Solution: aggregate small files into tar/shards, or use DNE (Distributed Namespace).                         |
 
 ---
 
@@ -1234,6 +3054,7 @@ spec:
 ## Runbook 1: High Latency Incident
 
 ### Symptoms
+
 - P99 latency > 2× baseline
 - GPU utilization drops
 - Request queue depth increasing
@@ -1267,19 +3088,20 @@ nsys profile -o debug_capture \
 
 ### Common Root Causes
 
-| Symptom Pattern              | Root Cause                    | Fix                                    |
-| ---------------------------- | ----------------------------- | -------------------------------------- |
-| GPU util drops to 0%         | ECC error, GPU fell off bus   | Replace GPU, check PCIe slot           |
-| GPU clocks throttled         | Thermal limit reached         | Improve cooling, reduce power limit    |
-| NCCL AllReduce slow          | Wrong topology (PCIe vs NVLink) | Re-pin pods to NVLink mesh           |
-| Prefill blocking decode      | Same GPU, no chunking         | Enable chunked prefill, disaggregate   |
-| CPU gaps in nsys timeline    | Python GIL, serialization     | Move to C++/Rust, use CUDA Graphs      |
+| Symptom Pattern           | Root Cause                      | Fix                                  |
+| ------------------------- | ------------------------------- | ------------------------------------ |
+| GPU util drops to 0%      | ECC error, GPU fell off bus     | Replace GPU, check PCIe slot         |
+| GPU clocks throttled      | Thermal limit reached           | Improve cooling, reduce power limit  |
+| NCCL AllReduce slow       | Wrong topology (PCIe vs NVLink) | Re-pin pods to NVLink mesh           |
+| Prefill blocking decode   | Same GPU, no chunking           | Enable chunked prefill, disaggregate |
+| CPU gaps in nsys timeline | Python GIL, serialization       | Move to C++/Rust, use CUDA Graphs    |
 
 ---
 
 ## Runbook 2: OOM on GPU
 
 ### Symptoms
+
 - CUDA out of memory errors
 - Requests rejected unexpectedly
 - KV cache evictions high
@@ -1304,19 +3126,20 @@ nsys profile --stats=true \
 
 ### Common Root Causes
 
-| Root Cause                          | Fix                                    |
-| ----------------------------------- | -------------------------------------- |
-| max_model_len too high              | Reduce to realistic average (e.g., 2048) |
-| No prefix caching enabled           | Enable `--enable-prefix-caching`       |
-| FP16 KV cache (should be FP8)       | Switch to `--kv-cache-dtype=fp8`       |
-| Batch size too large                | Reduce `--max-num-seqs`                |
-| Memory fragmentation                | Restart pod, enable PagedAttention     |
+| Root Cause                    | Fix                                      |
+| ----------------------------- | ---------------------------------------- |
+| max_model_len too high        | Reduce to realistic average (e.g., 2048) |
+| No prefix caching enabled     | Enable `--enable-prefix-caching`       |
+| FP16 KV cache (should be FP8) | Switch to `--kv-cache-dtype=fp8`       |
+| Batch size too large          | Reduce `--max-num-seqs`                |
+| Memory fragmentation          | Restart pod, enable PagedAttention       |
 
 ---
 
 ## Runbook 3: Model Quality Degradation
 
 ### Symptoms
+
 - Output becomes repetitive/nonsensical
 - Accuracy drops on eval set
 - FP8-related issues on long prompts
@@ -1337,13 +3160,360 @@ ncu -k "flash_attn" --section SpeedOfLight \
 
 ### Common Root Causes
 
-| Root Cause                          | Fix                                    |
-| ----------------------------------- | -------------------------------------- |
-| FP8 softmax precision loss          | Use BF16 for attention, FP8 for weights |
-| Temperature too high                | Reduce from 1.0 to 0.7                 |
-| Top-p sampling too aggressive       | Reduce from 0.99 to 0.9                |
-| Prompt truncation                   | Increase max_model_len                 |
-| KV cache corruption                 | Restart pod, check ECC errors          |
+| Root Cause                    | Fix                                     |
+| ----------------------------- | --------------------------------------- |
+| FP8 softmax precision loss    | Use BF16 for attention, FP8 for weights |
+| Temperature too high          | Reduce from 1.0 to 0.7                  |
+| Top-p sampling too aggressive | Reduce from 0.99 to 0.9                 |
+| Prompt truncation             | Increase max_model_len                  |
+| KV cache corruption           | Restart pod, check ECC errors           |
+
+---
+
+## Runbook 4: Network Bottlenecks (Ethernet, RDMA, NCCL/InfiniBand)
+
+### Symptoms
+
+- AllReduce/AllGather time dominates training/inference step
+- NCCL timeout errors (`NCCL WARN Timeout`)
+- Multi-GPU scaling is sub-linear (TP=4 not 4× faster)
+- TTFT spikes on multi-node inference
+- `nvidia-smi topo -m` shows `PIX`/`PHB` instead of `NV#` between GPUs
+- High CPU utilization during collective operations
+- Packet drops or retransmits on RDMA interfaces
+
+---
+
+### Phase 1: Topology & Connectivity Diagnosis
+
+```bash
+# ─── GPU Interconnect Topology ───
+nvidia-smi topo -m
+# Legend: NV# = NVLink (best), SYS = cross-socket, PIX = same PCIe switch, PHB = same CPU
+# PROBLEM: If GPUs used for TP show PHB/SYS instead of NV# → wrong GPU assignment
+
+# ─── NVLink Status & Bandwidth ───
+nvidia-smi nvlink -s           # Link status (active/inactive)
+nvidia-smi nvlink -c           # Error counters (CRC, replay)
+# Non-zero CRC errors → failing NVLink, replace cable/GPU
+
+# ─── InfiniBand / RoCE Status ───
+ibstat                         # Port state, link speed, LID
+ibstatus                       # Quick status of all IB ports
+ibv_devinfo                    # Detailed device capabilities (MTU, max_qp, max_cq)
+
+# Verify link is Active and correct speed
+# Expected: LinkUp, 400 Gb/sec (HDR) or 200 Gb/sec (HDR100)
+
+# ─── RDMA Device Check ───
+rdma link show                 # All RDMA devices and states
+show_gids                      # GID table (for RoCE v2 — must have correct GID)
+ibv_devices                    # List available RDMA devices
+
+# ─── Ethernet / RoCE Interface Check ───
+ethtool <interface>            # Link speed, duplex, auto-negotiation
+ethtool -S <interface> | grep -i "error\|drop\|pause"  # HW-level drops
+ip -s link show <interface>    # TX/RX packets, errors, drops
+```
+
+---
+
+### Phase 2: Bandwidth & Latency Profiling
+
+```bash
+# ─── NVLink Bandwidth Test ───
+# Use NCCL's built-in benchmark
+cd /opt/nccl-tests && ./build/all_reduce_perf -b 1M -e 1G -f 2 -g <num_gpus>
+# Expected (8× H100 NVLink): ~450 GB/s bus bandwidth for AllReduce
+# If significantly lower → topology issue or link degradation
+
+# ─── RDMA Bandwidth (ib_write_bw / ib_read_bw) ───
+# Server side:
+ib_write_bw -d mlx5_0 --report_gbits
+# Client side:
+ib_write_bw -d mlx5_0 --report_gbits <server_ip>
+# Expected: HDR = ~380 Gbps, HDR100 = ~190 Gbps, NDR = ~380 Gbps
+
+# ─── RDMA Latency ───
+# Server:
+ib_write_lat -d mlx5_0
+# Client:
+ib_write_lat -d mlx5_0 <server_ip>
+# Expected: ~1–2 µs for IB, ~3–5 µs for RoCE v2
+
+# ─── NCCL AllReduce Benchmark (multi-node) ───
+mpirun -np 16 --hostfile hosts.txt \
+  -x NCCL_DEBUG=INFO -x NCCL_IB_DISABLE=0 \
+  ./build/all_reduce_perf -b 8M -e 2G -f 2 -g 1
+# Watch for: "Using network IB" (not Socket), bus bandwidth close to theoretical
+
+# ─── Ethernet TCP Bandwidth (baseline) ───
+# Server:
+iperf3 -s
+# Client:
+iperf3 -c <server_ip> -P 8 -t 30   # 8 parallel streams, 30 seconds
+# Expected 100GbE: ~95 Gbps; if much lower → MTU/offload/buffer issue
+```
+
+---
+
+### Phase 3: NCCL-Specific Troubleshooting
+
+```bash
+# ─── Enable NCCL Debug Logging ───
+export NCCL_DEBUG=INFO           # Basic info (which transport chosen)
+export NCCL_DEBUG=WARN           # Only warnings/errors (production)
+export NCCL_DEBUG_SUBSYS=ALL     # All subsystems (verbose, for diagnosis)
+
+# Look for these in logs:
+#   "NET/IB" → using InfiniBand (good for inter-node)
+#   "NET/Socket" → using TCP sockets (bad — fallback, 10× slower)
+#   "P2P/NVLink" → using NVLink (good for intra-node)
+#   "P2P/SHM" → using shared memory (slower fallback)
+
+# ─── Force NCCL Transport Selection ───
+export NCCL_NET_GDR_LEVEL=5       # Enable GPUDirect RDMA (GPU↔NIC directly)
+export NCCL_IB_DISABLE=0          # Ensure IB is NOT disabled
+export NCCL_SOCKET_IFNAME=eth0    # Pin to correct interface (avoid loopback)
+export NCCL_IB_HCA=mlx5_0         # Pin to specific HCA (avoid wrong NIC)
+export NCCL_P2P_LEVEL=NVL         # Force NVLink for intra-node P2P
+export NCCL_IB_GID_INDEX=3        # For RoCE v2 — select correct GID
+
+# ─── NCCL Timeout Issues ───
+export NCCL_TIMEOUT=1800000       # Increase timeout (ms) for large collectives
+# Root causes: asymmetric link speeds, one node slower, packet drops on switch
+
+# ─── NCCL Topology File (override auto-detection) ───
+export NCCL_TOPO_FILE=/etc/nccl/topo.xml   # Custom topology (DGX/HGX)
+# Useful when: auto-detection is wrong, custom NVSwitch config, VM environments
+```
+
+**NCCL transport decision tree:**
+
+```
+Is communication intra-node?
+  ├── YES: Are GPUs NVLink-connected?
+  │     ├── YES → P2P/NVLink (900 GB/s bidirectional per link)
+  │     └── NO  → P2P/SHM or PCIe P2P (~64 GB/s)
+  └── NO (inter-node):
+        ├── Is InfiniBand/RoCE available?
+        │     ├── YES: Is GPUDirect RDMA working?
+        │     │     ├── YES → NET/IB + GDR (GPU↔NIC direct, lowest latency)
+        │     │     └── NO  → NET/IB (GPU→CPU→NIC, still fast)
+        │     └── NO → NET/Socket (TCP — worst case, 10× slower)
+        └── Fallback: NET/Socket over Ethernet
+```
+
+---
+
+### Phase 4: GPUDirect RDMA (GDR) Troubleshooting
+
+```bash
+# ─── Verify GPUDirect RDMA is Working ───
+# Check if nvidia_peermem module is loaded
+lsmod | grep nvidia_peermem
+# If missing:
+modprobe nvidia_peermem
+
+# Verify GPU and NIC are on same PCIe switch (NUMA-local)
+nvidia-smi topo -m
+# Look for GPU↔NIC relationship: should be "PIX" or "PXB" (same PCIe switch)
+# If "SYS" → GPU and NIC are cross-socket → GDR will be slow
+
+# ─── Check if NCCL is actually using GDR ───
+# In NCCL_DEBUG=INFO output, look for:
+#   "GPU Direct RDMA Enabled for HCA mlx5_0"
+# If NOT present:
+#   - nvidia_peermem not loaded
+#   - GPU/NIC not on same NUMA node
+#   - NCCL_NET_GDR_LEVEL too low
+
+# ─── Performance comparison: GDR vs non-GDR ───
+# With GDR (GPU → RDMA NIC → remote GPU):
+#   Inter-node AllReduce (1GB): ~12 ms
+# Without GDR (GPU → CPU RAM → RDMA NIC → CPU RAM → remote GPU):
+#   Inter-node AllReduce (1GB): ~25 ms (2× slower, CPU copies)
+
+# ─── NUMA Affinity for NIC ───
+cat /sys/class/infiniband/mlx5_0/device/numa_node
+# GPU and NIC must be on SAME NUMA node for GDR
+# Fix: bind process to correct NUMA node
+numactl --cpunodebind=0 --membind=0 ./your_training_script
+```
+
+---
+
+### Phase 5: Ethernet / RoCE v2 Specific Issues
+
+```bash
+# ─── RoCE v2 requires proper ECN/PFC configuration ───
+# Check Priority Flow Control (PFC)
+mlnx_qos -i <interface>
+# PFC must be enabled on the traffic class used by RoCE (typically TC3)
+
+# Check ECN (Explicit Congestion Notification)
+sysctl net.ipv4.tcp_ecn            # Should be 1 or 2
+mlnx_qos -i <interface> --trust=dscp  # Trust DSCP markings
+
+# ─── Common RoCE Problems ───
+# 1. No PFC → packet drops under congestion → NCCL retransmits/hangs
+#    Fix: enable PFC on switch and NIC for RoCE traffic class
+#    mlnx_qos -i <interface> --pfc 0,0,0,1,0,0,0,0  # PFC on TC3
+
+# 2. Wrong GID index → connection failures
+#    show_gids                      # Find correct GID for RoCE v2
+#    export NCCL_IB_GID_INDEX=3     # Use correct index
+
+# 3. MTU mismatch → fragmentation → low throughput
+#    ip link set <interface> mtu 4096   # RoCE typically 4K MTU
+#    # Must match on BOTH sides + switch
+
+# ─── Switch-side checks (if accessible) ───
+# - ECN marking thresholds (RED/WRED)
+# - PFC watchdog timer (avoid PFC storms)
+# - Buffer allocation per priority
+# - RDMA traffic isolation (VLAN/DSCP)
+
+# ─── Monitoring RoCE counters ───
+ethtool -S <interface> | grep -E "rx_prio3|tx_prio3|rx_pause|tx_pause"
+perfquery -x -d mlx5_0 -p 1  # Port counters (errors, drops)
+```
+
+---
+
+### Phase 6: CPU-Side Network Bottlenecks
+
+```bash
+# ─── IRQ Affinity (CPU handling network interrupts) ───
+# Problem: all NIC interrupts on one CPU → soft-IRQ bottleneck
+cat /proc/interrupts | grep mlx5   # Check which CPUs handle NIC IRQs
+
+# Fix: distribute IRQs across non-inference CPUs
+/opt/mellanox/scripts/set_irq_affinity.sh mlx5_0
+# Or manually:
+echo 0-3 > /proc/irq/<irq_num>/smp_affinity_list  # Pin to CPUs 0-3
+
+# ─── Busy Polling (reduce network latency on CPU side) ───
+sysctl -w net.core.busy_read=50    # µs to busy-poll before sleeping
+sysctl -w net.core.busy_poll=50    # µs for socket poll
+
+# ─── Socket Buffer Sizes (for gRPC / TCP traffic) ───
+sysctl -w net.core.rmem_max=67108864   # 64MB receive buffer
+sysctl -w net.core.wmem_max=67108864   # 64MB send buffer
+sysctl -w net.ipv4.tcp_rmem="4096 1048576 67108864"
+sysctl -w net.ipv4.tcp_wmem="4096 1048576 67108864"
+
+# ─── TCP Tuning for gRPC (CPU-to-CPU inference traffic) ───
+sysctl -w net.ipv4.tcp_nodelay=1          # Disable Nagle
+sysctl -w net.ipv4.tcp_timestamps=1       # Precise RTT measurement
+sysctl -w net.ipv4.tcp_window_scaling=1   # Large windows for high-BDP
+sysctl -w net.core.netdev_max_backlog=65536  # Prevent kernel drops
+
+# ─── CPU Utilization from Network (soft-IRQ storm) ───
+mpstat -P ALL 1   # Look for single CPU at 100% in %soft
+# Fix: RSS (Receive Side Scaling) — distribute to multiple CPUs
+ethtool -L <interface> combined 16   # 16 RX queues
+ethtool -X <interface> equal 16      # Hash to all queues equally
+
+# ─── Connection Tracking Overhead (in K8s/iptables) ───
+conntrack -C    # Current conntrack entries
+sysctl net.netfilter.nf_conntrack_max   # Max entries
+# If near max → connection drops
+# Fix: increase max, or bypass conntrack for RDMA traffic
+```
+
+---
+
+### Phase 7: Multi-Node Inference / Training Network Diagnosis
+
+```bash
+# ─── Profiling NCCL Collectives with nsys ───
+nsys profile -t cuda,nvtx,nccl --gpu-metrics-device=all \
+  python train.py --nnodes=4 --nproc_per_node=8
+
+# In nsys timeline:
+# - Look for NCCL kernel duration vs compute kernel duration
+# - If NCCL > 30% of step time → network is the bottleneck
+# - Check for "wait" gaps before NCCL kernels (pipeline bubble)
+
+# ─── NCCL Timing (programmatic) ───
+# In PyTorch:
+import torch.distributed as dist
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+start.record()
+dist.all_reduce(tensor)
+end.record()
+torch.cuda.synchronize()
+print(f"AllReduce: {start.elapsed_time(end):.2f} ms")
+
+# ─── Network Bandwidth Saturation Check ───
+# During training:
+sar -n DEV 1 60    # Network throughput per interface, 1-sec intervals
+# Look for interface approaching link speed (e.g., 50 GB/s on 400G IB)
+
+# ─── Check for Asymmetric Links (one slow node ruins all) ───
+# Run ib_write_bw from EACH node to a common target
+# If one node shows 50% bandwidth → bad cable, NIC issue, or switch port
+for host in node{01..08}; do
+  ssh $host "ib_write_bw -d mlx5_0 --report_gbits $TARGET_IP" &
+done
+wait
+
+# ─── DCGM Network Metrics ───
+dcgmi dmon -e 1011,1012   # NVLink TX/RX bytes
+# Compare across GPUs — asymmetry indicates routing issue
+```
+
+---
+
+### Common Root Causes & Fixes Summary
+
+| Symptom                            | Root Cause                                   | Diagnosis                                | Fix                                                        |
+| ---------------------------------- | -------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| NCCL using Socket instead of IB    | IB interface not detected                    | `NCCL_DEBUG=INFO` shows "NET/Socket"   | Set `NCCL_IB_HCA=mlx5_0`, load `ib_uverbs` module      |
+| AllReduce 5× slower than expected | GPUs on different NUMA nodes / PCIe topology | `nvidia-smi topo -m` shows SYS/PHB     | Reassign GPUs, fix NUMA binding                            |
+| NCCL timeout after 5 min           | One node has link flap or packet drops       | `ibstat` shows port down/flapping      | Replace cable, check switch port                           |
+| Inter-node bandwidth 50% of spec   | MTU mismatch or no jumbo frames              | `ip link show` / switch config         | Set MTU 4096 (RoCE) or 9000 (IPoIB) on all hops            |
+| GDR not working (CPU copies)       | `nvidia_peermem` not loaded                | `lsmod                                   | grep peermem` empty                                        |
+| RoCE packet drops under load       | PFC not configured on switch                 | `perfquery` shows `port_rcv_errors`  | Enable PFC TC3 on switch + NIC                             |
+| Soft-IRQ storm (CPU 100%)          | All NIC IRQs on one core                     | `mpstat` shows 1 core at 100% %soft    | Set RSS queues, distribute IRQs                            |
+| gRPC latency spike (CPU-side)      | Small socket buffers + Nagle                 | `ss -ti` shows small cwnd, delayed ACK | `TCP_NODELAY`, increase buffer sizes                     |
+| NVLink CRC errors                  | Failing NVLink connection                    | `nvidia-smi nvlink -c` non-zero        | RMA GPU/baseboard, reseat connection                       |
+| NCCL ring timeout in k8s           | Pod network policy blocking GPU traffic      | `NCCL_DEBUG=INFO` connection refused   | Allow inter-pod traffic on NCCL ports (default: ephemeral) |
+| InfiniBand port down               | SM (Subnet Manager) issue                    | `ibstat` state = Down                  | Check `opensm` service, verify SM routing                |
+| Training stall (all nodes wait)    | Straggler with degraded NIC                  | Nsys shows one rank lagging              | Isolate slow node, check `ib_write_bw` per-node          |
+
+---
+
+### Network Performance Expectations
+
+| Interconnect          | Bandwidth              | Latency     | Use Case                         |
+| --------------------- | ---------------------- | ----------- | -------------------------------- |
+| NVLink 4.0 (H100)     | 900 GB/s bidirectional | < 1 µs     | Intra-node TP AllReduce          |
+| NVSwitch (DGX H100)   | 900 GB/s all-to-all    | < 1 µs     | 8-GPU full mesh                  |
+| InfiniBand NDR (400G) | 50 GB/s per port       | ~1 µs      | Inter-node NCCL (training/PP)    |
+| InfiniBand HDR (200G) | 25 GB/s per port       | ~1.5 µs    | Inter-node NCCL                  |
+| RoCE v2 (100GbE)      | 12.5 GB/s per port     | ~3–5 µs   | Inter-node (cloud/Ethernet)      |
+| TCP/IP (100GbE)       | ~11 GB/s per port      | ~15–30 µs | gRPC inference traffic, fallback |
+| TCP/IP (25GbE)        | ~3 GB/s per port       | ~20–50 µs | Standard K8s pod networking      |
+
+**Rule of thumb for collective operations:**
+
+```
+AllReduce time ≈ 2 × message_size / bandwidth  (ring algorithm)
+   + latency × 2 × (num_nodes - 1)            (ring steps)
+
+Example: AllReduce 1 GB across 8 nodes on HDR InfiniBand:
+   ≈ 2 × 1 GB / 25 GB/s + 1.5µs × 2 × 7
+   ≈ 80 ms + 0.021 ms
+   ≈ 80 ms  (bandwidth-dominated for large messages)
+
+Example: AllReduce 1 MB across 8 nodes on HDR InfiniBand:
+   ≈ 2 × 1 MB / 25 GB/s + 1.5µs × 14
+   ≈ 0.08 ms + 0.021 ms
+   ≈ 0.1 ms  (latency matters for small messages)
+```
 
 ---
 
@@ -1468,24 +3638,24 @@ ncu -k "flash_attn" --section SpeedOfLight \
 
 ## 16-Week Study Plan
 
-| Week | Focus Area                          | Key Deliverables                                    | Hours |
-|------|-------------------------------------|-----------------------------------------------------|-------|
-| 1    | Story A: CapitalOne Fraud Platform  | Architecture diagram, metrics, Q&A memorized        | 10    |
-| 2    | Story B: Fiserv LLM Orchestration   | Hierarchical context flow, KV cache routing         | 10    |
-| 3    | Story C: Apple Siri Pipeline        | Shared memory design, 5-stage optimization          | 10    |
-| 4    | Story D: Broadcom Multi-Model       | RequestContext struct, early-exit logic             | 10    |
-| 5    | GPU Architecture & CUDA Fundamentals | Memory hierarchy, warp execution, occupancy         | 10    |
-| 6    | CUDA Graphs & Profiling             | nsys/ncu workflow, 8 practical tasks                | 10    |
-| 7    | Rust Systems Patterns               | Arena allocators, SPSC queues, Arrow IPC            | 10    |
-| 8    | C++ Systems Patterns                | Shared memory, buffer pools, SIMD                   | 10    |
-| 9    | Host Tuning                         | NUMA, huge pages, IRQ affinity, CPU isolation       | 10    |
-| 10   | Kubernetes for GPU Workloads        | Device plugins, topology manager, autoscaling       | 10    |
-| 11   | Networking & Storage                | gRPC tuning, NCCL topology, NVMe caching            | 10    |
-| 12   | Troubleshooting Runbooks            | High latency, OOM, quality degradation scenarios    | 10    |
-| 13   | Mock Interviews (Technical)         | 3 mock sessions with feedback                       | 10    |
-| 14   | Mock Interviews (Behavioral)        | STAR stories, leadership examples                   | 10    |
-| 15   | System Design Practice              | 5 LLM serving design problems                       | 10    |
-| 16   | Final Review & Rest                 | Light review, sleep, mental preparation             | 5     |
+| Week | Focus Area                           | Key Deliverables                                      | Hours |
+| ---- | ------------------------------------ | ----------------------------------------------------- | ----- |
+| 1    | Story A: CapitalOne Fraud Platform   | Architecture diagram, metrics, Q&A memorized          | 10    |
+| 2    | Story B: Fiserv LLM Orchestration    | Hierarchical context flow, KV cache routing           | 10    |
+| 3    | Story C: Apple Siri Pipeline         | Shared memory design, 5-stage optimization            | 10    |
+| 4    | Story D: Broadcom Multi-Model        | RequestContext struct, early-exit logic               | 10    |
+| 5    | GPU Architecture & CUDA Fundamentals | Memory hierarchy, warp execution, occupancy           | 10    |
+| 6    | CUDA Graphs & Profiling              | nsys/ncu workflow, 8 practical tasks                  | 10    |
+| 7    | Rust Systems Patterns                | Arena allocators, SPSC queues, Arrow IPC              | 10    |
+| 8    | C++ Systems Patterns                 | Shared memory, buffer pools, SIMD                     | 10    |
+| 9    | Host Tuning                          | NUMA, huge pages, IRQ affinity, CPU isolation         | 10    |
+| 10   | Kubernetes for GPU Workloads         | Device plugins, topology manager, autoscaling         | 10    |
+| 11   | Networking & Storage                 | gRPC tuning, NCCL topology, GPFS/Lustre, GDS, tiering | 10    |
+| 12   | Troubleshooting Runbooks             | High latency, OOM, quality degradation scenarios      | 10    |
+| 13   | Mock Interviews (Technical)          | 3 mock sessions with feedback                         | 10    |
+| 14   | Mock Interviews (Behavioral)         | STAR stories, leadership examples                     | 10    |
+| 15   | System Design Practice               | 5 LLM serving design problems                         | 10    |
+| 16   | Final Review & Rest                  | Light review, sleep, mental preparation               | 5     |
 
 ---
 
@@ -1493,68 +3663,76 @@ ncu -k "flash_attn" --section SpeedOfLight \
 
 ### Weekly Checkpoints
 
-| Week | Topic                               | Hours Planned | Hours Actual | Completion % | Notes |
-|------|-------------------------------------|---------------|--------------|--------------|-------|
-| 1    | CapitalOne Story                    | 10            |              |              |       |
-| 2    | Fiserv Story                        | 10            |              |              |       |
-| 3    | Apple Story                         | 10            |              |              |       |
-| 4    | Broadcom Story                      | 10            |              |              |       |
-| 5    | GPU Architecture                    | 10            |              |              |       |
-| 6    | CUDA Profiling                      | 10            |              |              |       |
-| 7    | Rust Patterns                       | 10            |              |              |       |
-| 8    | C++ Patterns                        | 10            |              |              |       |
-| 9    | Host Tuning                         | 10            |              |              |       |
-| 10   | Kubernetes                          | 10            |              |              |       |
-| 11   | Networking/Storage                  | 10            |              |              |       |
-| 12   | Troubleshooting                     | 10            |              |              |       |
-| 13   | Mock Technical                      | 10            |              |              |       |
-| 14   | Mock Behavioral                     | 10            |              |              |       |
-| 15   | System Design                       | 10            |              |              |       |
-| 16   | Final Review                        | 5             |              |              |       |
+| Week | Topic              | Hours Planned | Hours Actual | Completion % | Notes |
+| ---- | ------------------ | ------------- | ------------ | ------------ | ----- |
+| 1    | CapitalOne Story   | 10            |              |              |       |
+| 2    | Fiserv Story       | 10            |              |              |       |
+| 3    | Apple Story        | 10            |              |              |       |
+| 4    | Broadcom Story     | 10            |              |              |       |
+| 5    | GPU Architecture   | 10            |              |              |       |
+| 6    | CUDA Profiling     | 10            |              |              |       |
+| 7    | Rust Patterns      | 10            |              |              |       |
+| 8    | C++ Patterns       | 10            |              |              |       |
+| 9    | Host Tuning        | 10            |              |              |       |
+| 10   | Kubernetes         | 10            |              |              |       |
+| 11   | Networking/Storage | 10            |              |              |       |
+| 12   | Troubleshooting    | 10            |              |              |       |
+| 13   | Mock Technical     | 10            |              |              |       |
+| 14   | Mock Behavioral    | 10            |              |              |       |
+| 15   | System Design      | 10            |              |              |       |
+| 16   | Final Review       | 5             |              |              |       |
 
 ### Confidence Self-Assessment
 
-| Topic                          | Before (1-10) | After (1-10) | Improvement |
-|--------------------------------|---------------|--------------|-------------|
-| Story Narratives               |               |              |             |
-| GPU Architecture               |               |              |             |
-| CUDA Profiling                 |               |              |             |
-| Rust Systems Programming       |               |              |             |
-| C++ Systems Programming        |               |              |             |
-| Host Tuning                    |               |              |             |
-| Kubernetes GPU Scheduling      |               |              |             |
-| Networking Optimization        |               |              |             |
-| Troubleshooting                |               |              |             |
-| System Design                  |               |              |             |
-| Behavioral Interviews          |               |              |             |
+| Topic                     | Before (1-10) | After (1-10) | Improvement |
+| ------------------------- | ------------- | ------------ | ----------- |
+| Story Narratives          |               |              |             |
+| GPU Architecture          |               |              |             |
+| CUDA Profiling            |               |              |             |
+| Rust Systems Programming  |               |              |             |
+| C++ Systems Programming   |               |              |             |
+| Host Tuning               |               |              |             |
+| Kubernetes GPU Scheduling |               |              |             |
+| Networking Optimization   |               |              |             |
+| Troubleshooting           |               |              |             |
+| System Design             |               |              |             |
+| Behavioral Interviews     |               |              |             |
 
 ---
 
 ## Key Numbers to Memorize
 
-| Fact                                | Number                      |
-| ----------------------------------- | --------------------------- |
-| CUDA kernel launch overhead         | ~5–15 µs                  |
-| H100 HBM bandwidth                  | 3.35 TB/s                   |
-| H100 FP16 TFLOPS                    | 1,979                       |
-| H100 SMs                            | 132                         |
-| NVLink 4 bandwidth (per link)       | 900 GB/s bidirectional      |
-| PCIe Gen5 bandwidth                 | ~64 GB/s                    |
-| NVLink vs PCIe speedup              | ~14×                       |
-| Typical AllReduce latency (NVLink)  | 0.1–0.3 ms                 |
-| Typical AllReduce latency (PCIe)    | 0.5–2.0 ms                 |
-| malloc latency                      | 100–500 ns                 |
-| Pool acquire latency                | ~50 ns                      |
-| Shared memory access                | ~20 cycles (~15 ns)         |
-| L2 cache access                     | ~200 cycles                 |
-| HBM access                          | ~400 cycles                 |
-| gRPC roundtrip (same datacenter)    | 0.5–2 ms                   |
-| JSON serialization (feature vector) | ~200 µs                    |
-| Arrow wrap (zero-copy)              | ~0 µs (pointer assignment) |
-| XGBoost inference (500 trees)       | <100 µs                    |
-| vLLM decode step (8B, batch=1)      | ~14 ms                      |
-| Llama 8B weights (FP16)             | ~16 GB                      |
-| KV cache per token (Llama 8B, FP16) | ~128 KB                     |
+| Fact                                | Number                             |
+| ----------------------------------- | ---------------------------------- |
+| CUDA kernel launch overhead         | ~5–15 µs                         |
+| H100 HBM bandwidth                  | 3.35 TB/s                          |
+| H100 FP16 TFLOPS                    | 1,979                              |
+| H100 SMs                            | 132                                |
+| NVLink 4 bandwidth (per link)       | 900 GB/s bidirectional             |
+| PCIe Gen5 bandwidth                 | ~64 GB/s                           |
+| NVLink vs PCIe speedup              | ~14×                              |
+| Typical AllReduce latency (NVLink)  | 0.1–0.3 ms                        |
+| Typical AllReduce latency (PCIe)    | 0.5–2.0 ms                        |
+| malloc latency                      | 100–500 ns                        |
+| Pool acquire latency                | ~50 ns                             |
+| Shared memory access                | ~20 cycles (~15 ns)                |
+| L2 cache access                     | ~200 cycles                        |
+| HBM access                          | ~400 cycles                        |
+| gRPC roundtrip (same datacenter)    | 0.5–2 ms                          |
+| JSON serialization (feature vector) | ~200 µs                           |
+| Arrow wrap (zero-copy)              | ~0 µs (pointer assignment)        |
+| XGBoost inference (500 trees)       | <100 µs                           |
+| vLLM decode step (8B, batch=1)      | ~14 ms                             |
+| Llama 8B weights (FP16)             | ~16 GB                             |
+| KV cache per token (Llama 8B, FP16) | ~128 KB                            |
+| NVMe SSD bandwidth (single)         | 7 GB/s (Gen4) / 14 GB/s (Gen5)     |
+| Lustre aggregate bandwidth          | 50–2000+ GB/s (cluster-dependent) |
+| GPFS aggregate bandwidth            | 50–2000+ GB/s (cluster-dependent) |
+| GPUDirect Storage throughput        | ~25 GB/s (PCIe Gen5 x16)           |
+| NFS max throughput (single server)  | ~3 GB/s                            |
+| Model load 70B FP8 (NVMe+GDS)       | ~2.8 s                             |
+| Model load 70B FP8 (naive single)   | ~12.8 s                            |
+| Checkpoint 405B FP32 size           | ~1.6 TB                            |
 
 ---
 
