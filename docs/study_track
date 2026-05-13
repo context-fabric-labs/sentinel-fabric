@@ -234,6 +234,7 @@ Programming
 		Generic pattern , it creats respective function at runtime 
 		same_as for type checking 
 	ZERO data copy 
+    
 	Memory Arena
 	NUMA based programming (https://www.youtube.com/watch?v=f0ZKBusa4CI)
 	Threading & Processes 
