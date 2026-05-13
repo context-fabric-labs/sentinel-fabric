@@ -1,0 +1,311 @@
+System Engineering 
+	Platform and Infra
+		CPU:
+			Host:
+				CPU Isolation
+					GRUB_CMDLINE_LINUX="isolcpus=4-19,24-39 nohz_full=4-19,24-39 rcu_nocbs=4-19,24-39"
+				NUMA pinning 
+					numactl --cpunodebind=0 --membind=0 -- ./fraud-scorer. # SHould not use this and usually done on K8 side 
+				Kernel Tuning to Disable NIC Intrupt (IRQ Affinity)
+					systemctl disable irqbalance
+			K8:
+				kind: ClusterConfiguration and kind: KubeletConfiguratio with static policy . # Revisit for in-depth 
+				Pod spec with resouce and limits exact match 	
+		Memory:
+			Host:
+				Huge Page allocation 
+				Shared Memory (/dev/shm)
+			K8:
+				Volume with Huge Pages 
+				IPC  Namespace  :- Volume with shared Memory for container to shared within a pod (in pod spec . shareProcessNamespace: true  )
+		Network
+			Host:
+				AF_XDP (Instead DPDK due to high operation challenges)
+			K8:
+				SR-IV CNI plugin 
+		Storage
+			NVME
+		GPU
+			GPU Device Plugins 
+			MIG partitiioning 
+			Time slice, sharing GPU among POD 
+		Minitoring 
+			eBPF 
+ 		Storage
+ 			NVME
+ 			GPFS 
+ 			Lustre
+
+To-DO :- 
+	1) Actual baremetal Harware configuration
+	2) Deployment of K8 on Baremetal 
+	3) K8 Cluster(s) Topology 
+	4) Dev Ops, Rolling Upgrades 
+ ================================================================================================================================================================
+	
+	Performance Troubleshooting &  Profiling
+		Cluster level:-
+			DGCM Exporter
+			Node Exporter 
+			vLLM metrics 
+		Node Level
+			htop
+			numastat
+			
+
+
+		Performance Troubleshooting
+			USE methods(Usage Standardidation Saturation) for Infra
+			RED methods ((Throughput))
+			On-CPU vs Off-CPU analysis
+			Tools
+				CPU
+					top/htop
+					uptime
+					mpstat
+					pidstat
+					ps
+				Memory
+					free
+					vstat
+					slabtop
+					pcstat
+				NUMA
+					numastat
+					numactl
+				Storage
+					iostat
+					iotop
+				Network
+					ss
+					netstat
+					tcpdump
+		Profiling
+			CPU
+				perf
+				Intel vTune 
+				Intel Inspector
+				Tracy 
+			GPU
+				NsIght System
+				Nsight Compute 
+			Memory
+				valagrind
+				heaptrack
+				tcmalloc(For Production)
+			Network
+				Wireshark
+			PyTorch Profiler 
+	
+	Benchmarking
+	 	Compute
+	 		HPL
+	 		HPCG
+	 		STREAM
+	 		Intel MLC
+	 	Network
+	 		iperf3
+	 		NCCL Tests
+	 	Storage
+	 		FIO
+	 		IOR
+	 	GPU
+	 		gpu-burn
+	 		DCGM diag
+	 		cuBLAS bench
+	 		MLPerf
+===================================================================================================	 		
+
+Inferencing 
+	LLM
+		Transformer Architecture 
+			Prefill - Decode Phase
+		Quantization
+		Optimization Techniques
+			Continous Batching
+			Dynamic Batching
+			Paged Attenion
+			Flashed Attenion 
+			Grouped Query Attension
+			Distillation  
+			Pruning
+			KV Cache 
+			Kernel Fusion
+			Prefix and Prompt caching
+			Sliding Window Attention
+		Advanced Optimization
+			Sepearte Prefill and Decode Phase
+			Spcculative Decoding
+			Canceling
+			Premption
+
+		LLM Runtimes 
+			vLLM
+			TensorRT-LLM
+			SGLang
+		Paraleeism 
+			Tensor
+			Data
+			Model 
+	Classic
+		Feature Enginereing
+		Observability
+		Multi-Model Patterns
+			Cascade
+			Ensemble
+			Sequential
+
+
+===================================================================================================
+
+Training 
+	Training LLM from scrtch 
+	Fine tuning large LLM with huge dataset
+	Fine tune small model with huge dataset
+
+===================================================================================================
+System Programming
+		CPP
+			Memory Optimization 
+				NUMA Optimization 
+				Memory allocation
+				SIMD
+			Concurrency and ralallesism
+				Threads and Thread Pools
+				Lock Free Queue- SPSC
+			Zero-Copy Architecure 
+				Apache Arrow Integration
+				Seralizationa dn compression
+				RDMA
+		RUST
+			Consistent Hashing
+			Proxy, Routing and Load Balancing
+			Circuit Breakers
+===================================================================================================
+
+GPU & CUDA
+	GPU
+	CUDA
+		Kernels 
+			1-D
+			2-D
+			Reductions
+			GEMM
+		
+		Atomics
+		Warp premetives
+		Coalesced vs scattered access
+		Memeory 
+			Shared Memory 
+				Tiling
+				Bank Conflicts
+			Host-Drvice Transfer 
+				Pageble
+				Pinned
+				Mapped Zero-Copy 
+				Unified Memory 
+		Occupancy
+			Stall Categories
+		CUDA Streams
+		waves
+		Multi-Gpu operation
+		CUDA Graphs
+		Kernel fusion
+		Libraries
+			Thrust
+			cuBLAS
+			cuTLAS
+		Profiling 
+			Nsys
+			NCU
+			Roofline 
+	Triton
+
+	Questions 
+		a) What kind of profiling you have done, what were the results, how did you analyze it,  and how do you optimize it 
+===================================================================================================
+
+Programming 
+	CPP
+	RAAI
+		Standard practise of aquiring resources in constructir, using desctor and stand c++ unique poters, file etc.
+	Pointers and Smart Pointers
+	Template
+		Generic pattern , it creats respective function at runtime 
+		same_as for type checking 
+	ZERO data copy 
+	Memory Arena
+	NUMA based programming (https://www.youtube.com/watch?v=f0ZKBusa4CI)
+	Threading & Processes 
+		Unlike thread each Processes has its own memory whereas therads operates in the same memory 
+		pthreads are c style threads, we should not be using it instaed we should use std:thread which RAAI safe .
+
+	
+	Plugin and Libraries
+	FileIO
+	SIMD vectorization and CUGEMM libraries Smart Pointers, RAII, Futures, Template
+	OOPS
+	MPI(Extra)
+	Macro
+
+	How do you write the C++ program to take advantage of SIMD, NUMA , CFS , MemoryArena , Zero Copy , L1/L2/L3 cache 
+
+Python
+	Python essential concepts 
+	PyTorch
+		Eager/ torch.compile
+		Triton
+RUST
+	Socket Programming 
+	Proxy, Routing and Load Balancing
+	Memory Arena
+	FileIO
+	Owenership and borrowing
+	shadowing 
+	loop label, while , for 
+	Struct / Enum 
+	Error handling / Option / Result 
+	Dynamic Dispatch
+	Iterator
+	Smart Pointers
+	Frameworks
+		Takio
+		Axum
+	MPSC channels
+	ThreadPool
+
+Zero Copy 
+		POSIX shm_open, mmap, and memory-mapped files
+		Rust (memmap2 or raw mmap)
+		Python (multiprocessing.shared_memory)
+	Serialization/deSearlization
+		Protopub, Flatbuffer
+	Fast Network
+		io_uring, AF_XDP, DPDK, netmap, RDMA.
+	Apache Arrow 
+
+=====================================================================================================================================
+Projects 
+	1) Three Tier Fraud detection system for Capital One 
+		a) Rust based Gateway
+		b) Ensamble serving with Zero Copy ML Fetures 
+		c) LLM context with pre knowledge and Reasoning and Features from Redis 
+			Arrow zero-copy context
+			NUMA pinning
+			Local Hot Cache and Redis Cache 
+			FP8 / INT8 quantization
+			Arrow zero-copy context
+			Prefill
+	2) Apple Siri
+		a) ZERO Copy between stages 
+		b) GPU vector search with FIASS
+		c) GPU-batched ranking
+		d) Parallel Classifier, ENR and query embeddings 
+
+			spsc ring, FIASS, eBPF, C++ and RUST readings, Profiling , Training (FSDP, PP, TP), Arrow
+
+
+
+
+
+

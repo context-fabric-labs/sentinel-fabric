@@ -30,6 +30,24 @@ This is **not** a simple "speech-to-text" problem. It's a **distributed systems 
 | **Stability Under Failure** | Graceful degradation | ASR/TTS/search dependencies can fail independently |
 | **Energy Efficiency** | Optimal Apple Silicon utilization | Battery life on edge devices, thermal constraints in datacenters |
 
+### The NLP-to-Transformer Migration Challenge
+
+The existing Siri pipeline was built on **legacy NLP models** — statistical language models (n-gram LMs), GMM-HMM acoustic models for ASR, rule-based NLU with hand-crafted grammars, and concatenative/parametric TTS. These models were:
+
+- **Accurate enough for simple commands** ("Call Mom", "Set a timer") but poor at complex, compositional queries
+- **Lightweight** but incapable of contextual understanding across multi-turn conversations
+- **Fast individually** but stitched together with ad-hoc service boundaries and redundant serialization
+
+The migration to **Transformer-based models** (Conformer ASR, DistilBERT NLU, FastSpeech TTS) brought dramatically better quality — but also **4–10× higher compute cost per inference** and larger model footprints. The systems challenge was: **deliver Transformer-quality results within the same latency envelope the legacy NLP models achieved.**
+
+| Dimension | Legacy NLP Models | Transformer Models | Challenge |
+|-----------|------------------|-------------------|----------|
+| **ASR** | GMM-HMM + n-gram LM | Conformer + RNN-T | 8× more FLOPs per frame |
+| **NLU** | Rule-based grammars + MaxEnt classifier | DistilBERT (66M params) | Needs GPU; 10× slower on CPU |
+| **TTS** | Concatenative / parametric | FastSpeech + neural vocoder | 20× more compute; streaming required |
+| **Entity Resolution** | Dictionary lookup + regex | Embedding similarity + coreference | Vector search over millions of entities |
+| **Context** | Stateless per turn | Multi-turn attention over dialogue history | Session state must persist across stages |
+
 ### The Core Systems Problem
 
 > **How do we make a multi-stage conversational pipeline behave like one smooth low-latency system instead of a chain of disconnected APIs?**
@@ -57,6 +75,17 @@ In a naive design, each stage becomes:
 ### Design Principle
 
 **Treat the multi-stage pipeline as a single distributed system with shared state, not as independent microservices.**
+
+**Model Migration Strategy:** Replace legacy NLP components with Transformer equivalents one stage at a time, while redesigning the inter-stage communication layer to absorb the increased compute cost through zero-copy state propagation and hardware-accelerated inference.
+
+| Stage | Legacy Model (Replaced) | Transformer Model (New) | Key Upgrade Benefit |
+|-------|------------------------|------------------------|--------------------|
+| **ASR** | GMM-HMM + 3-gram LM | Conformer encoder + RNN-T decoder | 25% lower WER; streaming partial results |
+| **NLU** | MaxEnt classifier + regex NER | DistilBERT intent classifier + token NER | 15% higher intent accuracy; handles compositional queries |
+| **Entity Resolution** | Dictionary + edit-distance | FAISS vector search over BERT embeddings | Handles synonyms, misspellings, ambiguity |
+| **Ranking** | TF-IDF + hand-tuned rules | LambdaMART over dense+sparse features | Personalized, context-aware ranking |
+| **TTS** | Unit-selection / parametric | FastSpeech 2 + HiFi-GAN vocoder | Natural prosody; emotion control; streaming |
+| **Dialogue** | Finite state machine | Transformer-encoded dialogue state | Multi-turn coreference; slot carryover |
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -135,7 +164,7 @@ In a naive design, each stage becomes:
 
 ### 1. **Zero-Copy State Propagation Across Pipeline Stages**
 
-**Challenge:** Each stage (ASR → NLU → Search → Orchestration → TTS) was rebuilding and re-serializing conversational state, adding 50–80 ms overhead per stage.
+**Challenge:** With the migration from lightweight NLP models to Transformer-based models, each stage became more compute-intensive. The legacy pipeline's practice of rebuilding and re-serializing conversational state between stages — tolerable at 5–10 ms with small NLP model outputs — now added 50–80 ms overhead per stage due to larger embedding tensors and richer intermediate representations.
 
 **Solution:**
 
@@ -303,7 +332,7 @@ public:
 
 ### 2. **Streaming ASR with Partial Hypothesis Propagation**
 
-**Challenge:** Users expect to see transcriptions as they speak (partial results), but traditional ASR waits for complete utterance before returning anything.
+**Challenge:** The legacy GMM-HMM ASR model operated in batch mode — it waited for the complete utterance before decoding. Users expect to see transcriptions as they speak (partial results). The new Conformer-based ASR model supports streaming, but requires careful KV cache management to avoid re-computing encoder states for previously seen audio frames.
 
 **Solution:**
 
@@ -386,7 +415,7 @@ public:
 ```
 
 **Key Optimizations:**
-- **KV Cache Reuse:** Encoder attention caches K,V for past frames (like LLM KV cache)
+- **KV Cache Reuse:** Encoder attention caches K,V for past frames (avoids re-computation on every chunk)
 - **Incremental Decoding:** RNN-T decoder processes one frame at a time
 - **Partial Emission:** Hypotheses emitted every 50–100 ms as confidence exceeds threshold
 - **Zero-Copy Write:** Partial results written directly to shared state
@@ -439,7 +468,7 @@ public:
 
 ### 3. **BERT-Based NLU with Intent Classification and Entity Extraction**
 
-**Challenge:** Understand user intent from ASR output (which may contain errors, disfluencies, incomplete sentences) and extract entities for downstream actions.
+**Challenge:** The legacy NLU used a MaxEnt classifier with hand-engineered features for intent detection and regex-based entity extraction. It failed on compositional queries ("find the restaurant John mentioned last Tuesday"), couldn't handle disfluencies, and required manual grammar updates for every new intent. The upgrade to DistilBERT-based NLU provides contextual understanding but requires GPU inference and produces 768-dimensional embeddings that must flow efficiently to downstream stages.
 
 **Solution:**
 
@@ -525,10 +554,11 @@ public:
 };
 ```
 
-**Model Choice: DistilBERT vs. Full BERT**
-- **DistilBERT:** 6 layers, 66M parameters, 40% faster, 97% accuracy retention
-- **Full BERT:** 12 layers, 110M parameters, higher accuracy but slower
-- **Decision:** DistilBERT for p99 latency targets, full BERT for complex queries
+**Model Choice: DistilBERT vs. Full BERT (replacing legacy MaxEnt classifier)**
+- **Legacy MaxEnt:** <1M parameters, CPU-only, 50µs inference — but 78% intent accuracy, no contextual understanding
+- **DistilBERT:** 6 layers, 66M parameters, 40% faster than BERT, 97% accuracy retention — 93% intent accuracy
+- **Full BERT:** 12 layers, 110M parameters, higher accuracy but slower — 95% intent accuracy
+- **Decision:** DistilBERT for p99 latency targets (25ms on Apple Silicon GPU), full BERT for complex queries via fallback path
 
 #### B. Entity Extraction with Context Awareness
 
@@ -606,7 +636,7 @@ NLU:
 
 ### 4. **Vector Search and Federated Ranking**
 
-**Challenge:** After NLU extracts intent and entities, retrieve relevant results from multiple sources (knowledge graph, content index, action database) and rank them.
+**Challenge:** The legacy search used TF-IDF keyword matching with hand-tuned boosting rules. It couldn't handle semantic similarity ("cheap eats" → budget restaurants), synonym expansion, or personalized ranking. After the NLU upgrade to BERT-based embeddings, we could leverage dense vector representations for semantic search — but needed to combine this with structured knowledge graph lookups and real-time API calls across multiple content sources.
 
 **Solution:**
 
@@ -768,7 +798,7 @@ struct RankingFeatures {
 
 ### 5. **Response Orchestration with Multi-Turn Context Management**
 
-**Challenge:** Decide what response to give based on intent, search results, and conversation history. Handle clarifications, follow-ups, and multi-turn dialogues.
+**Challenge:** The legacy orchestration used a finite-state-machine (FSM) dialogue manager with manually authored state transitions. Adding a new intent required editing hundreds of FSM rules, and multi-turn context was limited to single-slot carryover. The Transformer-based approach replaces this with a learned dialogue state tracker that encodes the full conversation history and supports compositional slot filling, coreference resolution, and dynamic tool selection.
 
 **Solution:**
 
@@ -941,7 +971,7 @@ Response: "OK, I've scheduled a meeting with John for tomorrow at 3pm."
 
 ### 6. **Neural TTS with Streaming Synthesis**
 
-**Challenge:** Convert response text to natural-sounding speech with low latency and streaming delivery.
+**Challenge:** The legacy TTS used unit-selection synthesis (concatenating pre-recorded speech segments) or parametric models (HMM-based). The output sounded robotic, lacked prosody variation, and couldn't express emotion. The upgrade to FastSpeech 2 + HiFi-GAN neural vocoder produces natural-sounding speech with controllable prosody and emotion — but at 20× the compute cost. Streaming synthesis is essential to hide this latency from the user.
 
 **Solution:**
 
@@ -1079,6 +1109,1895 @@ Emotion select_emotion(const OrchestrationResult& response) {
         return NEUTRAL;
     }
 }
+```
+
+---
+
+### 7. **GPU-Accelerated Pipeline Optimizations (NLU ∥ Search ∥ Ranking)**
+
+The preceding sections describe **what** each stage computes. This section describes **how** we restructured the NLU → Search → Ranking hot path to exploit GPU parallelism, eliminate unnecessary data movement, and batch work that was previously sequential.
+
+**The Problem:** In the initial Transformer migration, each stage ran serially on the GPU:
+
+```
+SEQUENTIAL (BEFORE)
+────────────────────────────────────────────────────────────────────────
+Time →  ├─ BERT Encode (8ms) ─┤─ Intent Classify (3ms) ─┤─ Entity NER (3ms) ─┤
+        ├─── GPU idle ────────────────────────────────────── Vector Search (4ms)─┤
+        ├─── GPU idle ────────────────────────────────────────── Ranking (5ms×100)─┤
+        Total NLU+Search+Ranking: 14 + 4 + 5 = 23 ms
+```
+
+**The Opportunity:** Intent classification, entity embedding, and query embedding are **independent** — they read the same BERT output but don't depend on each other. Vector search can stay on GPU. Ranking can be batched.
+
+```
+PARALLEL GPU STREAMS (AFTER)
+────────────────────────────────────────────────────────────────────────
+Stream 0: ├── BERT Encode (8ms) ──────────────────────────────────────┤
+Stream 1: │                       ├─ Intent Classify (3ms) ─┤         │
+Stream 2: │                       ├─ Entity NER (3ms) ──────┤         │
+Stream 3: │                       ├─ Query Embed (2ms) ─┤────────────→│
+          │                       │                     ↓ (GPU→GPU)   │
+Stream 3: │                       │        ├─ GPU Vector Search (0.7ms)┤
+Stream 4: │                       │        │   ├─ Batched Ranking (0.8ms)┤
+          │                       │        │   │                        │
+Sync ────►│                       │        │   │                        │
+          Total NLU+Search+Ranking: 8 + max(3,3,2+0.7+0.8) = 8 + 3.5 = 11.5 ms
+          Savings: 23 ms → 11.5 ms  (2.0× faster)
+────────────────────────────────────────────────────────────────────────
+```
+
+#### A. Parallel GPU Streams — Intent Classifier ∥ Entity Tagger ∥ Query Embedder
+
+**Challenge:** After BERT encoding, intent classification, entity extraction, and query embedding generation were running serially on the same GPU command queue. Each waits for the previous to finish, but they are **data-independent** — they all read from the same BERT hidden states.
+
+**Before:** 14 ms (BERT 8ms + intent 3ms + entity 3ms, serial)
+**After:** 8 ms (BERT 8ms, then intent ∥ entity ∥ query embedding in parallel = max(3,3,2) = 3ms)
+
+```cpp
+/// GPU Stream Manager for parallel NLU execution
+/// Uses Metal command queues on Apple Silicon (analogous to CUDA streams)
+class ParallelNLUPipeline {
+    // Metal device and command queues (one per parallel stream)
+    id<MTLDevice> device;
+    id<MTLCommandQueue> bert_queue;          // Stream 0: BERT encoder
+    id<MTLCommandQueue> intent_queue;        // Stream 1: Intent classifier
+    id<MTLCommandQueue> entity_queue;        // Stream 2: Entity tagger (NER)
+    id<MTLCommandQueue> embedding_queue;     // Stream 3: Query embedding
+    
+    // Shared GPU buffer — BERT output stays on GPU
+    id<MTLBuffer> bert_hidden_states;        // [seq_len, 768] — written by Stream 0
+                                             // Read by Streams 1, 2, 3 (no copy)
+    
+    // Output buffers (GPU-resident)
+    id<MTLBuffer> intent_logits;             // [num_intents] — from Stream 1
+    id<MTLBuffer> entity_labels;             // [seq_len, num_entity_types] — from Stream 2
+    id<MTLBuffer> query_embedding;           // [768] — from Stream 3
+    
+    // Metal compute pipelines (precompiled shader functions)
+    id<MTLComputePipelineState> bert_pipeline;
+    id<MTLComputePipelineState> intent_pipeline;
+    id<MTLComputePipelineState> entity_pipeline;
+    id<MTLComputePipelineState> embedding_pipeline;
+    
+    // Synchronization: fence signals when BERT completes
+    id<MTLSharedEvent> bert_complete_event;
+    uint64_t bert_event_value = 0;
+    
+public:
+    /// Execute NLU pipeline with parallel GPU streams
+    NLUResult execute_parallel(const std::vector<int32_t>& tokens) {
+        bert_event_value++;
+        
+        // ═══════════════════════════════════════════════════════════════
+        // STREAM 0: BERT Encoder (must complete before downstream heads)
+        // ═══════════════════════════════════════════════════════════════
+        auto bert_cmd = [bert_queue commandBuffer];
+        {
+            auto encoder = [bert_cmd computeCommandEncoder];
+            
+            // Copy token IDs to GPU input buffer
+            [encoder setComputePipelineState:bert_pipeline];
+            [encoder setBuffer:token_ids_buffer offset:0 atIndex:0];
+            [encoder setBuffer:bert_hidden_states offset:0 atIndex:1];
+            
+            // Launch BERT forward pass (6 transformer layers)
+            // DistilBERT: ~8ms on Apple M2 Ultra GPU
+            MTLSize grid = MTLSizeMake(seq_len, 1, 1);
+            MTLSize threadgroup = MTLSizeMake(256, 1, 1);
+            [encoder dispatchThreads:grid threadsPerThreadgroup:threadgroup];
+            [encoder endEncoding];
+        }
+        
+        // Signal completion event — downstream streams wait on this
+        [bert_cmd encodeSignalEvent:bert_complete_event value:bert_event_value];
+        [bert_cmd commit];
+        
+        // ═══════════════════════════════════════════════════════════════
+        // STREAMS 1, 2, 3: Launch in PARALLEL (all wait for BERT event)
+        // ═══════════════════════════════════════════════════════════════
+        
+        // --- Stream 1: Intent Classification (~3ms) ---
+        auto intent_cmd = [intent_queue commandBuffer];
+        [intent_cmd encodeWaitForEvent:bert_complete_event value:bert_event_value];
+        {
+            auto encoder = [intent_cmd computeCommandEncoder];
+            [encoder setComputePipelineState:intent_pipeline];
+            
+            // Read CLS token (index 0) from BERT output — zero-copy
+            // bert_hidden_states is already on GPU from Stream 0
+            [encoder setBuffer:bert_hidden_states offset:0 atIndex:0];
+            [encoder setBuffer:intent_classifier_weights offset:0 atIndex:1];
+            [encoder setBuffer:intent_logits offset:0 atIndex:2];
+            
+            // Linear(768 → num_intents) + softmax
+            [encoder dispatchThreads:MTLSizeMake(num_intents, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+            [encoder endEncoding];
+        }
+        [intent_cmd commit];
+        
+        // --- Stream 2: Entity Extraction / NER (~3ms) ---
+        auto entity_cmd = [entity_queue commandBuffer];
+        [entity_cmd encodeWaitForEvent:bert_complete_event value:bert_event_value];
+        {
+            auto encoder = [entity_cmd computeCommandEncoder];
+            [encoder setComputePipelineState:entity_pipeline];
+            
+            // Read ALL token embeddings from BERT output — zero-copy
+            [encoder setBuffer:bert_hidden_states offset:0 atIndex:0];
+            [encoder setBuffer:entity_classifier_weights offset:0 atIndex:1];
+            [encoder setBuffer:entity_labels offset:0 atIndex:2];
+            
+            // Per-token classification: Linear(768 → num_entity_types)
+            [encoder dispatchThreads:MTLSizeMake(seq_len, num_entity_types, 1)
+                threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+            [encoder endEncoding];
+        }
+        [entity_cmd commit];
+        
+        // --- Stream 3: Query Embedding for Vector Search (~2ms) ---
+        auto embed_cmd = [embedding_queue commandBuffer];
+        [embed_cmd encodeWaitForEvent:bert_complete_event value:bert_event_value];
+        {
+            auto encoder = [embed_cmd computeCommandEncoder];
+            [encoder setComputePipelineState:embedding_pipeline];
+            
+            // Mean pooling over token embeddings → 768-dim query vector
+            [encoder setBuffer:bert_hidden_states offset:0 atIndex:0];
+            [encoder setBuffer:query_embedding offset:0 atIndex:1];
+            
+            // MeanPool + L2Normalize — output stays on GPU for vector search
+            [encoder dispatchThreads:MTLSizeMake(768, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+            [encoder endEncoding];
+        }
+        // DO NOT commit yet — chain GPU vector search onto this stream
+        // query_embedding stays on GPU (zero D2H transfer)
+        
+        // ═══════════════════════════════════════════════════════════════
+        // SYNCHRONIZE: Wait for intent + entity streams
+        // (Stream 3 continues into vector search — see section B)
+        // ═══════════════════════════════════════════════════════════════
+        [intent_cmd waitUntilCompleted];
+        [entity_cmd waitUntilCompleted];
+        
+        // Read intent result (small — 4 bytes)
+        uint32_t intent_id = read_argmax(intent_logits);
+        float intent_confidence = read_max_softmax(intent_logits);
+        
+        // Read entity labels (small — seq_len × 4 bytes)
+        auto entities = decode_bio_labels(entity_labels, tokens);
+        
+        return NLUResult{intent_id, intent_confidence, entities};
+    }
+};
+```
+
+**Why separate command queues (not one queue with barriers):**
+- Metal command queues map to **independent GPU execution engines**
+- Separate queues allow the GPU scheduler to fill idle ALU cycles
+- Intent classifier is matrix-multiply-heavy (ALU-bound)
+- Entity tagger accesses per-token embeddings (memory-bound)
+- Running ALU-bound ∥ memory-bound on separate queues achieves **near-perfect overlap**
+- Unified Memory means all buffers are accessible from any queue (no explicit copies)
+
+#### B. GPU-Resident Vector Search — Custom Metal Kernel
+
+**Challenge:** The original vector search pipeline was:
+1. NLU produces query embedding on GPU
+2. **Copy query embedding GPU → CPU** (D2H transfer: ~0.5ms)
+3. Run FAISS HNSW search on CPU (~4ms)
+4. Return entity IDs to CPU
+
+Total: 4.5ms, with wasted GPU→CPU transfer and CPU compute on work that's embarrassingly parallel.
+
+**After:** Query embedding stays on GPU. Custom Metal kernel does batch dot-product against GPU-resident index. **Zero D2H transfer.**
+
+**Before:** 4 ms (CPU FAISS HNSW)
+**After:** 0.7 ms (GPU batch dot-product, zero data transfer)
+
+```cpp
+/// GPU-resident vector search index
+/// Entity embeddings stored permanently on GPU in Metal buffer
+class GPUVectorSearchIndex {
+    id<MTLDevice> device;
+    
+    // Entity embeddings — GPU-resident (loaded at startup, stays on GPU)
+    id<MTLBuffer> entity_embeddings;   // [num_entities, embed_dim] float16
+                                        // 10M × 768 × 2 bytes = 15 GB
+                                        // Fits in Apple M2 Ultra unified memory
+    
+    // Entity metadata (CPU-side, indexed by ID)
+    std::vector<EntityMetadata> entity_metadata;
+    
+    // Precompiled Metal kernel for batch dot-product
+    id<MTLComputePipelineState> dot_product_kernel;
+    id<MTLComputePipelineState> top_k_kernel;
+    
+    // Scratch buffers (GPU-resident, reused across queries)
+    id<MTLBuffer> similarity_scores;    // [num_entities] — one score per entity
+    id<MTLBuffer> top_k_indices;        // [k] — top-k entity IDs
+    id<MTLBuffer> top_k_scores;         // [k] — top-k similarity scores
+    
+    int num_entities;
+    int embed_dim;
+    
+public:
+    GPUVectorSearchIndex(id<MTLDevice> dev, int num_ent, int dim)
+        : device(dev), num_entities(num_ent), embed_dim(dim)
+    {
+        // Allocate GPU buffers (once at startup)
+        entity_embeddings = [device newBufferWithLength:
+            num_entities * dim * sizeof(float16_t)
+            options:MTLResourceStorageModeShared];
+        
+        similarity_scores = [device newBufferWithLength:
+            num_entities * sizeof(float)
+            options:MTLResourceStorageModeShared];
+        
+        top_k_indices = [device newBufferWithLength:
+            128 * sizeof(uint32_t)     // Max k=128
+            options:MTLResourceStorageModeShared];
+        
+        // Compile Metal kernel
+        auto library = [device newLibraryWithSource:@R"(
+            #include <metal_stdlib>
+            using namespace metal;
+            
+            /// Batch dot-product: query (1×D) × entities (N×D) → scores (N)
+            /// Each thread computes one dot product
+            kernel void batch_dot_product(
+                device const half* query        [[buffer(0)]],
+                device const half* entities     [[buffer(1)]],
+                device float* scores            [[buffer(2)]],
+                constant uint& embed_dim        [[buffer(3)]],
+                constant uint& num_entities     [[buffer(4)]],
+                uint entity_idx                 [[thread_position_in_grid]]
+            ) {
+                if (entity_idx >= num_entities) return;
+                
+                // Dot product: query · entity[entity_idx]
+                float sum = 0.0f;
+                const device half* entity_ptr = entities + entity_idx * embed_dim;
+                
+                // Vectorized: process 8 dimensions per iteration
+                for (uint d = 0; d < embed_dim; d += 8) {
+                    half8 q = *(device const half8*)(query + d);
+                    half8 e = *(device const half8*)(entity_ptr + d);
+                    
+                    // Accumulate in float32 for precision
+                    float4 prod_lo = float4(q.lo) * float4(e.lo);
+                    float4 prod_hi = float4(q.hi) * float4(e.hi);
+                    
+                    sum += prod_lo.x + prod_lo.y + prod_lo.z + prod_lo.w;
+                    sum += prod_hi.x + prod_hi.y + prod_hi.z + prod_hi.w;
+                }
+                
+                scores[entity_idx] = sum;
+            }
+            
+            /// Parallel top-k reduction using threadgroup shared memory
+            kernel void top_k_reduce(
+                device const float* scores      [[buffer(0)]],
+                device uint* out_indices         [[buffer(1)]],
+                device float* out_scores         [[buffer(2)]],
+                constant uint& num_entities     [[buffer(3)]],
+                constant uint& k                [[buffer(4)]],
+                uint tid                        [[thread_position_in_grid]],
+                uint tgid                       [[threadgroup_position_in_grid]],
+                uint tg_size                    [[threads_per_threadgroup]]
+            ) {
+                // Each threadgroup finds local top-k, then merge
+                threadgroup float local_scores[64];
+                threadgroup uint local_indices[64];
+                
+                // Initialize with -inf
+                uint idx = tgid * tg_size + tid;
+                if (idx < num_entities) {
+                    local_scores[tid] = scores[idx];
+                    local_indices[tid] = idx;
+                } else {
+                    local_scores[tid] = -INFINITY;
+                    local_indices[tid] = 0;
+                }
+                
+                threadgroup_barrier(mem_flags::mem_threadgroup);
+                
+                // Parallel reduction: find max in threadgroup
+                for (uint stride = tg_size / 2; stride > 0; stride >>= 1) {
+                    if (tid < stride) {
+                        if (local_scores[tid + stride] > local_scores[tid]) {
+                            local_scores[tid] = local_scores[tid + stride];
+                            local_indices[tid] = local_indices[tid + stride];
+                        }
+                    }
+                    threadgroup_barrier(mem_flags::mem_threadgroup);
+                }
+                
+                // Thread 0 writes threadgroup winner
+                if (tid == 0) {
+                    out_scores[tgid] = local_scores[0];
+                    out_indices[tgid] = local_indices[0];
+                }
+            }
+        )" options:nil error:nil];
+        
+        dot_product_kernel = [device newComputePipelineStateWithFunction:
+            [library newFunctionWithName:@"batch_dot_product"] error:nil];
+        top_k_kernel = [device newComputePipelineStateWithFunction:
+            [library newFunctionWithName:@"top_k_reduce"] error:nil];
+    }
+    
+    /// Search: query embedding (already on GPU) → top-k entity IDs
+    /// Called directly on Stream 3 command buffer — ZERO data transfer
+    void search_on_gpu(
+        id<MTLCommandBuffer> cmd_buffer,
+        id<MTLBuffer> query_embedding,      // Already on GPU from NLU Stream 3
+        int k
+    ) {
+        // Step 1: Batch dot-product (query × all 10M entities)
+        {
+            auto encoder = [cmd_buffer computeCommandEncoder];
+            [encoder setComputePipelineState:dot_product_kernel];
+            [encoder setBuffer:query_embedding offset:0 atIndex:0];
+            [encoder setBuffer:entity_embeddings offset:0 atIndex:1];
+            [encoder setBuffer:similarity_scores offset:0 atIndex:2];
+            [encoder setBytes:&embed_dim length:sizeof(uint) atIndex:3];
+            [encoder setBytes:&num_entities length:sizeof(uint) atIndex:4];
+            
+            // Launch 10M threads (one per entity)
+            // Apple M2 Ultra GPU: 76 compute units × 1024 threads = ~78K concurrent
+            // 10M / 78K = ~128 waves — completes in ~0.5ms
+            [encoder dispatchThreads:MTLSizeMake(num_entities, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+            [encoder endEncoding];
+        }
+        
+        // Step 2: Top-k reduction on GPU
+        {
+            auto encoder = [cmd_buffer computeCommandEncoder];
+            [encoder setComputePipelineState:top_k_kernel];
+            [encoder setBuffer:similarity_scores offset:0 atIndex:0];
+            [encoder setBuffer:top_k_indices offset:0 atIndex:1];
+            [encoder setBuffer:top_k_scores offset:0 atIndex:2];
+            [encoder setBytes:&num_entities length:sizeof(uint) atIndex:3];
+            [encoder setBytes:&k length:sizeof(uint) atIndex:4];
+            
+            // Reduction: 10M → k results
+            uint threadgroups = (num_entities + 255) / 256;
+            [encoder dispatchThreadgroups:MTLSizeMake(threadgroups, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+            [encoder endEncoding];
+        }
+        
+        [cmd_buffer commit];
+    }
+    
+    /// Read top-k results (only k entity IDs copied to CPU — tiny)
+    std::vector<EntityMatch> read_top_k_results(int k) {
+        auto* indices = (uint32_t*)[top_k_indices contents];
+        auto* scores = (float*)[top_k_scores contents];
+        
+        std::vector<EntityMatch> results;
+        for (int i = 0; i < k; i++) {
+            results.push_back({
+                .entity = entity_metadata[indices[i]],
+                .distance = 1.0f - scores[i],
+                .confidence = scores[i],
+            });
+        }
+        return results;
+    }
+};
+```
+
+**Why brute-force GPU dot-product beats CPU HNSW for this workload:**
+
+| Dimension | CPU HNSW (FAISS) | GPU Brute-Force (Metal) |
+|-----------|------------------|------------------------|
+| **Latency** | ~4 ms (graph traversal) | ~0.7 ms (batch dot-product) |
+| **Data movement** | GPU→CPU transfer (0.5ms) + CPU compute | Zero transfer — query stays on GPU |
+| **Recall** | 95% (approximate) | **100%** (exact search) |
+| **Index update** | Rebuild HNSW graph (minutes) | Replace embedding row (instant) |
+| **Memory** | CPU RAM + HNSW graph overhead (~3×) | GPU unified memory (1× — raw embeddings only) |
+| **Scales to** | 50M+ entities (logarithmic) | ~10M entities (linear, bounded by GPU memory) |
+
+**Trade-off:** Brute-force is optimal for ≤10M entities on Apple Silicon's unified memory. For 100M+ entities, we'd use GPU-accelerated IVF (inverted file index) with coarse quantization.
+
+#### C. GPU-Batched Ranking — One Forward Pass for All Candidates
+
+**Challenge:** The original LambdaMART ranker scored candidates **sequentially on CPU** — one tree traversal per candidate. For 100 candidates × 28 features, this took ~5ms. The ranking model is embarrassingly parallel: each candidate's score is independent.
+
+**Before:** 5 ms (100 candidates × 50µs each, sequential CPU)
+**After:** 0.8 ms (100 candidates in ONE GPU forward pass)
+
+```cpp
+/// GPU-batched ranking model
+/// All candidates scored in a single GPU dispatch
+class GPUBatchedRanker {
+    id<MTLDevice> device;
+    id<MTLCommandQueue> ranking_queue;      // Stream 4: Ranking
+    
+    // Ranking model weights (GPU-resident)
+    // Replaced LambdaMART (CPU tree traversal) with compact MLP
+    // trained to match LambdaMART scores (knowledge distillation)
+    id<MTLBuffer> layer1_weights;            // [28, 128] — 28 features → 128 hidden
+    id<MTLBuffer> layer1_bias;               // [128]
+    id<MTLBuffer> layer2_weights;            // [128, 64]
+    id<MTLBuffer> layer2_bias;               // [64]
+    id<MTLBuffer> output_weights;            // [64, 1]
+    id<MTLBuffer> output_bias;               // [1]
+    
+    // Scratch buffers (preallocated)
+    id<MTLBuffer> candidate_features;        // [max_candidates, 28]
+    id<MTLBuffer> ranking_scores;            // [max_candidates]
+    
+    // Precompiled ranking kernel
+    id<MTLComputePipelineState> ranking_kernel;
+    
+    static constexpr int MAX_CANDIDATES = 256;
+    static constexpr int NUM_FEATURES = 28;
+    
+public:
+    GPUBatchedRanker(id<MTLDevice> dev) : device(dev) {
+        ranking_queue = [device newCommandQueue];
+        
+        // Compile fused ranking kernel
+        auto library = [device newLibraryWithSource:@R"(
+            #include <metal_stdlib>
+            using namespace metal;
+            
+            /// Fused MLP ranking: one thread per candidate
+            /// Each thread computes: score = MLP(features[candidate_idx])
+            kernel void batch_rank(
+                device const float* features         [[buffer(0)]],  // [N, 28]
+                device const float* w1               [[buffer(1)]],  // [28, 128]
+                device const float* b1               [[buffer(2)]],  // [128]
+                device const float* w2               [[buffer(3)]],  // [128, 64]
+                device const float* b2               [[buffer(4)]],  // [64]
+                device const float* w_out            [[buffer(5)]],  // [64, 1]
+                device const float* b_out            [[buffer(6)]],  // [1]
+                device float* scores                 [[buffer(7)]],  // [N]
+                constant uint& num_features          [[buffer(8)]],
+                constant uint& num_candidates        [[buffer(9)]],
+                uint cand_idx                        [[thread_position_in_grid]]
+            ) {
+                if (cand_idx >= num_candidates) return;
+                
+                // Pointer to this candidate's feature vector
+                device const float* feat = features + cand_idx * num_features;
+                
+                // Layer 1: Linear(28 → 128) + ReLU
+                float hidden1[128];
+                for (uint h = 0; h < 128; h++) {
+                    float sum = b1[h];
+                    for (uint f = 0; f < num_features; f++) {
+                        sum += feat[f] * w1[f * 128 + h];
+                    }
+                    hidden1[h] = max(sum, 0.0f);  // ReLU
+                }
+                
+                // Layer 2: Linear(128 → 64) + ReLU
+                float hidden2[64];
+                for (uint h = 0; h < 64; h++) {
+                    float sum = b2[h];
+                    for (uint i = 0; i < 128; i++) {
+                        sum += hidden1[i] * w2[i * 64 + h];
+                    }
+                    hidden2[h] = max(sum, 0.0f);
+                }
+                
+                // Output: Linear(64 → 1) + sigmoid
+                float score = b_out[0];
+                for (uint i = 0; i < 64; i++) {
+                    score += hidden2[i] * w_out[i];
+                }
+                scores[cand_idx] = 1.0f / (1.0f + exp(-score));  // Sigmoid
+            }
+        )" options:nil error:nil];
+        
+        ranking_kernel = [device newComputePipelineStateWithFunction:
+            [library newFunctionWithName:@"batch_rank"] error:nil];
+    }
+    
+    /// Score all candidates in ONE GPU dispatch
+    std::vector<float> score_batch(
+        const std::vector<RankingFeatureVector>& features,
+        int num_candidates
+    ) {
+        // 1. Write all candidate features to GPU buffer (contiguous)
+        float* feat_ptr = (float*)[candidate_features contents];
+        for (int i = 0; i < num_candidates; i++) {
+            memcpy(feat_ptr + i * NUM_FEATURES,
+                   features[i].as_array(),
+                   NUM_FEATURES * sizeof(float));
+        }
+        
+        // 2. Launch ONE kernel for ALL candidates
+        auto cmd = [ranking_queue commandBuffer];
+        {
+            auto encoder = [cmd computeCommandEncoder];
+            [encoder setComputePipelineState:ranking_kernel];
+            [encoder setBuffer:candidate_features offset:0 atIndex:0];
+            [encoder setBuffer:layer1_weights offset:0 atIndex:1];
+            [encoder setBuffer:layer1_bias offset:0 atIndex:2];
+            [encoder setBuffer:layer2_weights offset:0 atIndex:3];
+            [encoder setBuffer:layer2_bias offset:0 atIndex:4];
+            [encoder setBuffer:output_weights offset:0 atIndex:5];
+            [encoder setBuffer:output_bias offset:0 atIndex:6];
+            [encoder setBuffer:ranking_scores offset:0 atIndex:7];
+            
+            uint nf = NUM_FEATURES;
+            uint nc = num_candidates;
+            [encoder setBytes:&nf length:sizeof(uint) atIndex:8];
+            [encoder setBytes:&nc length:sizeof(uint) atIndex:9];
+            
+            // 100 candidates = 100 threads — trivial for GPU
+            // Each thread runs the full MLP independently
+            [encoder dispatchThreads:MTLSizeMake(num_candidates, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+            [encoder endEncoding];
+        }
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        
+        // 3. Read scores (tiny: 100 × 4 bytes = 400 bytes)
+        float* scores_ptr = (float*)[ranking_scores contents];
+        return std::vector<float>(scores_ptr, scores_ptr + num_candidates);
+    }
+};
+
+/// Knowledge distillation: LambdaMART → GPU-friendly MLP
+///
+/// Why not run LambdaMART directly on GPU?
+///   Tree traversal is branch-heavy and irregular — terrible for GPU warp execution.
+///   Different candidates take different tree paths → warp divergence → low GPU utilization.
+///
+/// Solution: Train a compact MLP (28→128→64→1) to mimic LambdaMART predictions.
+///   - Training data: 10M (features, LambdaMART_score) pairs
+///   - MSE loss: MLP matches LambdaMART scores within 0.02 RMSE
+///   - NDCG@10 retention: 99.1% (MLP) vs 100% (LambdaMART baseline)
+///   - Benefit: MLP is pure matrix multiply — perfect for GPU
+///   - Latency: 0.8ms (GPU batched MLP) vs 5ms (CPU sequential trees)
+```
+
+#### D. Integrated GPU Pipeline — Full NLU→Search→Ranking Flow
+
+Putting all three optimizations together in a single coordinated execution:
+
+```cpp
+/// Fully GPU-accelerated NLU → Search → Ranking pipeline
+class GPUAcceleratedPipeline {
+    ParallelNLUPipeline nlu;
+    GPUVectorSearchIndex vector_search;
+    GPUBatchedRanker ranker;
+    
+    // Shared event for NLU→Search synchronization
+    id<MTLSharedEvent> nlu_complete_event;
+    
+public:
+    /// End-to-end GPU-accelerated execution
+    PipelineResult execute(const std::vector<int32_t>& tokens) {
+        // Phase 1: Parallel NLU (8ms BERT + 3ms parallel heads)
+        // query_embedding stays on GPU after this call
+        auto nlu_result = nlu.execute_parallel(tokens);
+        
+        // Phase 2: GPU vector search (0.7ms, zero D2H transfer)
+        // query_embedding flows directly GPU→GPU from NLU Stream 3
+        auto search_cmd = [nlu.embedding_queue commandBuffer];
+        vector_search.search_on_gpu(
+            search_cmd,
+            nlu.query_embedding,    // Already on GPU — no copy
+            /*k=*/100
+        );
+        [search_cmd waitUntilCompleted];
+        auto search_results = vector_search.read_top_k_results(100);
+        
+        // Phase 3: GPU-batched ranking (0.8ms for 100 candidates)
+        auto features = extract_ranking_features(search_results, nlu_result);
+        auto scores = ranker.score_batch(features, search_results.size());
+        
+        // Phase 4: Apply scores and sort (CPU, ~0.1ms for 100 items)
+        auto ranked = apply_scores_and_sort(search_results, scores);
+        
+        return PipelineResult{
+            .nlu = nlu_result,
+            .ranked_results = ranked,
+        };
+    }
+};
+
+/// Performance summary:
+///
+/// BEFORE (serial CPU/GPU):
+///   BERT encode:        8 ms  (GPU, serial)
+///   Intent classify:    3 ms  (GPU, serial after BERT)
+///   Entity extract:     3 ms  (GPU, serial after intent)
+///   Query embedding:    2 ms  (GPU, serial after entity) — then D2H copy
+///   Vector search:      4 ms  (CPU FAISS)                — query on CPU
+///   Ranking:            5 ms  (CPU sequential)           — 100 × 50µs
+///   ─────────────────────────
+///   TOTAL:             25 ms
+///
+/// AFTER (parallel GPU streams):
+///   BERT encode:        8 ms  (Stream 0)
+///   Intent ∥ Entity ∥ Embed: 3 ms  (Streams 1,2,3 parallel)
+///   GPU vector search:  0.7 ms (Stream 3, chained — zero D2H)
+///   GPU batched ranking: 0.8 ms (Stream 4, batched MLP)
+///   ─────────────────────────
+///   TOTAL:             12.5 ms
+///
+///   SAVINGS:           25 ms → 12.5 ms  (2.0× faster)
+///
+/// Individual optimizations:
+///   A. Parallel streams:      14 ms → 8 ms   (NLU heads parallel)
+///   B. GPU vector search:     4 ms → 0.7 ms  (5.7× faster)
+///   C. GPU-batched ranking:   5 ms → 0.8 ms  (6.3× faster)
+```
+
+---
+
+## Functional Deep Dive: End-to-End System Walkthrough
+
+This section covers the **functional behavior** of the conversational platform — how a real user request flows through the system, what computations happen at each stage, and how the search, ranking, recommendation, and feed-forward mechanisms work together.
+
+### End-to-End Request Lifecycle
+
+When a user says "Hey Siri, recommend a good Italian restaurant near me that's open now," the system executes the following end-to-end flow:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          FUNCTIONAL REQUEST FLOW                                 │
+│                                                                                  │
+│  1. AUDIO CAPTURE ──► 2. FEATURE EXTRACTION ──► 3. ASR DECODING                │
+│         │                      │                        │                        │
+│   16kHz PCM audio      Log-Mel Spectrogram     Streaming Conformer              │
+│   Voice Activity       80-dim filterbank       RNN-T joint network              │
+│   Detection (VAD)      25ms frames, 10ms hop   Beam search (beam=8)             │
+│                                                                                  │
+│  4. NLU PIPELINE ──► 5. SEARCH & RETRIEVAL ──► 6. RANKING & RECOMMENDATION     │
+│         │                      │                        │                        │
+│   Tokenization         Multi-source retrieval   Learning-to-rank                │
+│   BERT encoding        Embedding-based search   Feature engineering             │
+│   Intent classifier    Knowledge graph lookup   Personalized re-ranking         │
+│   Slot/entity tagger   Geo-spatial filtering    Diversity-aware selection        │
+│                                                                                  │
+│  7. RESPONSE ORCHESTRATION ──► 8. TTS SYNTHESIS ──► 9. AUDIO DELIVERY           │
+│         │                           │                      │                     │
+│   Slot filling check        Text normalization       Streaming chunks            │
+│   API/tool invocation       Phoneme prediction       Adaptive bitrate            │
+│   Template rendering        Mel-spectrogram gen      Jitter buffer              │
+│   Response formatting       Vocoder synthesis        Playback sync              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Step-by-Step Functional Trace
+
+```cpp
+/// Complete functional trace for: "Recommend a good Italian restaurant near me"
+///
+/// STEP 1: Audio Capture & VAD
+///   Raw input: 16kHz PCM, ~2.5 seconds of speech
+///   VAD detects speech onset at 120ms, offset at 2480ms
+///   Noise floor estimation: -45 dB SNR
+///
+/// STEP 2: Feature Extraction
+///   Input: 2360ms of speech (37,760 samples at 16kHz)
+///   Output: 234 frames × 80-dim Log-Mel filterbank features
+///   Windowing: 25ms Hamming window, 10ms hop
+///   Pre-emphasis: 0.97 coefficient
+///   Mel filterbank: 80 triangular filters, 0-8kHz
+///
+/// STEP 3: ASR Decoding
+///   Partial results emitted every ~80ms:
+///     t=80ms:   "recommend"
+///     t=160ms:  "recommend a good"
+///     t=320ms:  "recommend a good Italian"
+///     t=480ms:  "recommend a good Italian restaurant"
+///     t=640ms:  "recommend a good Italian restaurant near me"
+///   Final: "recommend a good Italian restaurant near me" (confidence: 0.94)
+///
+/// STEP 4: NLU Pipeline
+///   Tokenization: [recommend, a, good, italian, restaurant, near, me]
+///   BERT encoding: 768-dim contextual embeddings per token
+///   Intent: RESTAURANT_RECOMMENDATION (confidence: 0.92)
+///   Entities: {CUISINE: "Italian", QUALITY: "good", PROXIMITY: "near_user"}
+///
+/// STEP 5: Search & Retrieval
+///   Geo query: restaurants within 5km of user location (lat/lon)
+///   Cuisine filter: cuisine_type = "Italian"
+///   Status filter: is_open = true (based on current time + business hours)
+///   Vector search: query embedding vs. restaurant description embeddings
+///   Retrieved: 47 candidate restaurants
+///
+/// STEP 6: Ranking & Recommendation
+///   Feature extraction: 47 candidates × 28 features each
+///   First-pass ranking (LambdaMART): top-10 from 47
+///   Personalized re-ranking: user history, dietary preferences, past ratings
+///   Diversity injection: ensure variety (price range, distance, rating)
+///   Final: top-3 recommendations with explanation scores
+///
+/// STEP 7: Response Orchestration
+///   Template: recommendation_with_details
+///   Response: "I found 3 great Italian restaurants near you. The highest rated
+///             is Trattoria Milano, 0.8 miles away with 4.7 stars. Would you
+///             like directions or to make a reservation?"
+///
+/// STEP 8-9: TTS + Delivery
+///   Text normalization: "0.8" → "zero point eight", "4.7" → "four point seven"
+///   Streaming synthesis: first audio chunk at 85ms after response decision
+///   Total audio: ~6 seconds of speech
+```
+
+---
+
+## Transformer Feed-Forward & Attention Mechanism Deep Dive
+
+Every stage in the pipeline relies on **transformer-based models**. Understanding how feed-forward layers, self-attention, and cross-attention work is critical for performance tuning and debugging.
+
+### Feed-Forward Network (FFN) in Transformer Layers
+
+Each transformer layer contains a **position-wise feed-forward network (FFN)** that applies non-linear transformations independently to each position (token) in the sequence.
+
+```cpp
+/// Position-wise Feed-Forward Network
+/// Applied to every token independently (parallelizable)
+///
+/// FFN(x) = max(0, x·W1 + b1)·W2 + b2
+///
+/// In modern transformers (BERT, Conformer, FastSpeech):
+///   - Inner dimension = 4× hidden dimension (e.g., 768 → 3072 → 768)
+///   - GELU activation replaces ReLU for smoother gradients
+///   - Pre-norm (LayerNorm before FFN) for training stability
+class FeedForwardNetwork {
+    // Weights
+    Tensor W1;      // [hidden_dim, ffn_dim]  e.g., [768, 3072]
+    Tensor b1;      // [ffn_dim]
+    Tensor W2;      // [ffn_dim, hidden_dim]  e.g., [3072, 768]
+    Tensor b2;      // [hidden_dim]
+    
+    float dropout_rate;
+    
+public:
+    /// Forward pass: expand → activate → project back
+    Tensor forward(const Tensor& input) {
+        // input: [batch, seq_len, hidden_dim]
+        
+        // Step 1: Linear expansion (768 → 3072)
+        //   Projects each token into higher-dimensional space
+        //   This is where the model learns non-linear feature combinations
+        auto expanded = matmul(input, W1) + b1;
+        // expanded: [batch, seq_len, ffn_dim]
+        
+        // Step 2: GELU activation
+        //   GELU(x) = x · Φ(x) where Φ is the standard Gaussian CDF
+        //   Smoother than ReLU — allows small negative gradients
+        //   Critical for NLU intent classification accuracy
+        auto activated = gelu(expanded);
+        
+        // Step 3: Dropout (training only)
+        activated = dropout(activated, dropout_rate);
+        
+        // Step 4: Linear projection back (3072 → 768)
+        //   Compresses enriched representation back to model dimension
+        auto output = matmul(activated, W2) + b2;
+        // output: [batch, seq_len, hidden_dim]
+        
+        return output;
+    }
+    
+    /// GELU activation function
+    /// Preferred over ReLU in BERT/Conformer for smoother gradients
+    Tensor gelu(const Tensor& x) {
+        // Approximate: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
+        auto cube = x * x * x;
+        auto inner = sqrt(2.0 / M_PI) * (x + 0.044715 * cube);
+        return 0.5 * x * (1.0 + tanh(inner));
+    }
+};
+
+/// Why FFN matters in each pipeline stage:
+///
+/// ASR (Conformer):
+///   - FFN learns acoustic-to-linguistic mappings
+///   - "Macchiato" phonemes → word token hypothesis
+///   - 2 FFN layers per Conformer block (sandwich architecture)
+///     FFN → Self-Attention → Convolution → FFN
+///
+/// NLU (BERT):
+///   - FFN learns intent-discriminating features
+///   - "recommend" + "restaurant" → RESTAURANT_RECOMMENDATION intent
+///   - Encodes compositional semantics across tokens
+///
+/// TTS (FastSpeech):
+///   - FFN learns text-to-prosody mappings
+///   - Question marks → rising intonation duration patterns
+///   - Exclamation → increased energy/emphasis
+```
+
+### Multi-Head Self-Attention Mechanism
+
+```cpp
+/// Multi-Head Self-Attention
+/// Allows each token to attend to all other tokens in the sequence
+/// Each head specializes: syntactic head, semantic head, positional head, etc.
+class MultiHeadSelfAttention {
+    int num_heads;       // e.g., 12 for BERT-base
+    int head_dim;        // hidden_dim / num_heads = 768/12 = 64
+    int hidden_dim;      // e.g., 768
+    
+    // Projection matrices (one per Q, K, V)
+    Tensor Wq;           // [hidden_dim, hidden_dim]
+    Tensor Wk;           // [hidden_dim, hidden_dim]
+    Tensor Wv;           // [hidden_dim, hidden_dim]
+    Tensor Wo;           // [hidden_dim, hidden_dim]  output projection
+    
+public:
+    /// Forward pass
+    /// Attention(Q, K, V) = softmax(Q·K^T / √d_k)·V
+    Tensor forward(const Tensor& input, const Tensor* mask = nullptr) {
+        int batch = input.shape[0];
+        int seq_len = input.shape[1];
+        
+        // Step 1: Project input to Q, K, V
+        auto Q = matmul(input, Wq);  // [batch, seq_len, hidden_dim]
+        auto K = matmul(input, Wk);
+        auto V = matmul(input, Wv);
+        
+        // Step 2: Reshape to multiple heads
+        // [batch, seq_len, hidden_dim] → [batch, num_heads, seq_len, head_dim]
+        Q = reshape(Q, {batch, seq_len, num_heads, head_dim}).transpose(1, 2);
+        K = reshape(K, {batch, seq_len, num_heads, head_dim}).transpose(1, 2);
+        V = reshape(V, {batch, seq_len, num_heads, head_dim}).transpose(1, 2);
+        
+        // Step 3: Scaled dot-product attention
+        // scores[i][j] = how much token i should attend to token j
+        auto scores = matmul(Q, K.transpose(-2, -1)) / sqrt(head_dim);
+        // scores: [batch, num_heads, seq_len, seq_len]
+        
+        // Step 4: Apply mask (causal mask for ASR, padding mask for NLU)
+        if (mask) {
+            scores = scores + (*mask * -1e9);  // -inf for masked positions
+        }
+        
+        // Step 5: Softmax → attention weights
+        auto attn_weights = softmax(scores, /*dim=*/-1);
+        // attn_weights: [batch, num_heads, seq_len, seq_len]
+        // Each row sums to 1.0 — probability distribution over positions
+        
+        // Step 6: Weighted sum of values
+        auto context = matmul(attn_weights, V);
+        // context: [batch, num_heads, seq_len, head_dim]
+        
+        // Step 7: Concatenate heads and project
+        context = context.transpose(1, 2).reshape({batch, seq_len, hidden_dim});
+        auto output = matmul(context, Wo);
+        
+        return output;
+    }
+};
+
+/// How attention heads specialize in conversational AI:
+///
+/// Example input: "Recommend a good Italian restaurant near me"
+///
+/// Head 1 (Syntactic):
+///   "restaurant" attends strongly to "Italian" (modifier) and "good" (adjective)
+///   Captures syntactic dependencies regardless of distance
+///
+/// Head 4 (Semantic):
+///   "recommend" attends to "restaurant" and "near me"
+///   Links the action verb to its object and spatial constraint
+///
+/// Head 7 (Entity-Focused):
+///   "Italian" attends to "restaurant" to form entity span
+///   "near me" attends to itself to form location entity
+///
+/// Head 11 (Intent):
+///   [CLS] token attends broadly to "recommend", "restaurant", "near"
+///   Aggregates evidence for RESTAURANT_RECOMMENDATION intent
+```
+
+### Cross-Attention for Multi-Modal Stages
+
+```cpp
+/// Cross-Attention: one sequence attends to another
+/// Used in: ASR decoder (text attends to audio), TTS (text attends to mel)
+class CrossAttention {
+    // Same structure as self-attention but Q comes from decoder,
+    // K and V come from encoder
+    
+public:
+    /// decoder_input attends to encoder_output
+    Tensor forward(
+        const Tensor& decoder_input,    // Q source (text tokens in ASR)
+        const Tensor& encoder_output    // K, V source (audio features in ASR)
+    ) {
+        auto Q = matmul(decoder_input, Wq);   // From decoder
+        auto K = matmul(encoder_output, Wk);   // From encoder
+        auto V = matmul(encoder_output, Wv);   // From encoder
+        
+        // Token "restaurant" in decoder attends to audio frames 180-220
+        // where the phonemes /ˈrɛstərɑːnt/ were spoken
+        auto scores = matmul(Q, K.transpose(-2, -1)) / sqrt(head_dim);
+        auto attn = softmax(scores, -1);
+        auto context = matmul(attn, V);
+        
+        return matmul(context, Wo);
+    }
+};
+
+/// Where cross-attention is used:
+///
+/// ASR (Conformer + RNN-T):
+///   Decoder tokens attend to encoder audio features
+///   "restaurant" decoder token → audio frames where word was spoken
+///
+/// TTS (FastSpeech):
+///   Mel-spectrogram decoder attends to text encoder output
+///   Audio frame at t=1.2s → text token "restaurant" for synthesis
+///
+/// NLU (Context-Aware Entity Resolution):
+///   Current turn entities attend to previous turn context
+///   "the one in Illinois" → previous mention of "Springfield"
+```
+
+### Complete Transformer Block Assembly
+
+```cpp
+/// Full transformer block as used in BERT NLU
+/// Pre-norm architecture (LayerNorm before sublayer)
+class TransformerBlock {
+    LayerNorm norm1, norm2;
+    MultiHeadSelfAttention self_attention;
+    FeedForwardNetwork ffn;
+    float dropout_rate;
+    
+public:
+    Tensor forward(const Tensor& input) {
+        // Sub-layer 1: Self-Attention with residual connection
+        auto normed = norm1.forward(input);
+        auto attn_out = self_attention.forward(normed);
+        auto residual1 = input + dropout(attn_out, dropout_rate);
+        
+        // Sub-layer 2: Feed-Forward with residual connection
+        normed = norm2.forward(residual1);
+        auto ffn_out = ffn.forward(normed);
+        auto residual2 = residual1 + dropout(ffn_out, dropout_rate);
+        
+        return residual2;
+    }
+};
+
+/// BERT-base for NLU: 12 × TransformerBlock
+///   Hidden dim: 768, FFN dim: 3072, Heads: 12
+///   Total parameters: 110M
+///   Latency (DistilBERT, 6 layers): ~25ms on Apple Silicon
+///
+/// Conformer for ASR: 16 × ConformerBlock (FFN-Attn-Conv-FFN sandwich)
+///   Hidden dim: 512, FFN dim: 2048, Heads: 8
+///   + Depthwise convolution for local patterns
+///   Latency: ~15ms per audio chunk (streaming)
+///
+/// FastSpeech for TTS: 6 × TransformerBlock
+///   Hidden dim: 384, FFN dim: 1536, Heads: 4
+///   + Duration predictor + variance adaptor
+///   Latency: ~50ms for first mel chunk (streaming)
+```
+
+---
+
+## Search, Retrieval & Recommendation Engine Deep Dive
+
+The search and recommendation system is the core **functional intelligence** of the platform — it turns an understood intent into actionable, personalized results.
+
+### Multi-Strategy Retrieval Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     RETRIEVAL & RECOMMENDATION PIPELINE                     │
+│                                                                             │
+│  ┌─────────────┐    ┌──────────────────────────────────────────────────┐   │
+│  │ NLU Output   │───►│  QUERY UNDERSTANDING & EXPANSION                │   │
+│  │ Intent +     │    │  • Synonym expansion ("Italian" → "Tuscan")    │   │
+│  │ Entities     │    │  • Query relaxation (drop "good" if too few)   │   │
+│  └─────────────┘    │  • Geo-expansion (5km → 10km if sparse)        │   │
+│                      └───────────────┬──────────────────────────────────┘   │
+│                                      │                                      │
+│                      ┌───────────────▼──────────────────────────────────┐   │
+│                      │  MULTI-SOURCE PARALLEL RETRIEVAL                  │   │
+│                      │                                                    │   │
+│  ┌───────────────┐   │   Source A: Embedding-Based Semantic Search      │   │
+│  │ Embedding     │◄──│     Query → dense vector → ANN search (HNSW)    │   │
+│  │ Index (FAISS) │   │     Returns: semantically similar entities       │   │
+│  └───────────────┘   │                                                    │   │
+│                      │   Source B: Structured Knowledge Graph            │   │
+│  ┌───────────────┐   │     SPARQL/Cypher query on entity relationships  │   │
+│  │ Knowledge     │◄──│     Returns: factual answers, entity attributes  │   │
+│  │ Graph (Neo4j) │   │                                                    │   │
+│  └───────────────┘   │   Source C: Inverted Index (Keyword Search)      │   │
+│                      │     BM25 scoring on text content                  │   │
+│  ┌───────────────┐   │     Returns: lexically matching documents        │   │
+│  │ Search Index  │◄──│                                                    │   │
+│  │ (Lucene)      │   │   Source D: Real-Time API Sources                │   │
+│  └───────────────┘   │     Weather API, Maps API, Calendar API, etc.    │   │
+│                      │     Returns: live data (business hours, prices)   │   │
+│  ┌───────────────┐   │                                                    │   │
+│  │ External APIs │◄──│   Source E: User Personalization Store           │   │
+│  └───────────────┘   │     Past interactions, preferences, favorites     │   │
+│                      │     Returns: user-specific context signals        │   │
+│  ┌───────────────┐   │                                                    │   │
+│  │ User Profile  │◄──│                                                    │   │
+│  │ Store         │   └───────────────┬──────────────────────────────────┘   │
+│  └───────────────┘                   │                                      │
+│                      ┌───────────────▼──────────────────────────────────┐   │
+│                      │  FUSION → RANKING → RECOMMENDATION                │   │
+│                      │  • Score normalization across sources             │   │
+│                      │  • Feature engineering (28 features per result)  │   │
+│                      │  • LambdaMART first-pass ranking                 │   │
+│                      │  • Personalized re-ranking (user model)          │   │
+│                      │  • Diversity injection (MMR algorithm)           │   │
+│                      │  • Explanation generation                        │   │
+│                      └──────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Embedding-Based Semantic Search (Dense Retrieval)
+
+```cpp
+/// Dense retrieval using dual-encoder architecture
+/// Query and documents encoded independently → dot-product similarity
+class DenseRetriever {
+    // Query encoder (shared BERT backbone with NLU, fine-tuned for retrieval)
+    std::unique_ptr<BERTEncoder> query_encoder;
+    
+    // Document/entity index (precomputed embeddings)
+    faiss::IndexHNSWFlat index;          // HNSW graph for ANN search
+    
+    // Embedding dimension
+    static constexpr int EMBED_DIM = 768;
+    
+    // Document metadata store
+    DocumentStore doc_store;
+    
+public:
+    /// Encode query into dense vector
+    std::vector<float> encode_query(
+        const NLUResult& nlu,
+        const std::string& raw_text
+    ) {
+        // Construct enriched query: raw text + intent + entities
+        // "Italian restaurant near me" + "[INTENT:RESTAURANT_REC]" + "[LOC:user_loc]"
+        std::string enriched = raw_text;
+        enriched += " [INTENT:" + intent_to_string(nlu.intent_id) + "]";
+        for (const auto& entity : nlu.entities) {
+            enriched += " [" + entity.type + ":" + entity.value + "]";
+        }
+        
+        // Tokenize and encode through BERT
+        auto tokens = tokenizer.encode(enriched);
+        auto embeddings = query_encoder->forward(tokens);
+        
+        // Use [CLS] token embedding as query vector
+        auto query_vector = embeddings.cls_embedding;
+        
+        // L2 normalize for cosine similarity via dot product
+        return l2_normalize(query_vector);
+    }
+    
+    /// Search index for top-k nearest neighbors
+    std::vector<RetrievalResult> search(
+        const std::vector<float>& query_vector,
+        int top_k,
+        const SearchFilters& filters
+    ) {
+        // Pre-filter: apply hard constraints before ANN search
+        // (geo-radius, open-now, cuisine type)
+        auto candidate_ids = apply_pre_filters(filters);
+        
+        // ANN search on filtered subset
+        std::vector<float> distances(top_k);
+        std::vector<int64_t> result_ids(top_k);
+        
+        // HNSW search: O(log N) per query, ~5ms for 10M documents
+        index.search(
+            1,                            // 1 query
+            query_vector.data(),          // query embedding
+            top_k,                        // number of results
+            distances.data(),             // output distances
+            result_ids.data()             // output document IDs
+        );
+        
+        // Fetch full documents
+        std::vector<RetrievalResult> results;
+        for (int i = 0; i < top_k; i++) {
+            if (result_ids[i] >= 0) {
+                results.push_back({
+                    .document = doc_store.get(result_ids[i]),
+                    .semantic_score = 1.0f - distances[i],  // similarity
+                    .source = "dense_retrieval"
+                });
+            }
+        }
+        
+        return results;
+    }
+};
+
+/// Offline index building pipeline
+/// Runs nightly or on entity/document updates
+class IndexBuilder {
+    BERTEncoder document_encoder;
+    
+public:
+    /// Build HNSW index from document corpus
+    faiss::IndexHNSWFlat build_index(
+        const std::vector<Document>& documents
+    ) {
+        // HNSW parameters tuned for recall vs. latency tradeoff
+        int M = 32;            // Max connections per node (higher = better recall, more memory)
+        int ef_construction = 200;  // Search depth during build (higher = better index quality)
+        
+        faiss::IndexHNSWFlat index(EMBED_DIM, M);
+        index.hnsw.efConstruction = ef_construction;
+        index.hnsw.efSearch = 64;   // Search depth at query time
+        
+        // Batch encode all documents
+        std::vector<float> all_embeddings(documents.size() * EMBED_DIM);
+        
+        for (size_t i = 0; i < documents.size(); i++) {
+            auto embedding = encode_document(documents[i]);
+            std::copy(embedding.begin(), embedding.end(),
+                      all_embeddings.begin() + i * EMBED_DIM);
+        }
+        
+        // Add all vectors to index
+        index.add(documents.size(), all_embeddings.data());
+        
+        return index;
+        // Index stats for 10M documents:
+        //   Memory: ~30 GB (768 dims × 4 bytes × 10M + HNSW graph)
+        //   Build time: ~2 hours
+        //   Query latency: <5ms @ 95% recall@10
+    }
+};
+```
+
+### BM25 Keyword Search (Sparse Retrieval)
+
+```cpp
+/// BM25 sparse retrieval for lexical matching
+/// Catches entities and phrases that semantic search may miss
+class BM25Retriever {
+    // Inverted index: term → list of (doc_id, term_frequency)
+    std::unordered_map<std::string, std::vector<PostingEntry>> inverted_index;
+    
+    // Document statistics
+    std::vector<int> doc_lengths;
+    float avg_doc_length;
+    int total_docs;
+    
+    // BM25 parameters (tuned on validation set)
+    float k1 = 1.2;    // Term frequency saturation
+    float b  = 0.75;   // Length normalization
+    
+public:
+    /// BM25 score for a query against a document
+    /// BM25(q, d) = Σ IDF(t) × (tf × (k1+1)) / (tf + k1 × (1 - b + b × |d|/avgdl))
+    float score(const std::vector<std::string>& query_terms, int doc_id) {
+        float total_score = 0.0f;
+        
+        for (const auto& term : query_terms) {
+            // IDF: inverse document frequency
+            int df = document_frequency(term);
+            float idf = log((total_docs - df + 0.5) / (df + 0.5) + 1.0);
+            
+            // TF: term frequency in document
+            float tf = term_frequency(term, doc_id);
+            
+            // Length normalization
+            float dl = doc_lengths[doc_id];
+            float norm = 1.0 - b + b * (dl / avg_doc_length);
+            
+            // BM25 formula
+            total_score += idf * (tf * (k1 + 1.0)) / (tf + k1 * norm);
+        }
+        
+        return total_score;
+    }
+    
+    /// Retrieve top-k documents by BM25
+    std::vector<RetrievalResult> retrieve(
+        const std::string& query,
+        int top_k
+    ) {
+        auto terms = tokenize_and_stem(query);
+        
+        // Score all candidate documents (from posting lists)
+        std::unordered_map<int, float> doc_scores;
+        for (const auto& term : terms) {
+            for (const auto& posting : inverted_index[term]) {
+                doc_scores[posting.doc_id] += 
+                    score_term(term, posting.doc_id, posting.tf);
+            }
+        }
+        
+        // Top-k selection
+        auto top_k_docs = partial_sort_top_k(doc_scores, top_k);
+        
+        std::vector<RetrievalResult> results;
+        for (auto& [doc_id, bm25_score] : top_k_docs) {
+            results.push_back({
+                .document = doc_store.get(doc_id),
+                .lexical_score = bm25_score,
+                .source = "bm25_retrieval"
+            });
+        }
+        return results;
+    }
+};
+```
+
+### Hybrid Retrieval Fusion (Dense + Sparse)
+
+```cpp
+/// Reciprocal Rank Fusion (RRF) to combine dense and sparse retrieval
+/// RRF is robust — doesn't require score calibration between retrievers
+class HybridRetriever {
+    DenseRetriever dense;
+    BM25Retriever sparse;
+    
+    // RRF constant (controls impact of rank position)
+    static constexpr float K = 60.0f;
+    
+public:
+    /// Combine results from multiple retrievers using RRF
+    /// RRF_score(d) = Σ 1 / (K + rank_i(d))
+    std::vector<RetrievalResult> retrieve(
+        const NLUResult& nlu,
+        const std::string& query_text,
+        const SearchFilters& filters,
+        int top_k
+    ) {
+        // Parallel retrieval from both sources
+        auto dense_results = dense.search(
+            dense.encode_query(nlu, query_text), top_k * 2, filters
+        );
+        auto sparse_results = sparse.retrieve(query_text, top_k * 2);
+        
+        // Build rank maps
+        std::unordered_map<int, float> rrf_scores;
+        
+        for (size_t rank = 0; rank < dense_results.size(); rank++) {
+            int doc_id = dense_results[rank].document.id;
+            rrf_scores[doc_id] += 1.0f / (K + rank + 1);
+        }
+        
+        for (size_t rank = 0; rank < sparse_results.size(); rank++) {
+            int doc_id = sparse_results[rank].document.id;
+            rrf_scores[doc_id] += 1.0f / (K + rank + 1);
+        }
+        
+        // Sort by RRF score and return top-k
+        auto fused = sort_by_score(rrf_scores, top_k);
+        
+        // Attach both dense and sparse scores for downstream ranking features
+        for (auto& result : fused) {
+            result.dense_score = find_score(dense_results, result.document.id);
+            result.sparse_score = find_score(sparse_results, result.document.id);
+        }
+        
+        return fused;
+    }
+};
+
+/// Why hybrid retrieval matters:
+///
+/// Dense retrieval excels at:
+///   "recommend something similar to Olive Garden" → semantic similarity
+///   "cheap eats downtown" → conceptual matching
+///
+/// Sparse retrieval excels at:
+///   "Trattoria Milano" → exact entity name match
+///   "restaurants with outdoor seating" → specific attribute match
+///
+/// Together: 15-20% higher recall than either alone
+```
+
+### Learning-to-Rank (LTR) with LambdaMART
+
+```cpp
+/// LambdaMART ranking model
+/// Gradient-boosted decision trees optimized for NDCG (ranking quality)
+class LambdaMARTRanker {
+    // Ensemble of gradient-boosted trees
+    std::vector<DecisionTree> trees;
+    float learning_rate;
+    
+public:
+    /// Extract ranking features for each candidate
+    RankingFeatureVector extract_features(
+        const RetrievalResult& candidate,
+        const NLUResult& nlu,
+        const UserProfile& user,
+        const GeoContext& geo
+    ) {
+        RankingFeatureVector features;
+        
+        // --- Retrieval score features ---
+        features.dense_retrieval_score = candidate.dense_score;
+        features.sparse_retrieval_score = candidate.sparse_score;
+        features.rrf_score = candidate.rrf_score;
+        
+        // --- Relevance features ---
+        features.intent_match_score = compute_intent_match(
+            candidate.document, nlu.intent_id
+        );
+        features.entity_overlap = compute_entity_overlap(
+            candidate.document.entities, nlu.entities
+        );
+        features.title_query_similarity = cosine_similarity(
+            candidate.document.title_embedding,
+            nlu.query_embedding
+        );
+        
+        // --- Quality features ---
+        features.avg_rating = candidate.document.avg_rating;          // e.g., 4.7
+        features.num_reviews = log1p(candidate.document.num_reviews); // log scale
+        features.recency_score = compute_recency(candidate.document.last_updated);
+        features.source_authority = candidate.document.source_trust_score;
+        
+        // --- Geo-spatial features ---
+        features.distance_km = haversine_distance(
+            geo.user_lat, geo.user_lon,
+            candidate.document.lat, candidate.document.lon
+        );
+        features.distance_rank = 0;  // filled after sorting by distance
+        features.is_in_radius = features.distance_km <= geo.search_radius_km;
+        
+        // --- Temporal features ---
+        features.is_open_now = check_business_hours(
+            candidate.document.hours, geo.current_time
+        );
+        features.time_until_close = minutes_until_close(
+            candidate.document.hours, geo.current_time
+        );
+        features.is_peak_hours = is_peak_period(geo.current_time);
+        
+        // --- Personalization features ---
+        features.user_past_visits = user.visit_count(candidate.document.id);
+        features.user_category_affinity = user.category_preference(
+            candidate.document.category
+        );
+        features.user_price_match = 1.0f - abs(
+            user.preferred_price_level - candidate.document.price_level
+        ) / 4.0f;
+        features.collaborative_score = compute_collaborative_signal(
+            user.id, candidate.document.id
+        );
+        
+        // --- Contextual features ---
+        features.dialogue_turn_number = nlu.turn_count;
+        features.is_followup_query = nlu.is_followup;
+        features.previous_result_overlap = check_previous_results(
+            candidate.document.id
+        );
+        
+        return features;
+        // Total: 28 features per candidate
+    }
+    
+    /// Score candidates using LambdaMART ensemble
+    std::vector<float> predict(
+        const std::vector<RankingFeatureVector>& feature_vectors
+    ) {
+        std::vector<float> scores(feature_vectors.size(), 0.0f);
+        
+        // Additive ensemble: score = Σ learning_rate × tree_i(features)
+        for (const auto& tree : trees) {
+            for (size_t i = 0; i < feature_vectors.size(); i++) {
+                scores[i] += learning_rate * tree.predict(feature_vectors[i]);
+            }
+        }
+        
+        return scores;
+    }
+};
+
+/// LambdaMART training objective:
+///   Optimizes NDCG (Normalized Discounted Cumulative Gain) directly
+///   Lambda gradients: λ_ij = |ΔNDCG_ij| × σ(s_j - s_i)
+///     where ΔNDCG is the change in NDCG if results i and j are swapped
+///   This means the model focuses on getting the TOP results right
+///   (swapping rank 1↔2 has higher lambda than swapping rank 50↔51)
+```
+
+### Personalized Re-Ranking and Recommendation
+
+```cpp
+/// Personalized re-ranking using user preference model
+/// Applied after LambdaMART first-pass ranking
+class PersonalizedReranker {
+    // User preference model: lightweight MLP
+    // Input: [user_embedding ⊕ item_embedding ⊕ context_features]
+    // Output: personalized relevance score
+    struct PreferenceModel {
+        LinearLayer layer1;   // [input_dim, 128]
+        LinearLayer layer2;   // [128, 64]
+        LinearLayer output;   // [64, 1]
+    } model;
+    
+    // User embedding store (precomputed, updated daily)
+    EmbeddingStore user_embeddings;  // user_id → 128-dim vector
+    
+public:
+    /// Re-rank top-k results using personalization signals
+    std::vector<RankedResult> rerank(
+        const std::vector<RankedResult>& first_pass_results,
+        const UserProfile& user,
+        const GeoContext& context
+    ) {
+        auto user_emb = user_embeddings.get(user.id);
+        
+        std::vector<RankedResult> reranked;
+        for (const auto& result : first_pass_results) {
+            // Concatenate features
+            auto item_emb = result.document.embedding;
+            auto context_features = encode_context(context);
+            auto input = concatenate(user_emb, item_emb, context_features);
+            
+            // Forward through preference model
+            auto h1 = relu(model.layer1.forward(input));
+            auto h2 = relu(model.layer2.forward(h1));
+            float personalized_score = sigmoid(model.output.forward(h2));
+            
+            // Blend with first-pass score (avoid over-personalization)
+            float alpha = 0.3;  // Personalization weight
+            float final_score = (1.0 - alpha) * result.score 
+                              + alpha * personalized_score;
+            
+            reranked.push_back({
+                .document = result.document,
+                .score = final_score,
+                .personalized_score = personalized_score,
+                .first_pass_score = result.score
+            });
+        }
+        
+        std::sort(reranked.begin(), reranked.end(),
+                  [](auto& a, auto& b) { return a.score > b.score; });
+        
+        return reranked;
+    }
+};
+
+/// Collaborative filtering signal computation
+/// "Users who liked X also liked Y"
+class CollaborativeFilter {
+    // User-item interaction matrix (sparse)
+    // Factorized via ALS (Alternating Least Squares) into:
+    //   User factors: [num_users, factor_dim]    e.g., [10M, 64]
+    //   Item factors: [num_items, factor_dim]    e.g., [5M, 64]
+    Tensor user_factors;
+    Tensor item_factors;
+    
+public:
+    /// Compute collaborative filtering score
+    /// score(u, i) = user_factors[u] · item_factors[i]
+    float score(int user_id, int item_id) {
+        auto user_vec = user_factors.row(user_id);    // 64-dim
+        auto item_vec = item_factors.row(item_id);    // 64-dim
+        return dot_product(user_vec, item_vec);
+    }
+    
+    /// Generate recommendations for a user
+    /// "You might also like..." based on similar users' behavior
+    std::vector<int> recommend(int user_id, int top_k) {
+        auto user_vec = user_factors.row(user_id);
+        
+        // Score all items (batch dot product)
+        auto scores = matmul(user_vec, item_factors.transpose());
+        
+        // Exclude already-seen items
+        mask_seen_items(scores, user_id);
+        
+        return top_k_indices(scores, top_k);
+    }
+};
+```
+
+### Diversity-Aware Result Selection (MMR)
+
+```cpp
+/// Maximal Marginal Relevance (MMR) for result diversity
+/// Prevents returning 5 similar Italian restaurants — users want variety
+class DiversitySelector {
+public:
+    /// Select diverse subset using MMR
+    /// MMR = λ × Relevance(d) - (1-λ) × max_selected Similarity(d, d_selected)
+    std::vector<RankedResult> select_diverse(
+        const std::vector<RankedResult>& ranked_results,
+        int num_to_select,
+        float lambda = 0.7    // Balance relevance vs. diversity
+    ) {
+        std::vector<RankedResult> selected;
+        std::vector<bool> used(ranked_results.size(), false);
+        
+        // Always include the top-ranked result
+        selected.push_back(ranked_results[0]);
+        used[0] = true;
+        
+        for (int i = 1; i < num_to_select; i++) {
+            float best_mmr = -std::numeric_limits<float>::infinity();
+            int best_idx = -1;
+            
+            for (size_t j = 0; j < ranked_results.size(); j++) {
+                if (used[j]) continue;
+                
+                // Relevance component
+                float relevance = ranked_results[j].score;
+                
+                // Diversity component: max similarity to already-selected
+                float max_sim = 0.0f;
+                for (const auto& sel : selected) {
+                    float sim = cosine_similarity(
+                        ranked_results[j].document.embedding,
+                        sel.document.embedding
+                    );
+                    max_sim = std::max(max_sim, sim);
+                }
+                
+                // MMR score
+                float mmr = lambda * relevance - (1.0f - lambda) * max_sim;
+                
+                if (mmr > best_mmr) {
+                    best_mmr = mmr;
+                    best_idx = j;
+                }
+            }
+            
+            if (best_idx >= 0) {
+                selected.push_back(ranked_results[best_idx]);
+                used[best_idx] = true;
+            }
+        }
+        
+        return selected;
+    }
+};
+
+/// Example diversity in action:
+///
+/// Without MMR (top-3 by relevance only):
+///   1. Trattoria Milano (Italian, $$, 0.8mi, 4.7★)
+///   2. Pasta House (Italian, $$, 1.1mi, 4.5★)
+///   3. Luigi's Kitchen (Italian, $$, 0.9mi, 4.4★)
+///   → All similar price/distance/cuisine — not helpful
+///
+/// With MMR (λ=0.7):
+///   1. Trattoria Milano (Italian, $$, 0.8mi, 4.7★)    — top relevance
+///   2. Nonna's Fine Dining (Italian, $$$$, 1.2mi, 4.8★) — different price tier
+///   3. Bella Pizza (Italian, $, 0.3mi, 4.3★)           — budget option, closest
+///   → Variety in price, distance, and style
+```
+
+### Knowledge Graph Query for Factual Answers
+
+```cpp
+/// Knowledge graph retrieval for factual/entity-centric queries
+/// "What year did Trattoria Milano open?" → KG lookup
+class KnowledgeGraphRetriever {
+    // Graph database connection
+    GraphDatabase graph_db;  // Neo4j / custom graph store
+    
+public:
+    /// Structured query from NLU entities
+    KGResult query(const NLUResult& nlu) {
+        // Build graph query from intent + entities
+        // Intent: GET_ENTITY_ATTRIBUTE
+        // Entities: {RESTAURANT: "Trattoria Milano", ATTRIBUTE: "year_opened"}
+        
+        std::string cypher = build_cypher_query(nlu);
+        // MATCH (r:Restaurant {name: 'Trattoria Milano'})
+        // RETURN r.year_opened, r.chef, r.cuisine, r.awards
+        
+        auto result = graph_db.execute(cypher);
+        
+        return KGResult{
+            .entity = result.get("name"),
+            .attribute = result.get("year_opened"),
+            .confidence = 1.0f,  // Factual — no ambiguity
+            .source = "knowledge_graph"
+        };
+    }
+    
+    /// Relationship traversal for complex queries
+    /// "Who is the chef at the restaurant John recommended last week?"
+    KGResult traverse_relationships(
+        const NLUResult& nlu,
+        const DialogueState& dialogue
+    ) {
+        // Multi-hop query:
+        // User → recommended_by(John) → Restaurant → has_chef → Chef
+        std::string cypher = R"(
+            MATCH (u:User {name: $user_name})
+                  -[:RECEIVED_RECOMMENDATION]->(rec:Recommendation)
+                  -[:FROM]->(recommender:Contact {name: $contact_name})
+            MATCH (rec)-[:FOR]->(r:Restaurant)
+                  -[:HAS_CHEF]->(c:Chef)
+            WHERE rec.timestamp > $one_week_ago
+            RETURN c.name, r.name
+        )";
+        
+        return graph_db.execute(cypher, {
+            {"user_name", dialogue.user_name},
+            {"contact_name", "John"},
+            {"one_week_ago", one_week_ago_timestamp()}
+        });
+    }
+};
+```
+
+---
+
+## Functional Use Case Patterns
+
+Different types of user queries exercise different paths through the system. Understanding these patterns is essential for capacity planning, latency optimization, and failure isolation.
+
+### Use Case 1: Informational Query (Fast Path)
+
+```
+User: "What's the capital of France?"
+
+Pipeline:
+  ASR → NLU → Knowledge Graph (direct lookup) → Response → TTS
+  Skips: Vector search, ranking, personalization
+  Latency budget: 150ms (simple factual answer)
+
+Flow:
+  ASR: "What's the capital of France" (confidence: 0.97)
+  NLU: Intent=GET_FACT, Entity={COUNTRY: "France", ATTRIBUTE: "capital"}
+  KG:  MATCH (c:Country {name:"France"}) RETURN c.capital → "Paris"
+  Response: "The capital of France is Paris."
+  TTS: 1.2 seconds of audio
+
+Optimization: KG lookup is O(1) — no ranking needed.
+Cache: Frequently asked facts cached in shared memory (TTL: 24h).
+```
+
+### Use Case 2: Recommendation Query (Full Pipeline)
+
+```
+User: "Recommend a good Italian restaurant near me that's open now"
+
+Pipeline:
+  ASR → NLU → Query Expansion → Multi-Source Retrieval → Ranking →
+  Personalized Re-Ranking → Diversity Selection → Response → TTS
+  Latency budget: 280ms (complex multi-stage)
+
+Flow:
+  ASR: "Recommend a good Italian restaurant near me that's open now" (0.94)
+  NLU: Intent=RESTAURANT_REC, Entities={CUISINE:"Italian", PROXIMITY:"near"}
+  Query Expansion: "Italian" → ["Italian", "Tuscan", "Mediterranean"]
+  Retrieval:
+    Dense: 30 semantically similar restaurants
+    BM25: 25 keyword-matching restaurants
+    Geo filter: within 5km, currently open
+    RRF fusion: 47 unique candidates
+  Ranking:
+    LambdaMART: 28 features × 47 candidates → top-10
+    Personalization: user prefers $$-$$$ range → re-rank
+    MMR diversity: top-3 with variety
+  Response: "I found 3 great Italian restaurants near you..."
+  TTS: streaming, first chunk at 85ms
+
+Key features used: dense_score, distance_km, is_open_now, avg_rating,
+  user_category_affinity, user_price_match
+```
+
+### Use Case 3: Action/Tool Invocation Query
+
+```
+User: "Set a timer for 15 minutes"
+
+Pipeline:
+  ASR → NLU → Slot Filling → Tool Invocation → Confirmation → TTS
+  Skips: Search, ranking, personalization
+  Latency budget: 120ms (action with confirmation)
+
+Flow:
+  ASR: "Set a timer for 15 minutes" (confidence: 0.98)
+  NLU: Intent=SET_TIMER, Entity={DURATION: "15 minutes"}
+  Slot Check: All required slots filled (duration ✓)
+  Tool: timer_api.create({duration_seconds: 900})
+  Response: "OK, I've set a timer for 15 minutes."
+  TTS: 1.5 seconds of audio
+
+Optimization: No search needed — direct tool invocation.
+Failure handling: If timer API fails, respond with error and retry option.
+```
+
+### Use Case 4: Multi-Turn Conversational Query
+
+```
+Turn 1:
+  User: "Find me a hotel in San Francisco"
+  NLU: Intent=HOTEL_SEARCH, Entity={CITY: "San Francisco"}
+  Search: 120 hotels retrieved, ranked, top-5 presented
+  Response: "I found several hotels. The top-rated is Hotel Vitale..."
+
+Turn 2:
+  User: "How much is it per night?"
+  NLU: Intent=GET_PRICE, Entity={} (no explicit entity)
+  Context Resolution:
+    - "it" → coreference to "Hotel Vitale" from Turn 1
+    - Resolved via dialogue state: active_entity = Hotel Vitale
+  KG/API: price_api.get({hotel_id: "hotel_vitale"}) → $289/night
+  Response: "Hotel Vitale is $289 per night. Would you like to book?"
+
+Turn 3:
+  User: "What about something cheaper?"
+  NLU: Intent=REFINE_SEARCH, Entity={PRICE_CONSTRAINT: "cheaper"}
+  Context: Previous results + price threshold from Turn 2
+  Re-ranking: Filter results where price < $289, re-rank by value score
+  Response: "Here are some more affordable options..."
+
+Key Mechanism: Dialogue state tracks active entities, slot values, and
+  previous results across turns. Session-affine routing ensures state
+  is available locally without network fetch.
+```
+
+### Use Case 5: Streaming Music/Media Query
+
+```
+User: "Play something relaxing"
+
+Pipeline:
+  ASR → NLU → Preference Model → Content Retrieval → 
+  Collaborative Filtering → Audio Streaming Setup → TTS + Playback
+
+Flow:
+  ASR: "Play something relaxing" (confidence: 0.96)
+  NLU: Intent=PLAY_MUSIC, Entity={MOOD: "relaxing"}
+  
+  Retrieval Strategy (differs from restaurant search):
+    1. Mood embedding: "relaxing" → mood vector in music embedding space
+    2. Dense search over music catalog: songs with similar mood vectors
+    3. Collaborative filter: "Users who play relaxing music also like..."
+    4. User history: past relaxing music preferences (artist, genre, tempo)
+    5. Temporal context: evening → prefer ambient over acoustic
+    
+  Ranking Features (music-specific):
+    - mood_match_score: cosine(query_mood_emb, song_mood_emb)
+    - tempo_bpm: prefer 60-90 BPM for "relaxing"
+    - user_artist_affinity: how often user plays this artist
+    - collaborative_score: similar users' engagement with this song
+    - skip_rate: songs with high skip rate penalized
+    - freshness: mix of familiar favorites and new discoveries (70/30)
+    
+  Response: "Here's a relaxing playlist starting with Clair de Lune."
+  
+Recommendation Difference:
+  Restaurants: location-dependent, time-sensitive, one-shot decision
+  Music: preference-heavy, mood-aware, continuous engagement (skips, likes)
+```
+
+### Use Case 6: Failure Handling and Graceful Degradation
+
+```cpp
+/// Graceful degradation when individual stages fail
+class FailureHandler {
+public:
+    OrchestrationResult handle_stage_failure(
+        const std::string& failed_stage,
+        const NLUResult& nlu,
+        const DialogueState& dialogue
+    ) {
+        if (failed_stage == "dense_retrieval") {
+            // Dense search down → fall back to BM25 only
+            // Quality degrades ~15% but still functional
+            auto sparse_results = bm25_retriever.retrieve(nlu.raw_text, 20);
+            return rank_and_respond(sparse_results, nlu);
+        }
+        
+        if (failed_stage == "knowledge_graph") {
+            // KG down → fall back to web search for factual queries
+            auto web_results = web_search.query(nlu.raw_text, 5);
+            return OrchestrationResult{
+                .response_type = ANSWER_WITH_CAVEAT,
+                .text = "Based on what I found: " + web_results[0].snippet
+            };
+        }
+        
+        if (failed_stage == "personalization") {
+            // Personalization down → serve unpersonalized results
+            // User experience slightly less tailored but still relevant
+            return rank_without_personalization(nlu);
+        }
+        
+        if (failed_stage == "tts") {
+            // TTS down → return text-only response to device
+            // Device renders text on screen instead of audio
+            return OrchestrationResult{
+                .response_type = TEXT_ONLY,
+                .text = generate_response_text(nlu)
+            };
+        }
+        
+        // Multiple stages down → minimal response
+        return OrchestrationResult{
+            .response_type = DEGRADED,
+            .text = "I'm having trouble right now. Please try again."
+        };
+    }
+};
+
+/// Circuit breaker pattern for external dependencies
+class CircuitBreaker {
+    enum State { CLOSED, OPEN, HALF_OPEN };
+    
+    State state = CLOSED;
+    int failure_count = 0;
+    int failure_threshold = 5;       // Open after 5 consecutive failures
+    int64_t open_timestamp = 0;
+    int64_t recovery_timeout_ms = 30000;  // Try again after 30s
+    
+public:
+    template<typename Func>
+    auto execute(Func&& func) -> decltype(func()) {
+        if (state == OPEN) {
+            if (now_ms() - open_timestamp > recovery_timeout_ms) {
+                state = HALF_OPEN;  // Try one request
+            } else {
+                throw CircuitOpenException();
+            }
+        }
+        
+        try {
+            auto result = func();
+            on_success();
+            return result;
+        } catch (...) {
+            on_failure();
+            throw;
+        }
+    }
+    
+private:
+    void on_failure() {
+        failure_count++;
+        if (failure_count >= failure_threshold) {
+            state = OPEN;
+            open_timestamp = now_ms();
+        }
+    }
+    
+    void on_success() {
+        failure_count = 0;
+        state = CLOSED;
+    }
+};
 ```
 
 ---
@@ -1334,6 +3253,17 @@ class ConversationalMetrics {
 | **Stage-to-Stage Overhead** | 50–80 ms | 5–10 ms | **8× reduction** |
 | **Apple Silicon Efficiency** | Baseline | 40% lower power | **Energy savings** |
 
+#### GPU Pipeline Optimization Benchmarks
+
+| Optimization | Before | After | Speedup | Technique |
+|-------------|--------|-------|---------|-----------|
+| **NLU Parallel GPU Streams** | 14 ms (serial heads) | 8 ms (parallel) | **1.75×** | Metal command queues, event-based sync |
+| **GPU Vector Search** | 4 ms (CPU FAISS HNSW) | 0.7 ms (GPU dot-product) | **5.7×** | Custom Metal kernel, zero D2H transfer, GPU-resident index |
+| **GPU-Batched Ranking** | 5 ms (sequential CPU) | 0.8 ms (batched GPU MLP) | **6.3×** | Knowledge-distilled MLP, one GPU dispatch for 100 candidates |
+| **NLU+Search+Ranking Combined** | 25 ms (serial) | 12.5 ms (GPU pipeline) | **2.0×** | Parallel streams + GPU-resident data + batched inference |
+| **Vector Search Recall** | 95% (HNSW approx) | 100% (brute-force exact) | **+5% recall** | Exact search enabled by GPU throughput |
+| **Data Transfer Eliminated** | 0.5 ms D2H per query | 0 ms (GPU→GPU) | **∞** | Query embedding stays on GPU across NLU→Search |
+
 ---
 
 ## Resume Bullet Points
@@ -1346,8 +3276,9 @@ class ConversationalMetrics {
 • Designed zero-copy shared memory architecture for stage-to-stage handoff reducing serialization 
   overhead from 50–80ms to 5–10ms per stage and eliminating redundant host-device copies
 
-• Implemented streaming ASR with partial hypothesis propagation, BERT-based NLU with intent 
-  classification, vector search over knowledge graph, and neural TTS with emotion-aware prosody control
+• Engineered GPU-accelerated NLU→Search→Ranking pipeline using parallel Metal command queues, custom 
+  GPU dot-product kernel for vector search (5.7× faster), and batched MLP ranking (6.3× faster) with 
+  zero GPU-to-CPU data transfer between stages
 
 • Optimized Apple Silicon inference with NEON SIMD acceleration, GPU-offloaded transformer layers, 
   session-affine routing for 85% cache hit rate, and backpressure control for stability under burst traffic
@@ -1364,15 +3295,17 @@ class ConversationalMetrics {
 • Implemented streaming Conformer ASR with incremental decoding and partial hypothesis propagation 
   every 50–100ms, enabling real-time transcription as users speak
 
-• Built BERT-based NLU engine with DistilBERT for intent classification (97% accuracy retention) and 
-  entity extraction with context-aware coreference resolution across multi-turn dialogues
+• Built GPU-parallel NLU pipeline running DistilBERT intent classifier, entity tagger, and query 
+  embedder on concurrent Metal command queues with event-based synchronization, reducing NLU 
+  head latency from 14ms to 8ms
 
-• Developed federated ranking system combining vector search over 10M entity embeddings (HNSW, <5ms 
-  latency) with LambdaMART ranking across knowledge graph, content index, and action databases
+• Developed GPU-resident vector search with custom Metal dot-product kernel over 10M entity 
+  embeddings (4ms→0.7ms, 5.7× faster) and knowledge-distilled MLP ranking scoring 100 candidates 
+  in one GPU dispatch (5ms→0.8ms, 6.3× faster) with zero GPU-to-CPU data transfer
 
-• Optimized Apple Silicon inference with NEON SIMD for audio features (4× speedup), Metal GPU 
-  acceleration for transformer layers (2× speedup), session-affine routing (85% cache hit rate), and 
-  backpressure control preventing memory explosion during traffic spikes
+• Optimized Apple Silicon inference with NEON SIMD for audio features (4× speedup), unified memory 
+  for zero-copy GPU↔CPU, session-affine routing (85% cache hit rate), and backpressure control 
+  preventing memory explosion during traffic spikes
 ```
 
 ---
@@ -1386,8 +3319,9 @@ class ConversationalMetrics {
 
 ### AI/ML Infrastructure
 - **Transformer Models:** BERT, Conformer ASR, FastSpeech TTS, DistilBERT optimization
-- **Vector Search:** FAISS HNSW index, entity embeddings, approximate nearest neighbor
-- **Model Serving:** Low-latency inference, KV cache reuse, incremental decoding
+- **Vector Search:** GPU-resident brute-force dot-product (custom Metal kernel), FAISS HNSW fallback
+- **Model Serving:** Low-latency Transformer inference, KV cache reuse, incremental decoding, NLP-to-Transformer migration
+- **GPU Pipeline:** Parallel Metal command queues, knowledge-distilled MLP ranking, batched GPU inference
 
 ### Distributed Systems
 - **Multi-Stage Pipelines:** Stage coordination, session-affine routing, state propagation
@@ -1395,7 +3329,8 @@ class ConversationalMetrics {
 - **Observability:** Distributed tracing, per-stage metrics, p99 latency monitoring
 
 ### Hardware Optimization
-- **Apple Silicon:** NEON SIMD, Metal GPU acceleration, unified memory architecture
+- **Apple Silicon:** NEON SIMD, Metal GPU acceleration, unified memory architecture, parallel Metal command queues
+- **GPU Kernel Engineering:** Custom Metal dot-product kernel, fused MLP ranking kernel, event-based stream synchronization
 - **Energy Efficiency:** Compute/memory behavior analysis, power-performance tradeoffs
 - **Edge-Cloud Hybrid:** On-device NLU for simple queries, cloud offload for complex
 
@@ -1420,56 +3355,47 @@ class ConversationalMetrics {
 
 ### "What was the hardest technical challenge?"
 
-**Answer:** "The multi-stage coordination problem. Each stage (ASR, NLU, Search, Orchestration, TTS) had different latency profiles and compute requirements. ASR is streaming and compute-intensive, NLU is moderate compute with model inference, Search is memory-intensive with vector lookups, TTS is compute-intensive with GPU acceleration.
+**Answer:** "The fundamental challenge was migrating from lightweight legacy NLP models to Transformer-based models without blowing past our latency budget. The old GMM-HMM ASR, MaxEnt NLU, and concatenative TTS were fast individually but low-quality. The new Conformer ASR, DistilBERT NLU, and FastSpeech TTS gave us dramatically better quality — 25% lower word error rate, 15% higher intent accuracy — but at 4–10× the compute cost per stage.
 
-The naive approach was to treat each stage as an independent microservice with network calls between them. But that added 50–80 ms overhead per stage just for serialization and network hops. At 5 stages, that's 250–400 ms before any actual computation.
+On top of that, each stage had different latency profiles and compute requirements. The naive approach was to treat each stage as an independent microservice with network calls between them. But that added 50–80 ms overhead per stage just for serialization and network hops — overhead that was tolerable with small NLP model outputs but devastating with the larger Transformer embeddings and tensor representations. At 5 stages, that's 250–400 ms before any actual computation.
 
 The solution was to treat the pipeline as a single distributed system with shared memory for state propagation. All stages run co-located on the same machine, accessing a shared memory region for conversational state. This reduced stage-to-stage overhead from 50–80 ms to 5–10 ms."
 
 ### "How did you optimize for Apple Silicon?"
 
-**Answer:** "Three levels of optimization:
+**Answer:** "Four levels of optimization:
 
 1. **NEON SIMD:** Audio feature extraction (MFCC) uses ARM NEON intrinsics for 4× parallelism. Instead of processing one sample at a time, we process 4 samples in parallel.
 
-2. **Apple GPU:** Transformer layers (BERT, ASR encoder, TTS decoder) offloaded to GPU using Metal Performance Shaders. The unified memory architecture means zero-copy between CPU and GPU — no PCIe transfer overhead.
+2. **Apple GPU — Parallel Streams:** The NLU stage runs intent classification, entity extraction, and query embedding on three separate Metal command queues in parallel, synchronized by shared events. The BERT encoder output stays in unified memory — all three heads read it with zero copying.
 
-3. **Session-Affine Routing:** Consistent hashing routes same session to same server. This keeps KV cache warm, dialogue history cached locally, and avoids cold starts. Cache hit rate went from 40% to 85%."
+3. **GPU-Resident Search + Ranking:** The query embedding from NLU flows directly GPU→GPU into a custom Metal dot-product kernel that searches 10M entity embeddings in 0.7ms (vs. 4ms on CPU). Then a knowledge-distilled MLP ranking kernel scores 100 candidates in a single 0.8ms dispatch — no CPU tree traversal.
+
+4. **Session-Affine Routing:** Consistent hashing routes same session to same server. This keeps KV cache warm, dialogue history cached locally, and avoids cold starts. Cache hit rate went from 40% to 85%."
 
 ### "Biggest performance win?"
 
-**Answer:** "Zero-copy shared memory between stages. Before, each stage would:
-1. Receive protobuf over network
-2. Deserialize to C++ objects
-3. Process
-4. Serialize results to protobuf
-5. Send over network to next stage
+**Answer:** "Two wins at different layers:
 
-That's 2 serialization + 2 network hops per stage boundary. At 50–80 ms per boundary, 5 stages = 200–320 ms overhead.
+First, **zero-copy shared memory between stages**. Before, each stage would serialize to protobuf, send over network, deserialize. That's 50–80 ms per boundary, 5 stages = 200–320 ms overhead. After, all stages access the same shared memory region via pointer dereferences. Overhead dropped to 5–10 ms per stage.
 
-After, all stages access the same shared memory region:
-1. ASR writes hypotheses directly to shared arena
-2. NLU reads hypotheses via pointer (no deserialization)
-3. Search reads NLU output via pointer
-4. Orchestration reads search results via pointer
-
-No serialization, no network hops, just pointer dereferences. Overhead dropped to 5–10 ms per stage. End-to-end latency went from 850 ms to 280 ms."
+Second, **GPU pipeline optimization for NLU→Search→Ranking**. We found that after BERT encoding, the intent classifier, entity tagger, and query embedder were running serially — wasting GPU cycles. We split them onto parallel Metal command queues. Then the query embedding flows directly GPU→GPU into a custom dot-product kernel (4ms→0.7ms, 5.7× faster) and into a batched MLP ranker (5ms→0.8ms, 6.3× faster). The key insight was that the query embedding never leaves the GPU — zero data transfer between NLU and search. Combined, the NLU+Search+Ranking hot path went from 25ms to 12.5ms."
 
 ---
 
 ## Three-Minute Interview Story
 
 **Situation:**
-"Apple's Siri platform needed to handle millions of concurrent conversational sessions with sub-300ms p99 latency. The challenge wasn't individual model quality — it was the systems cost of moving intermediate state across ASR, NLU, search, orchestration, and TTS stages. Each stage was adding 50–80 ms overhead for serialization and network hops."
+"Apple's Siri platform was migrating from legacy NLP models (GMM-HMM ASR, MaxEnt NLU, unit-selection TTS) to Transformer-based models (Conformer ASR, DistilBERT NLU, FastSpeech TTS). The Transformer models delivered dramatically better quality — 25% lower word error rate, 15% higher intent accuracy, natural-sounding speech — but at 4–10× higher compute cost. The challenge was delivering Transformer-quality results within the same sub-300ms p99 latency envelope while handling millions of concurrent sessions. Each pipeline stage was adding 50–80 ms overhead for serialization and network hops."
 
 **Approach:**
-"I redesigned the multi-stage pipeline as a unified distributed system with zero-copy shared memory. Instead of independent microservices, all stages run co-located and access a shared memory region for conversational state. ASR writes hypotheses directly to shared memory; NLU reads them via pointer with no deserialization. I implemented streaming ASR with partial results every 50ms, BERT-based NLU with intent classification, vector search over 10M entity embeddings, and neural TTS with emotion control. Optimized for Apple Silicon with NEON SIMD and GPU acceleration."
+"I redesigned the multi-stage pipeline as a unified distributed system with zero-copy shared memory, purpose-built to absorb the higher compute cost of Transformer models. Instead of independent microservices, all stages run co-located and access a shared memory region for conversational state. ASR writes hypotheses directly to shared memory; NLU reads them via pointer with no deserialization. I migrated each stage from legacy NLP to Transformers — Conformer ASR with streaming partial results, DistilBERT NLU replacing MaxEnt classifiers, FAISS vector search replacing TF-IDF lookup, and FastSpeech TTS replacing unit-selection synthesis. For the NLU→Search→Ranking hot path, I built a GPU-parallel pipeline with separate Metal command queues, a custom GPU dot-product kernel for vector search (5.7× faster), and a batched MLP ranker (6.3× faster) — with zero GPU-to-CPU data transfer between stages. Optimized for Apple Silicon with NEON SIMD and unified memory."
 
 **Measurement:**
-"End-to-end p99 latency dropped from 850ms to 280ms. Stage-to-stage overhead went from 50–80ms to 5–10ms. Session cache hit rate improved from 40% to 85%. The platform now handles millions of daily sessions with 99.99% availability."
+"End-to-end p99 latency dropped from 850ms to 280ms. Stage-to-stage overhead went from 50–80ms to 5–10ms. The GPU pipeline optimization alone cut NLU+Search+Ranking from 25ms to 12.5ms — with vector search going from 4ms to 0.7ms and ranking from 5ms to 0.8ms. Session cache hit rate improved from 40% to 85%. The platform now handles millions of daily sessions with 99.99% availability."
 
 **Learning:**
-"Modern AI products are multi-stage serving systems, not isolated model calls. The systems optimization — zero-copy, session stickiness, backpressure control — matters as much as model quality for user experience."
+"Upgrading model quality (NLP → Transformers) is only half the battle. Without systems-level optimization — zero-copy state propagation, session stickiness, hardware-accelerated inference, backpressure control — the improved models would have blown past latency budgets. The systems work is what made the model upgrade feasible at production scale."
 
 ---
 
@@ -1493,7 +3419,15 @@ No serialization, no network hops, just pointer dereferences. Overhead dropped t
 - [ ] Build dialogue state manager for multi-turn context
 - [ ] Develop response orchestration with tool invocation
 
-### Phase 4: TTS + Optimization (Weeks 25-32)
+### Phase 4: GPU Pipeline Optimization (Weeks 25-28)
+- [ ] Implement parallel Metal command queues for NLU heads
+- [ ] Build custom Metal dot-product kernel for GPU vector search
+- [ ] Train knowledge-distilled MLP ranker (LambdaMART → MLP)
+- [ ] Deploy GPU-batched ranking kernel
+- [ ] Validate zero-copy GPU→GPU data flow (NLU→Search→Ranking)
+- [ ] Benchmark parallel streams vs serial baseline
+
+### Phase 5: TTS + Production Hardening (Weeks 29-36)
 - [ ] Deploy FastSpeech neural TTS with streaming synthesis
 - [ ] Implement emotion-aware prosody control
 - [ ] Optimize for Apple Silicon (NEON, Metal GPU)

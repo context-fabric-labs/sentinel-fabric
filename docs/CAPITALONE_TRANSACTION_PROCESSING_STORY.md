@@ -5,7 +5,7 @@
 **Project:** CapitalOne Real-Time Fraud Detection & Automated Triage System  
 **Role:** Principal Systems Engineer - AI Infrastructure & Payment Processing  
 **Duration:** [Your Duration]  
-**Tech Stack:** Rust, C++/CUDA, Python, Apache Arrow, Multi-Tier LLM Orchestration, Sentinel/Helios
+**Tech Stack:** Rust, C++/CUDA, Python, Apache Arrow, TensorRT-LLM, Triton Inference Server, Multi-Tier LLM Orchestration, Sentinel/Helios
 
 ---
 
@@ -583,7 +583,153 @@ fn consume_arrow_event(record_batch: &ArrowRecordBatch) -> Tier2Input {
 
 **Solution:**
 
-#### A. Sentinel Configuration for Tier 2
+#### A. LLM Inference Runtime — TensorRT-LLM + Triton
+
+Before Sentinel can govern token budgets and priority lanes, we need an **inference engine** that actually serves the 13B model efficiently. We use **TensorRT-LLM** as the inference runtime compiled into **Triton Inference Server** as the model serving layer. Sentinel sits in front of Triton as the admission/governance proxy.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   TIER 2 INFERENCE STACK                                 │
+│                                                                          │
+│   Client (Arrow event) ──► Sentinel Gateway ──► Triton Inference Server │
+│                             (admission,          (HTTP/gRPC endpoint,    │
+│                              priority lanes,      model scheduling,      │
+│                              token budget,         request batching)      │
+│                              circuit breaker)              │              │
+│                                                            ▼              │
+│                                                  TensorRT-LLM Engine     │
+│                                                  (FP8 quantized 13B,     │
+│                                                   inflight batching,     │
+│                                                   paged KV cache,        │
+│                                                   CUDA Graphs)           │
+│                                                            │              │
+│                                                   GPU (2× H100 / A100)   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Why TensorRT-LLM over vLLM for this use case:**
+
+| Dimension | TensorRT-LLM | vLLM | Decision |
+|-----------|-------------|------|----------|
+| **Latency** | Lower p99 — compiled CUDA kernels, fused ops | Good throughput, higher tail latency | TensorRT-LLM wins for SLA-bound workloads |
+| **Quantization** | Native FP8/INT8/INT4 with calibration | GPTQ/AWQ support, no FP8 | FP8 on H100 gives 2× throughput at ~0.5% accuracy loss |
+| **Inflight Batching** | Built-in, token-level scheduling | Continuous batching via PagedAttention | Both strong; TRT-LLM tighter integration with Triton |
+| **KV Cache** | Paged KV cache with block reuse | PagedAttention (pioneered this) | Comparable — both avoid KV waste |
+| **Triton Integration** | First-class backend, single binary | Requires custom model adapter | TRT-LLM ships as a Triton backend |
+| **Operational** | NVIDIA-supported, matches GPU fleet | Community-driven, faster iteration | TRT-LLM for production SLA; vLLM for experimentation |
+
+```python
+# TensorRT-LLM engine build for Tier 2 (13B decline reasoner)
+# Run offline during model deployment — compiles optimized CUDA kernels
+
+import tensorrt_llm
+from tensorrt_llm.quantization import QuantMode
+
+def build_tier2_engine():
+    """Build TensorRT-LLM engine for 13B decline reasoner."""
+    
+    builder = tensorrt_llm.Builder()
+    
+    # Model configuration
+    config = {
+        'architecture': 'LlamaForCausalLM',
+        'num_hidden_layers': 40,
+        'hidden_size': 5120,
+        'intermediate_size': 13824,
+        'num_attention_heads': 40,
+        'num_key_value_heads': 8,        # GQA (grouped query attention)
+        'vocab_size': 32000,
+        'max_position_embeddings': 4096,  # Sufficient for structured prompts
+    }
+    
+    # Quantization: FP8 on H100 for 2× throughput
+    quant_mode = QuantMode.from_description(
+        quantize_weights=True,
+        quantize_activations=True,
+        per_token=True,
+        per_channel=True,
+        use_fp8=True,
+    )
+    
+    # Build config
+    build_config = tensorrt_llm.BuildConfig(
+        max_batch_size=32,              # Max concurrent requests in a batch
+        max_input_len=2048,             # Prompt + evidence pack
+        max_output_len=512,             # Structured JSON output
+        max_beam_width=1,               # Greedy decoding (deterministic)
+        builder_opt=5,                  # Max optimization level
+        strongly_typed=True,
+    )
+    
+    # Inflight batching config
+    build_config.plugin_config.set_gpt_attention_plugin('float16')
+    build_config.plugin_config.set_context_fmha('enable')      # Flash Attention
+    build_config.plugin_config.enable_paged_kv_cache()          # Paged KV cache
+    build_config.plugin_config.set_inflight_batching_gpt_attention_plugin('float16')
+    
+    engine = builder.build(config, build_config, quant_mode)
+    engine.save('models/decline-reasoner-13b-fp8/')
+    
+    return engine
+```
+
+```python
+# Triton model repository configuration for Tier 2
+# models/decline-reasoner-13b/config.pbtxt
+
+triton_config = """
+name: "decline-reasoner-13b"
+backend: "tensorrtllm"
+max_batch_size: 32
+
+model_transaction_policy {
+  decoupled: True              # Streaming (token-by-token output)
+}
+
+input [
+  { name: "input_ids",       data_type: TYPE_INT32, dims: [-1] },
+  { name: "input_lengths",   data_type: TYPE_INT32, dims: [1]  },
+  { name: "request_output_len", data_type: TYPE_INT32, dims: [1] },
+  { name: "temperature",     data_type: TYPE_FP32,  dims: [1]  },
+  { name: "end_id",          data_type: TYPE_INT32, dims: [1]  },
+  { name: "streaming",       data_type: TYPE_BOOL,  dims: [1]  }
+]
+
+output [
+  { name: "output_ids",     data_type: TYPE_INT32, dims: [-1] },
+  { name: "sequence_length", data_type: TYPE_INT32, dims: [1] }
+]
+
+instance_group [
+  { count: 1, kind: KIND_GPU, gpus: [0, 1] }   # 2 GPUs per instance (tensor parallel)
+]
+
+parameters: {
+  key: "gpt_model_type"
+  value: { string_value: "inflight_fused_batching" }  # Inflight batching
+}
+parameters: {
+  key: "max_tokens_in_paged_kv_cache"
+  value: { string_value: "81920" }                    # KV cache budget
+}
+parameters: {
+  key: "kv_cache_free_gpu_mem_fraction"
+  value: { string_value: "0.85" }                     # Reserve 85% GPU mem for KV
+}
+"""
+```
+
+**Key runtime optimizations:**
+- **FP8 quantization** (H100): 2× throughput vs FP16 with < 0.5% quality loss on structured outputs
+- **Inflight batching**: new requests join mid-generation (no head-of-line blocking)
+- **Paged KV cache**: allocates KV memory in 256-token blocks, reuses freed blocks immediately
+- **Flash Attention (context FMHA)**: fused attention kernel, 2× faster for long prompts
+- **Tensor parallelism**: 13B model split across 2 GPUs (each GPU holds half the layers)
+- **CUDA Graphs**: captured for decode phase, eliminating per-token kernel launch overhead
+
+#### B. Sentinel Configuration for Tier 2
+
+Sentinel sits as a **governance proxy** in front of Triton — it doesn't serve the model, it controls admission, enforces token budgets, and trips circuit breakers.
 
 ```yaml
 apiVersion: inference.sentinel.io/v1alpha1
@@ -593,6 +739,14 @@ metadata:
   namespace: ai-inference
 spec:
   model: payment/decline-reasoner-13b
+  runtime:
+    engine: tensorrt-llm            # Inference runtime
+    serving: triton                 # Model server
+    quantization: fp8               # FP8 on H100
+    tensorParallelism: 2            # 2 GPUs per instance
+    inflightBatching: true
+    pagedKVCache: true
+    maxBatchSize: 32
   gpuCount: 2
   replicas: 4
   slo:
@@ -616,14 +770,18 @@ spec:
       - type: custom
         name: sentinel_queue_depth
         target: 50
+      - type: custom
+        name: triton_inflight_batch_utilization
+        target: 0.7
 ```
 
-#### B. Reasoning Model Input — Structured Evidence Pack
+#### C. Reasoning Model Input — Structured Evidence Pack
 
 ```python
 class DeclineReasoner:
     """
     Fast reasoning model (13B) for decline explanation.
+    Served by TensorRT-LLM (FP8) behind Triton + Sentinel.
     Receives structured evidence pack — no re-parsing.
     """
     
@@ -681,7 +839,7 @@ class DeclineReasoner:
             return Priority.P1
 ```
 
-#### C. Structured Output — Immediately Consumable by Tier 3
+#### D. Structured Output — Immediately Consumable by Tier 3
 
 ```json
 {
@@ -729,7 +887,66 @@ class DeclineReasoner:
 
 **Solution:**
 
-#### A. Sentinel + Helios Configuration for Tier 3
+#### A. TensorRT-LLM Runtime for 70B Triage Agent
+
+The 70B triage agent requires **4 GPUs** with tensor parallelism and aggressive quantization to fit within the 10-second SLA while supporting multi-step tool-calling workflows.
+
+```python
+# TensorRT-LLM engine build for Tier 3 (70B triage agent)
+def build_tier3_engine():
+    """Build TensorRT-LLM engine for 70B triage agent."""
+    
+    builder = tensorrt_llm.Builder()
+    
+    config = {
+        'architecture': 'LlamaForCausalLM',
+        'num_hidden_layers': 80,
+        'hidden_size': 8192,
+        'intermediate_size': 28672,
+        'num_attention_heads': 64,
+        'num_key_value_heads': 8,           # GQA — critical for 70B memory
+        'vocab_size': 32000,
+        'max_position_embeddings': 8192,    # Longer context for multi-step triage
+    }
+    
+    # FP8 quantization (H100) — fits 70B in 4× 80GB GPUs
+    quant_mode = QuantMode.from_description(
+        quantize_weights=True,
+        quantize_activations=True,
+        use_fp8=True,
+    )
+    
+    build_config = tensorrt_llm.BuildConfig(
+        max_batch_size=8,                   # Lower batch — each request is multi-step
+        max_input_len=4096,                 # Evidence pack + tool results
+        max_output_len=2048,                # Multi-step reasoning output
+        max_beam_width=1,                   # Greedy
+        builder_opt=5,
+    )
+    
+    # 4-way tensor parallelism
+    build_config.auto_parallel_config.enabled = True
+    build_config.auto_parallel_config.num_gpus = 4
+    
+    build_config.plugin_config.set_gpt_attention_plugin('float16')
+    build_config.plugin_config.enable_paged_kv_cache()
+    build_config.plugin_config.set_inflight_batching_gpt_attention_plugin('float16')
+    
+    engine = builder.build(config, build_config, quant_mode)
+    engine.save('models/triage-agent-70b-fp8/')
+```
+
+**70B Memory Budget (4× H100 80GB):**
+
+| Component | FP16 | FP8 (deployed) |
+|-----------|------|----------------|
+| Model weights | 140 GB | 70 GB |
+| KV cache (batch=8, seq=8192) | ~40 GB | ~20 GB |
+| Activations + workspace | ~20 GB | ~15 GB |
+| **Total** | **200 GB** (won't fit) | **105 GB** (fits in 4×80GB) |
+| **Headroom** | — | 215 GB free for burst batching |
+
+#### B. Sentinel + Helios Configuration for Tier 3
 
 ```yaml
 apiVersion: inference.sentinel.io/v1alpha1
@@ -739,6 +956,14 @@ metadata:
   namespace: ai-inference
 spec:
   model: payment/triage-agent-70b
+  runtime:
+    engine: tensorrt-llm
+    serving: triton
+    quantization: fp8
+    tensorParallelism: 4              # 4 GPUs per instance
+    inflightBatching: true
+    pagedKVCache: true
+    maxBatchSize: 8                   # Lower — multi-step requests
   gpuCount: 4
   replicas: 2
   slo:
@@ -766,7 +991,7 @@ spec:
         target: 7000
 ```
 
-#### B. Agentic Workflow — Coordinator + Tool Adapters
+#### C. Agentic Workflow — Coordinator + Tool Adapters
 
 ```python
 class TriageAgent:
@@ -855,7 +1080,7 @@ class TriageAgent:
         )
 ```
 
-#### C. Helios Scheduling — Protect Tier 2 Capacity
+#### D. Helios Scheduling — Protect Tier 2 Capacity
 
 ```python
 class HeliosScheduler:
@@ -1304,9 +1529,9 @@ fn score_transaction(txn: &TxnView) {
 
 **Tier 1** is a per-core Rust/CUDA scoring pipeline: borrowed transaction views, cacheline-aligned feature blocks, ensemble of XGBoost/GBDT/neural models, and CUDA Graphs for GPU scoring — all within 5 ms p99.
 
-**Tier 2** uses a 13B reasoning model behind Sentinel to explain declines in 2–5 seconds. It reads the same Arrow event buffer published by Tier 1 — no re-parsing.
+**Tier 2** uses a 13B reasoning model served by **TensorRT-LLM (FP8)** behind **Triton Inference Server** and governed by **Sentinel** — explaining declines in 2–5 seconds. It reads the same Arrow event buffer published by Tier 1 — no re-parsing.
 
-**Tier 3** uses a 70B agentic workflow behind Sentinel + Helios to dispatch triage actions in 5–10 seconds. Helios protects Tier 2 capacity by degrading Tier 3 during decline spikes.
+**Tier 3** uses a 70B agentic workflow on **TensorRT-LLM (FP8, 4-way tensor parallel)** behind **Triton + Sentinel + Helios** to dispatch triage actions in 5–10 seconds. Helios protects Tier 2 capacity by degrading Tier 3 during decline spikes.
 
 The key innovation is the **shared immutable Arrow event buffer** at the tier boundary. Tier 1 writes once; Tiers 2 and 3 read by reference. No JSON rebuild, no reserialization, no context reconstruction."
 
@@ -1335,9 +1560,9 @@ The key innovation is the **shared immutable Arrow event buffer** at the tier bo
 • Designed per-core scoring architecture with borrowed transaction views, cacheline-aligned feature 
   blocks, CUDA Graphs for GPU acceleration, and SPSC ring buffers achieving 3.8ms p99 at 24,500 TPS
 
-• Implemented Sentinel + Helios governance for Tiers 2/3 (reasoning + triage) with token admission 
-  control, priority lanes, predictive scheduling, and degrade modes protecting 99.999% availability 
-  during 5× decline spikes
+• Deployed TensorRT-LLM (FP8 quantization) + Triton Inference Server for Tier 2/3 LLM serving with 
+  inflight batching, paged KV cache, and tensor parallelism; governed by Sentinel + Helios with token 
+  admission control, priority lanes, predictive scheduling, and degrade modes for 99.999% availability
 
 • Built zero-copy cross-tier data flow using Arrow IPC and shared memory segments eliminating 
   serialization overhead, reducing per-transaction bytes copied from 2KB to 47 bytes while enabling 
@@ -1356,9 +1581,13 @@ The key innovation is the **shared immutable Arrow event buffer** at the tier bo
 • Implemented ensemble scoring pipeline combining XGBoost, GBDT, logistic scorecards, rule engines, 
   and compact neural models reading from shared feature block with zero per-model serialization overhead
 
-• Built Sentinel + Helios governance for Tiers 2/3 (13B reasoning + 70B triage agent) with token 
-  admission control, priority lanes for high-value declines, predictive scheduling, and degrade modes 
-  protecting 99.999% availability during 5× decline spikes
+• Deployed TensorRT-LLM (FP8) + Triton Inference Server for 13B reasoning and 70B triage agent with 
+  inflight batching, paged KV cache, 4-way tensor parallelism, and CUDA Graphs — achieving 2× 
+  throughput vs FP16 baseline while meeting Tier 2 (4s) and Tier 3 (9s) p99 SLAs
+
+• Built Sentinel + Helios governance layer in front of Triton for token admission control, priority 
+  lanes for high-value declines, predictive scheduling, and degrade modes protecting 99.999% 
+  availability during 5× decline spikes
 
 • Engineered zero-copy cross-tier data flow using Arrow IPC and shared memory segments eliminating 
   JSON/protobuf serialization, reducing per-transaction bytes copied from 2KB to 47 bytes while 
@@ -1380,7 +1609,8 @@ The key innovation is the **shared immutable Arrow event buffer** at the tier bo
 ### AI/ML Infrastructure
 - **Multi-Tier Orchestration:** Deterministic scoring (Tier 1) + reasoning (Tier 2) + agentic (Tier 3)
 - **Sentinel/Helios:** Token admission, circuit breakers, priority lanes, predictive scheduling
-- **Model Serving:** XGBoost, GBDT, 13B reasoning model, 70B triage agent
+- **LLM Inference Runtime:** TensorRT-LLM (FP8 quantization, inflight batching, paged KV cache), Triton Inference Server
+- **Model Serving:** XGBoost, GBDT, 13B reasoning model, 70B triage agent (both served via TensorRT-LLM + Triton)
 
 ### Data Engineering
 - **Apache Arrow:** Columnar event buffers, zero-copy IPC, shared memory segments
@@ -1413,7 +1643,7 @@ The key innovation is the **shared immutable Arrow event buffer** at the tier bo
 
 ### "What was the hardest technical challenge?"
 
-**Answer:** "Balancing three conflicting latency SLAs in one system. Tier 1 needed sub-5ms decisions, but Tier 3's 70B agent took 5–10 seconds. If they shared GPU pools, Tier 3 would starve Tier 1. The solution was physical isolation (separate GPU pools) plus logical isolation (Sentinel token budgets, Helios scheduling) plus zero-copy data flow (Arrow shared buffers) so tiers could operate independently without rebuilding context."
+**Answer:** "Balancing three conflicting latency SLAs in one system. Tier 1 needed sub-5ms decisions, but Tier 3's 70B agent took 5–10 seconds. If they shared GPU pools, Tier 3 would starve Tier 1. The solution was physical isolation (separate GPU pools) plus logical isolation (Sentinel token budgets, Helios scheduling) plus zero-copy data flow (Arrow shared buffers). For the LLM layers, we used TensorRT-LLM with FP8 quantization and inflight batching behind Triton, which gave us 2× throughput vs FP16 — critical for fitting the 70B agent into 4 H100s while meeting the 10-second SLA."
 
 ### "How did you ensure 99.999% availability?"
 
@@ -1445,6 +1675,9 @@ The key innovation is the **shared immutable Arrow event buffer** at the tier bo
 - [ ] Integrate Helios for Tier 3 scheduling
 
 ### Phase 3: Tier 2/3 Agents (Weeks 17-24)
+- [ ] Build TensorRT-LLM FP8 engines for 13B reasoner and 70B triage agent
+- [ ] Deploy Triton Inference Server with inflight batching and paged KV cache
+- [ ] Validate FP8 quantization accuracy on decline-reasoning golden dataset
 - [ ] Deploy 13B reasoning model for Tier 2
 - [ ] Build enrichment service for additional context
 - [ ] Develop 70B triage agent with tool adapters
