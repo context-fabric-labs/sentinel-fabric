@@ -1,0 +1,621 @@
+
+FAISS — Technical Reference & Deployment Guide
+
+Facebook AI Similarity Search (FAISS)
+GPU-Accelerated Vector Search for Real-Time Inference Pipelines
+
+Prepared for: Sentinel Gateway / Fraud Detection & Search Infrastructure Use Cases
+
+Last Updated: May 2026
+
+Table of Contents
+
+1. What is FAISS?
+
+2. Core Concepts & Architecture
+
+3. Index Types — Comparison & Selection Guide
+
+4. GPU Acceleration (FAISS-GPU & cuVS)
+
+5. C++ API Integration
+
+6. Performance Benchmarks (CPU vs GPU)
+
+7. Deployment on Kubernetes (On-Prem GPU Cluster)
+
+8. Integration with Our Pipeline (Fraud Detection / Search Infra)
+
+9. Operational Best Practices
+
+10. References
+
+1. What is FAISS?
+
+FAISS (Facebook AI Similarity Search) is an open-source library developed by Meta AI Research for efficient similarity search and clustering of dense vectors. It is written in C++ with complete Python bindings and supports both CPU and GPU execution.
+
+FAISS is designed to handle vector datasets ranging from thousands to billions of entries. It provides multiple index types that allow users to trade off between search accuracy, speed, and memory consumption. FAISS is widely used in production systems for:
+
+Semantic search and retrieval-augmented generation (RAG)
+
+Recommendation systems (e.g., ad ranking, content feeds)
+
+Image/video similarity search
+
+Real-time fraud detection (embedding-based anomaly scoring)
+
+Entity resolution and deduplication
+
+The core operation is: given a set of database vectors xᵢ of dimension d, FAISS builds an index structure. When a new query vector x arrives, it efficiently finds argmin‖x − xᵢ‖ (L2 distance) or argmax⟨x, xᵢ⟩ (inner product). FAISS supports exact search (brute-force) and approximate nearest neighbor (ANN) search with configurable recall-speed tradeoffs.
+
+2. Core Concepts & Architecture
+
+2.1 Index Lifecycle
+
+Every FAISS index follows a three-phase lifecycle:
+
+Train: For approximate indexes (IVF, PQ), a representative sample of vectors is used to learn cluster centroids or quantization codebooks. Flat and HNSW indexes skip this step.
+
+Add: Database vectors are inserted into the index. For IVF indexes, each vector is assigned to its nearest cluster.
+
+Search: Given query vectors, the index returns the k nearest neighbors along with their distances.
+
+2.2 Key Parameters
+
+Parameter
+
+Description
+
+Typical Range
+
+d
+
+Dimensionality of vectors
+
+64–1536 (model dependent)
+
+nlist
+
+Number of IVF clusters (Voronoi cells)
+
+4√N to 16√N
+
+nprobe
+
+Number of clusters searched at query time
+
+1–256 (higher = better recall, slower)
+
+M (HNSW)
+
+Number of links per node in the graph
+
+4–64 (higher = more RAM, better recall)
+
+efSearch
+
+Search-time beam width for HNSW
+
+16–512
+
+m (PQ)
+
+Number of sub-quantizers for Product Quantization
+
+8–96 (each produces 1 byte code)
+
+2.3 Distance Metrics
+
+FAISS supports L2 (Euclidean), Inner Product (IP/cosine after normalization), and limited support for L1 and L∞. For our use cases — embedding-based similarity — L2 and IP are the primary metrics. Cosine similarity is achieved by normalizing vectors to unit length and using IP.
+
+3. Index Types — Comparison & Selection Guide
+
+FAISS provides multiple index types. The choice depends on dataset size, latency requirements, memory budget, and whether GPU is available.
+
+Index Type
+
+index_factory
+
+Training?
+
+Memory/Vector
+
+Recall
+
+Speed
+
+GPU Support
+
+Flat (Brute Force)
+
+Flat
+
+No
+
+d × 4 bytes
+
+100% (exact)
+
+O(N) — slow for large N
+
+Yes
+
+IVF-Flat
+
+IVF{K},Flat
+
+Yes (k-means)
+
+d × 4 bytes + overhead
+
+High (tunable via nprobe)
+
+Fast (searches nprobe clusters)
+
+Yes
+
+IVF-PQ
+
+IVF{K},PQ{m}
+
+Yes
+
+m bytes/vector
+
+Good (lossy compression)
+
+Very fast, low memory
+
+Yes
+
+HNSW
+
+HNSW{M}
+
+No
+
+d×4 + M×8 bytes
+
+Very High
+
+Very fast (graph traversal)
+
+No (CPU only)
+
+IVFPQFastScan
+
+IVF{K},PQ{m}x4fs
+
+Yes
+
+m/2 bytes/vector
+
+Good
+
+Fastest CPU (SIMD-optimized)
+
+No
+
+CAGRA (cuVS)
+
+GpuIndexCagra
+
+Yes (GPU)
+
+GPU VRAM
+
+Very High
+
+Fastest GPU graph index
+
+Yes (GPU only)
+
+RaBitQ
+
+IVF{K},RaBitQ
+
+Yes
+
+d/8 + 8 bytes
+
+Good
+
+Fast with max compression
+
+No
+
+3.1 Decision Tree (from Official FAISS Wiki)
+
+1. Few searches (< 10K)? → Use Flat (brute force).
+2. Need exact results? → Use Flat.
+3. Memory NOT a concern? → Use HNSW (CPU) or CAGRA (GPU) — best recall/speed.
+4. Memory somewhat constrained? → Use IVF + Flat.
+5. Memory quite constrained? → Use IVF + PQ (compressed vectors).
+6. Maximum compression? → Use RaBitQ (1 bit/dim).
+7. Dataset < 1M? → IVF with K = 4√N to 16√N.
+8. Dataset 1M–10M? → IVF65536_HNSW32.
+9. Dataset 10M–100M? → IVF262144_HNSW32.
+10. Dataset 100M–1B? → IVF1048576_HNSW32.
+
+3.2 Recommendation for Our Use Cases
+
+Fraud Detection Hot Path (< 5ms SLA, ~1M–10M transaction embeddings): Use GpuIndexIVFPQ with cuVS on GPU. The sub-millisecond GPU search latency (~0.3ms) fits within the SLA. IVF-PQ provides memory-efficient compressed storage on GPU VRAM.
+
+Search/Ranking Infrastructure (Siri-like, LinkedIn-like): Use CAGRA for GPU-accelerated graph-based index (build on GPU, optionally convert to HNSW for CPU search). For retrieval of 50–100 candidates from millions of documents, CAGRA offers the best recall at high throughput.
+
+4. GPU Acceleration (FAISS-GPU & cuVS)
+
+4.1 FAISS GPU Architecture
+
+FAISS GPU offloads compute-intensive distance calculations to NVIDIA CUDA cores. It uses cuBLAS for matrix multiplication and cuRAND for random number generation. The GPU version supports GpuIndexFlat, GpuIndexIVFFlat, GpuIndexIVFPQ, and (via cuVS) GpuIndexCagra.
+
+4.2 NVIDIA cuVS Integration (Since FAISS v1.10.0)
+
+cuVS (CUDA Vector Search) is NVIDIA's state-of-the-art library for GPU-accelerated ANN search, built on RAPIDS RAFT. Since FAISS v1.10.0, cuVS is integrated as an optional backend for GpuIndexFlat, GpuIndexIVFFlat, GpuIndexIVFPQ, and the new GpuIndexCagra.
+
+Key Benefits of cuVS:
+
+Build indexes up to 12× faster on GPU at 95% recall
+
+Search latencies up to 8× lower at 95% recall
+
+Seamless CPU↔GPU interoperability (build on GPU, search on CPU)
+
+CAGRA: GPU-native graph index — up to 4.7× faster search than CPU HNSW
+
+RMM pooled memory management for reduced allocation overhead
+
+Expanded PQ parameter space (bits per code: 4–8, subquantizers up to d)
+
+4.3 CAGRA — GPU-Native Graph Index
+
+CAGRA (CUDA ANN GRAph-based) is a fixed-degree flat graph index purpose-built for GPUs. Algorithm: (1) Build a kNN graph using IVF-PQ or NN-Descent, (2) Prune redundant routes. CAGRA can be serialized to HNSW format for CPU-based search — enabling hybrid deployments where you build fast on GPU and serve on CPU.
+
+4.4 cuVS Limitations
+
+Multi-GPU is NOT supported for cuVS indexes
+
+Precomputed tables not supported for GpuIndexIVFPQ with cuVS
+
+reserveVecs pre-allocation not supported
+
+searchPreassigned not supported
+
+Only indexes_64_BIT storage option available
+
+4.5 Installation
+
+Three package variants are available via conda (as of FAISS v1.14.1):
+
+Package
+
+Hardware
+
+CUDA
+
+Platform
+
+faiss-cpu
+
+CPU only
+
+No
+
+Linux, Windows, macOS (ARM)
+
+faiss-gpu
+
+CPU + NVIDIA GPU
+
+11.4, 12.1
+
+Linux x86-64
+
+faiss-gpu-cuvs
+
+CPU + GPU + cuVS
+
+12.4+
+
+Linux x86-64
+
+Install command:
+conda install -c pytorch -c nvidia -c rapidsai -c conda-forge faiss-gpu-cuvs=1.14.1
+
+5. C++ API Integration
+
+5.1 Why C++ for Our Pipeline?
+
+FAISS is natively written in C++. For our low-latency fraud detection and search pipelines — where we already serve XGBoost, ONNX transformer models, and the Rust/C++ gateway from the same process — calling FAISS directly via C++ eliminates Python GIL overhead, HTTP serialization, and enables zero-copy integration with Apache Arrow buffers.
+
+5.2 C++ Usage Pattern
+
+FAISS C++ API mirrors the Python API. Key header: #include <faiss/IndexIVFPQ.h>
+
+// Build IVF-PQ Index
+int d = 128;  // embedding dimension
+int nlist = 1024;  // number of clusters
+int m = 16;  // sub-quantizers
+int nbits = 8;  // bits per code
+
+faiss::IndexFlatL2 quantizer(d);
+faiss::IndexIVFPQ index(&quantizer, d, nlist, m, nbits);
+
+// Train on representative data
+index.train(n_train, train_data.data());
+
+// Add database vectors
+index.add(n_db, db_vectors.data());
+
+// Search
+int k = 10;
+std::vector<float> distances(nq * k);
+std::vector<faiss::idx_t> labels(nq * k);
+index.nprobe = 32;
+index.search(nq, query.data(), k, distances.data(), labels.data());
+
+5.3 C API / FFI for Rust Integration
+
+FAISS provides a pure C interface (c_api/) for FFI integration with Rust, Julia, etc. Build with: cmake -B build -DFAISS_ENABLE_C_API=ON . This produces libfaiss_c.so which can be linked from Rust via bindgen/FFI. Functions use the faiss_ prefix (e.g., faiss_IndexFlat_new). Types use the Faiss prefix (e.g., FaissIndex, FaissMetricType).
+
+5.4 GPU Index in C++
+
+#include <faiss/gpu/GpuIndexIVFPQ.h>
+#include <faiss/gpu/StandardGpuResources.h>
+
+faiss::gpu::StandardGpuResources res;
+faiss::gpu::GpuIndexIVFPQConfig config;
+config.interleavedLayout = true;  // enables cuVS backend
+
+faiss::gpu::GpuIndexIVFPQ gpu_index(
+    &res, d, nlist, m, nbits,
+    faiss::METRIC_L2, config);
+
+gpu_index.train(n_train, train_data.data());
+gpu_index.add(n_db, db_vectors.data());
+gpu_index.search(nq, query.data(), k, D.data(), I.data());
+
+6. Performance Benchmarks (CPU vs GPU)
+
+6.1 Single-Node Benchmarks (1M vectors, 768d)
+
+Metric
+
+FAISS GPU (IVF-PQ)
+
+FAISS CPU (IVF-PQ)
+
+FAISS CPU (HNSW)
+
+Notes
+
+Index Build Time
+
+~3s
+
+~12s
+
+~45s (HNSW)
+
+GPU 4× faster
+
+Query Latency (top-10)
+
+~0.3ms
+
+~1.5ms
+
+~2ms
+
+GPU 5–7× faster
+
+QPS (single thread)
+
+~3,300
+
+~670
+
+~500
+
+GPU dominates single-thread
+
+QPS (8 threads)
+
+~3,300
+
+~4,200
+
+~3,500
+
+CPU scales with threads
+
+Memory (1M vectors)
+
+~3 GB VRAM
+
+~3 GB RAM
+
+~3.5 GB RAM
+
+Comparable
+
+6.2 cuVS Benchmarks (Deep100M — 100M × 96d, H100 GPU)
+
+Metric
+
+cuVS (GPU)
+
+Classic FAISS GPU
+
+CPU HNSW
+
+IVF-PQ Build Time
+
+Up to 4.7× faster
+
+Baseline
+
+N/A
+
+IVF-PQ Search Latency
+
+Up to 8× lower
+
+Baseline
+
+N/A
+
+CAGRA Build Time
+
+Up to 12.3× faster
+
+N/A
+
+Baseline (hours)
+
+CAGRA Search Latency
+
+Up to 4.7× faster
+
+N/A
+
+Baseline
+
+Source: NVIDIA cuVS Blog (Nov 2025) — benchmarked on H100 GPU + Intel Xeon Platinum 8480CL CPU.
+
+7. Deployment on Kubernetes (On-Prem GPU Cluster)
+
+7.1 Architecture Overview
+
+In our on-prem K8s cluster, FAISS GPU runs as a sidecar or co-located process within the inference pod. The FAISS index is loaded into GPU VRAM at pod startup. The inference service (C++/Rust gateway) calls FAISS directly via in-process C++ API — no network hop.
+
+7.2 Prerequisites
+
+NVIDIA GPU Operator installed (DaemonSet for driver + device plugin)
+
+NVIDIA Device Plugin advertising nvidia.com/gpu resources to scheduler
+
+Container image built with CUDA toolkit + FAISS GPU libraries
+
+GPU nodes labeled: accelerator=nvidia-a100 (or equivalent)
+
+Node Feature Discovery (NFD) for automatic GPU capability labeling
+
+7.3 Pod Spec Example
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fraud-detection-scorer
+spec:
+  nodeSelector:
+    accelerator: nvidia-a100
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - name: scorer
+    image: registry.internal/fraud-scorer:latest
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+        memory: 32Gi
+      requests:
+        nvidia.com/gpu: 1
+        memory: 16Gi
+    volumeMounts:
+    - name: faiss-index
+      mountPath: /data/faiss
+  volumes:
+  - name: faiss-index
+    persistentVolumeClaim:
+      claimName: faiss-index-pvc
+
+7.4 Index Loading Strategy
+
+FAISS indexes are serialized to disk using faiss.write_index() (Python) or faiss::write_index() (C++). At pod startup, the index file is read from a PersistentVolume (NFS or local SSD) and loaded into GPU VRAM using index_cpu_to_gpu(). For warm-path workloads, use an init container to pre-download the latest index from the feature store / S3 before the main container starts.
+
+7.5 Host-Level Tuning (for GPU FAISS)
+
+NUMA Pinning: Pin the inference pod to the NUMA node closest to the GPU (via CPU Manager static policy + topology-aware scheduling).
+
+Hugepages: Configure 2MB or 1GB hugepages for large index files to reduce TLB misses during index load.
+
+GPU Isolation: Use MIG (Multi-Instance GPU) on A100 to partition GPU memory if sharing with other workloads.
+
+PCIe Topology: Ensure the GPU and NIC are on the same PCIe root complex to minimize cross-socket traffic.
+
+RMM Memory Pool: Enable RMM pooled allocation in FAISS GPU to avoid repeated cudaMalloc calls.
+
+8. Integration with Our Pipeline
+
+8.1 Fraud Detection — Hot Path (< 5ms)
+
+In the hot path, we use FAISS GPU (IVF-PQ) for real-time similarity search against a transaction embedding index. The flow is:
+
+Rust Gateway receives transaction → extracts features → produces embedding via ONNX (BERT/transformer)
+
+Embedding is passed to FAISS GpuIndexIVFPQ.search() via C++ in-process call
+
+FAISS returns top-K similar historical transactions (with distances) in ~0.3ms
+
+Distances are fed as features into XGBoost ensemble for final fraud score
+
+All data flows via Apache Arrow zero-copy buffers — no serialization overhead
+
+8.2 Search / Ranking Infrastructure (Warm Path)
+
+For Siri-like or LinkedIn-like query processing:
+
+Query embedding is generated by BERT (served via ONNX/C++)
+
+FAISS CAGRA (GPU) retrieves top 50–100 candidate documents/entities in < 1ms
+
+Candidates are re-ranked by a cross-encoder or feature-rich ranker (XGBoost/transformer)
+
+Final ranked list is returned to the user within the 200ms SLA
+
+Index is rebuilt periodically (daily/hourly) using GPU-accelerated CAGRA build, then optionally converted to HNSW for CPU serving if GPU capacity is constrained
+
+8.3 Zero-Copy with Apache Arrow
+
+Both FAISS and our feature pipeline use contiguous float32 arrays. Apache Arrow's columnar format stores embedding columns as contiguous buffers that can be passed directly to faiss::Index::search() without copying. The Rust gateway uses Arrow's C Data Interface to share buffers between Rust, C++, and FAISS. This eliminates serialization/deserialization overhead in the hot path.
+
+9. Operational Best Practices
+
+Index Versioning: Store index files with version tags (e.g., fraud_ivfpq_v42.index). Use blue-green deployment to swap indexes without downtime.
+
+Monitoring: Track search latency (p50/p99), recall@K, GPU VRAM utilization, and QPS via Prometheus + DCGM Exporter.
+
+Index Refresh: Rebuild indexes on a schedule (hourly for fraud embeddings, daily for document search). Use GPU build for speed, then deploy to CPU or GPU serving.
+
+Capacity Planning: 1M × 768d vectors ≈ 3 GB (flat). With PQ (m=64), ≈ 64 MB. Plan GPU VRAM budget accordingly.
+
+Fallback: If GPU is unavailable, FAISS supports transparent CPU fallback via index_gpu_to_cpu(). Ensure CPU indexes are pre-built as backup.
+
+Testing: Validate recall@K against a brute-force Flat index on a held-out query set before deploying a new ANN index.
+
+Multi-GPU Sharding: For datasets > GPU VRAM capacity, shard across multiple GPUs using IndexShards or IndexReplicas (note: cuVS does not support multi-GPU yet — use classic FAISS GPU).
+
+10. References
+
+FAISS Official Documentation: https://faiss.ai/
+
+FAISS GitHub Wiki — Index Selection Guide: https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
+
+FAISS GitHub Wiki — GPU with cuVS: https://github.com/facebookresearch/faiss/wiki/GPU-Faiss-with-cuVS
+
+NVIDIA Blog — Enhancing GPU-Accelerated Vector Search with cuVS (Nov 2025): https://developer.nvidia.com/blog/enhancing-gpu-accelerated-vector-search-in-faiss-with-nvidia-cuvs/
+
+FAISS C API (for Rust FFI): https://github.com/facebookresearch/faiss/blob/main/c_api/INSTALL.md
+
+FAISS Tutorials (C++ & Python): https://deepwiki.com/facebookresearch/faiss/8.3-tutorials-and-examples
+
+Kubernetes GPU Scheduling: https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/
+
+FAISS Installation Guide (v1.14.1): https://deepwiki.com/facebookresearch/faiss/2.1-installation-guide
+
+•••
+Go to
+Page

@@ -1,0 +1,947 @@
+FAISS — Search & Recommendation Infrastructure Guide
+With Zero-Copy Architecture for Low-Latency Pipelines
+
+Facebook AI Similarity Search (FAISS) + TigerGraph
+GPU-Accelerated Vector Search for Real-Time Search, Recommendation & Fraud Detection
+
+Use Case 1: CapitalOne Fraud Detection — FAISS GPU + TigerGraph + Zero-Copy Rust Pipeline
+Use Case 2: Apple Siri Voice Assistant — FAISS (CPU + GPU) + TigerGraph + Zero-Copy C++/Rust Pipeline
+
+Prepared for: LinkedIn Search & Feed Department Interview
+Tech Stack: FAISS (C++), TigerGraph (GSQL), Rust, C++/CUDA, Apache Arrow, Zero-Copy Shared Memory
+Last Updated: May 2026
+
+═══════════════════════════════════════════════════════════════════════════
+
+Table of Contents
+
+1. FAISS Core Architecture & Index Selection
+2. GPU Acceleration — FAISS-GPU, cuVS & CAGRA
+3. C++ & Rust API Integration (Zero-Copy Patterns)
+4. TigerGraph — Graph-Based Retrieval for Search & Recommendation
+5. USE CASE 1: CapitalOne Fraud Detection (FAISS + TigerGraph)
+6. USE CASE 2: Siri Voice Assistant (FAISS + TigerGraph)
+7. LinkedIn-Relevant: How This Maps to Search & Feed Infrastructure
+8. Deployment on Kubernetes (On-Prem GPU Cluster)
+9. Performance Benchmarks
+10. References
+
+═══════════════════════════════════════════════════════════════════════════
+
+1. FAISS CORE ARCHITECTURE & INDEX SELECTION
+
+═══════════════════════════════════════════════════════════════════════════
+
+1.1 What is FAISS?
+
+FAISS (Facebook AI Similarity Search) is a C++ library (with Python bindings) from Meta AI for efficient similarity search and clustering of dense vectors. It supports CPU and GPU execution and scales from thousands to billions of vectors.
+
+Core operation: given database vectors x_i of dimension d, FAISS builds an index. When query vector x arrives, find argmin ||x - x_i|| (L2) or argmax <x, x_i> (inner product).
+
+1.2 Index Lifecycle
+
+  Train → Add → Search
+
+  Train: Learn cluster centroids / codebooks (IVF, PQ indexes). Flat/HNSW skip this.
+  Add: Insert database vectors. IVF assigns each to nearest cluster.
+  Search: Given query vectors, return k nearest neighbors + distances.
+
+1.3 Index Types — Selection Guide
+
+  ┌──────────────────┬────────────┬──────────┬───────────────────┬────────────┬────────────┬───────────┐
+  │ Index Type        │ factory    │ Training │ Memory/Vector     │ Recall     │ Speed      │ GPU?      │
+  ├──────────────────┼────────────┼──────────┼───────────────────┼────────────┼────────────┼───────────┤
+  │ Flat (Brute Force)│ Flat       │ No       │ d × 4 bytes       │ 100%       │ O(N)       │ Yes       │
+  │ IVF-Flat          │ IVF{K},Flat│ Yes      │ d × 4 + overhead  │ High       │ Fast       │ Yes       │
+  │ IVF-PQ            │ IVF{K},PQ{m}│ Yes    │ m bytes/vector    │ Good       │ Very fast  │ Yes       │
+  │ HNSW              │ HNSW{M}   │ No       │ d×4 + M×8 bytes   │ Very High  │ Very fast  │ No (CPU)  │
+  │ CAGRA (cuVS)      │ GpuCagra  │ Yes (GPU)│ GPU VRAM          │ Very High  │ Fastest GPU│ GPU only  │
+  │ IVFPQFastScan     │ IVF,PQ4fs │ Yes      │ m/2 bytes/vector  │ Good       │ Fastest CPU│ No        │
+  └──────────────────┴────────────┴──────────┴───────────────────┴────────────┴────────────┴───────────┘
+
+1.4 Decision Tree
+
+  Q: Few searches (< 10K queries)?         → Flat
+  Q: Need exact results?                   → Flat
+  Q: Memory NOT a concern?                 → HNSW (CPU) or CAGRA (GPU)
+  Q: Memory somewhat constrained?          → IVF + Flat
+  Q: Memory quite constrained?             → IVF + PQ
+  Q: Maximum compression needed?           → RaBitQ (1 bit/dim)
+  Q: Dataset < 1M?                         → IVF with K = 4√N to 16√N
+  Q: Dataset 1M–10M?                       → IVF65536_HNSW32
+  Q: Dataset 10M–100M?                     → IVF262144_HNSW32
+  Q: Dataset > 100M?                       → IVF1048576_HNSW32
+
+  For dedicated GPU capacity + need 100% recall:
+  → Exhaustive kNN via cuBLAS matrix multiply (LinkedIn's approach)
+
+1.5 Key Parameters
+
+  d        = Dimensionality of vectors (64–1536, model dependent)
+  nlist    = Number of IVF clusters (4√N to 16√N)
+  nprobe   = Clusters searched at query time (1–256; higher = better recall, slower)
+  M (HNSW) = Links per node (4–64; higher = more RAM, better recall)
+  efSearch  = Search beam width for HNSW (16–512)
+  m (PQ)   = Sub-quantizers for Product Quantization (8–96, each = 1 byte)
+
+1.6 Distance Metrics
+
+  L2 (Euclidean):  ||x - y||² — standard for general embeddings
+  Inner Product:    <x, y>     — equivalent to cosine similarity after L2 normalization
+  Cosine:           Normalize vectors to unit length, then use IP
+
+═══════════════════════════════════════════════════════════════════════════
+
+2. GPU ACCELERATION — FAISS-GPU, cuVS & CAGRA
+
+═══════════════════════════════════════════════════════════════════════════
+
+2.1 Architecture
+
+  FAISS GPU offloads distance computations to CUDA cores. Uses cuBLAS for 
+  matrix multiplication. Supports: GpuIndexFlat, GpuIndexIVFFlat, 
+  GpuIndexIVFPQ, GpuIndexCagra (via cuVS).
+
+2.2 cuVS Integration (Since FAISS v1.10.0)
+
+  cuVS (CUDA Vector Search) — NVIDIA's GPU-accelerated ANN library built on 
+  RAPIDS RAFT. Integrated as optional backend.
+
+  Key Benefits:
+  • Build indexes up to 12× faster at 95% recall
+  • Search latencies up to 8× lower at 95% recall
+  • CPU↔GPU interoperability (build GPU, serve CPU)
+  • CAGRA: GPU-native graph index — 4.7× faster than CPU HNSW
+  • RMM pooled memory management
+
+2.3 CAGRA — GPU-Native Graph Index
+
+  Algorithm:
+  1. Build kNN graph using IVF-PQ or NN-Descent
+  2. Prune redundant routes → fixed-degree flat graph
+  
+  Key property: Can serialize to HNSW format for CPU search
+  → Build fast on GPU, serve on CPU (hybrid deployment)
+
+  USE CASE: Siri cloud entity search — build CAGRA on GPU, optionally
+  convert to HNSW for on-device CPU fallback.
+
+2.4 Exhaustive kNN on GPU (LinkedIn's Approach)
+
+  When: Dedicated GPU capacity + corpus < ~100M + freshness matters
+
+  Implementation: Q × D^T matrix multiply via cuBLAS
+  • Q = [batch_size × d] query embeddings
+  • D = [corpus_size × d] document embeddings
+  • Result = [batch_size × corpus_size] similarity scores
+  • Top-K via partial sort (cuDNN/custom kernel)
+
+  WHY LinkedIn chose this over ANN:
+  • 100% recall (no approximation loss)
+  • Trivial index updates (replace embedding row)
+  • No index rebuild for freshness
+  • GPU tensor cores make brute-force fast enough
+
+2.5 GPU Index in C++
+
+  #include <faiss/gpu/GpuIndexIVFPQ.h>
+  #include <faiss/gpu/StandardGpuResources.h>
+
+  faiss::gpu::StandardGpuResources res;
+  faiss::gpu::GpuIndexIVFPQConfig config;
+  config.interleavedLayout = true;  // enables cuVS backend on H100
+
+  faiss::gpu::GpuIndexIVFPQ gpu_index(
+      &res, d, nlist, m, nbits, faiss::METRIC_L2, config);
+
+  gpu_index.train(n_train, train_data.data());
+  gpu_index.add(n_db, db_vectors.data());
+  gpu_index.search(nq, query.data(), k, distances.data(), labels.data());
+
+2.6 CAGRA in C++
+
+  #include <faiss/gpu/GpuIndexCagra.h>
+
+  faiss::gpu::StandardGpuResources res;
+  faiss::gpu::GpuIndexCagraConfig config;
+  config.intermediate_graph_degree = 64;
+  config.graph_degree = 32;
+
+  faiss::gpu::GpuIndexCagra gpu_index(
+      &res, d, faiss::METRIC_INNER_PRODUCT, config);
+
+  gpu_index.train(n, data.data());
+  gpu_index.add(n, data.data());
+  gpu_index.search(nq, query.data(), k, distances.data(), labels.data());
+
+  // Convert to HNSW for CPU serving
+  faiss::IndexHNSWFlat cpu_index(d, 32);
+  gpu_index.copyTo(&cpu_index);
+
+2.7 Installation
+
+  Package            Hardware          CUDA      Platform
+  faiss-cpu          CPU only          No        Linux, Windows, macOS (ARM)
+  faiss-gpu          CPU + GPU         11.4/12.1 Linux x86-64
+  faiss-gpu-cuvs     CPU + GPU + cuVS  12.4+     Linux x86-64
+
+  conda install -c pytorch -c nvidia -c rapidsai -c conda-forge faiss-gpu-cuvs=1.14.1
+
+═══════════════════════════════════════════════════════════════════════════
+
+3. C++ & RUST API INTEGRATION (ZERO-COPY PATTERNS)
+
+═══════════════════════════════════════════════════════════════════════════
+
+3.1 Why C++/Rust for Search Infrastructure?
+
+  FAISS is natively C++. For low-latency search and fraud detection pipelines
+  where we serve ONNX transformer models, XGBoost, and FAISS from the same 
+  process — direct C++ integration eliminates:
+  • Python GIL overhead
+  • HTTP serialization round-trips
+  • Cross-process memory copies
+  
+  Rust provides: memory safety, zero-cost abstractions, excellent FFI to C++,
+  and lock-free concurrency primitives.
+
+3.2 C++ API Pattern
+
+  #include <faiss/IndexIVFPQ.h>
+
+  int d = 128, nlist = 4096, m = 16, nbits = 8;
+  faiss::IndexFlatL2 quantizer(d);
+  faiss::IndexIVFPQ index(&quantizer, d, nlist, m, nbits);
+
+  index.train(n_train, train_data.data());
+  index.add(n_db, db_vectors.data());
+
+  int k = 10;
+  std::vector<float> distances(nq * k);
+  std::vector<faiss::idx_t> labels(nq * k);
+  index.nprobe = 32;
+  index.search(nq, query.data(), k, distances.data(), labels.data());
+
+3.3 Rust FFI via C API
+
+  FAISS provides c_api/ for FFI integration.
+  Build: cmake -B build -DFAISS_ENABLE_C_API=ON
+  Produces: libfaiss_c.so
+  Functions use faiss_ prefix. Types use Faiss prefix.
+
+  // Rust side (via bindgen)
+  extern "C" {
+      fn faiss_IndexFlatL2_new(p_index: *mut *mut FaissIndex, d: i64) -> i32;
+      fn faiss_Index_add(index: *mut FaissIndex, n: i64, x: *const f32) -> i32;
+      fn faiss_Index_search(
+          index: *const FaissIndex, n: i64, x: *const f32,
+          k: i64, distances: *mut f32, labels: *mut i64
+      ) -> i32;
+  }
+
+3.4 Zero-Copy Pattern: GPU Embedding → FAISS Search (No D2H Transfer)
+
+  THE CRITICAL OPTIMIZATION: After the NLU/feature model produces an embedding
+  on GPU, keep it on GPU and pass the device pointer directly to FAISS GPU.
+  This eliminates a ~0.8ms device-to-host + host-to-device round trip.
+
+  // Embedding produced by ONNX/PyTorch on GPU (device memory)
+  float* d_query_embedding;  // Already on GPU from NLU forward pass
+
+  // FAISS GPU search — accepts device pointers directly
+  faiss::gpu::GpuIndexIVFPQ gpu_index(&res, d, nlist, m, nbits,
+                                       faiss::METRIC_L2, config);
+
+  // Search with device pointer — NO cudaMemcpy needed
+  float* d_distances;
+  faiss::idx_t* d_labels;
+  cudaMalloc(&d_distances, nq * k * sizeof(float));
+  cudaMalloc(&d_labels, nq * k * sizeof(faiss::idx_t));
+
+  gpu_index.search(nq, d_query_embedding, k, d_distances, d_labels);
+  // Results stay on GPU → feed directly to ranking model
+
+3.5 Apache Arrow Zero-Copy Between FAISS and Ranking
+
+  // Wrap FAISS results as Arrow arrays — no copies
+  auto distances_buffer = arrow::Buffer::Wrap(distances.data(),
+                                               nq * k * sizeof(float));
+  auto labels_buffer = arrow::Buffer::Wrap(labels.data(),
+                                            nq * k * sizeof(int64_t));
+
+  auto distances_array = std::make_shared<arrow::FloatArray>(
+      nq * k, distances_buffer);
+  auto labels_array = std::make_shared<arrow::Int64Array>(
+      nq * k, labels_buffer);
+
+  // Ranking model reads from same memory — zero copies
+  auto record_batch = arrow::RecordBatch::Make(schema,
+      nq * k, {distances_array, labels_array});
+
+3.6 Shared Memory Arena + SPSC Ring (Rust)
+
+  /// Hugepage-backed shared memory for inter-component zero-copy
+  struct PipelineArena {
+      base_ptr: *mut u8,
+      write_offset: AtomicU64,
+      capacity: usize,
+  }
+
+  impl PipelineArena {
+      fn allocate(&self, size: usize, align: usize) -> u32 {
+          // Atomic bump allocation — returns OFFSET, not pointer
+          let aligned = (self.write_offset.load(Relaxed) + align - 1) & !(align - 1);
+          self.write_offset.store(aligned + size as u64, Release);
+          aligned as u32
+      }
+  }
+
+  /// SPSC ring carries 32-byte descriptors, not payloads
+  #[repr(C, align(64))]
+  struct Descriptor {
+      arena_offset: u32,
+      payload_len: u32,
+      stage_mask: u8,       // Which stages have processed
+      padding: [u8; 23],
+  }
+
+  struct SPSCRing {
+      buffer: *mut Descriptor,
+      capacity: usize,       // Power of 2
+      head: AtomicUsize,     // Consumer (cache-line padded)
+      _pad: [u8; 56],
+      tail: AtomicUsize,     // Producer (cache-line padded)
+  }
+
+═══════════════════════════════════════════════════════════════════════════
+
+4. TIGERGRAPH — GRAPH-BASED RETRIEVAL FOR SEARCH & RECOMMENDATION
+
+═══════════════════════════════════════════════════════════════════════════
+
+4.1 Why Graph + Vector Search?
+
+  Vector search captures SEMANTIC SIMILARITY:
+    "cheap eats" → "budget restaurants" (embeddings are close)
+    
+  Graph traversal captures STRUCTURAL RELATIONSHIPS:
+    "the restaurant John mentioned" → User→John→Conversations→Restaurants
+    "fraud rings" → Card→Device→OtherCards (shared attributes)
+
+  Neither alone is sufficient. Combined = hybrid retrieval.
+
+4.2 TigerGraph Architecture
+
+  Component          Description
+  Storage            Distributed graph, partitioned by vertex type
+  Query Language     GSQL — SQL-like with graph traversal primitives  
+  Traversal          Multi-hop with filters, aggregations, accumulators
+  Throughput         Millions of vertices/sec per node
+  Real-Time          Sub-second for 2-3 hop on billion-edge graphs
+  REST API           Every query auto-exposes as REST endpoint
+
+4.3 Graph Schema for Search & Recommendation
+
+  // Fraud Detection Graph
+  CREATE VERTEX Card (PRIMARY_ID id STRING, bin STRING, issuer STRING)
+  CREATE VERTEX Merchant (PRIMARY_ID id STRING, mcc STRING, name STRING)
+  CREATE VERTEX Device (PRIMARY_ID id STRING, fingerprint STRING)
+  CREATE VERTEX IP (PRIMARY_ID id STRING, geo STRING)
+  
+  CREATE DIRECTED EDGE Transaction (FROM Card, TO Merchant,
+      amount DOUBLE, timestamp UINT, channel STRING)
+  CREATE UNDIRECTED EDGE SharedDevice (FROM Card, TO Device)
+  CREATE UNDIRECTED EDGE SharedIP (FROM Card, TO IP)
+
+  // Siri Knowledge Graph
+  CREATE VERTEX User (PRIMARY_ID id STRING, name STRING)
+  CREATE VERTEX Contact (PRIMARY_ID id STRING, name STRING,
+      name_embedding LIST<DOUBLE>, phone STRING)
+  CREATE VERTEX Place (PRIMARY_ID id STRING, name STRING,
+      embedding LIST<DOUBLE>, category STRING)
+  CREATE VERTEX App (PRIMARY_ID id STRING, name STRING)
+  
+  CREATE DIRECTED EDGE Knows (FROM User, TO Contact, frequency UINT)
+  CREATE DIRECTED EDGE VisitedPlace (FROM User, TO Place, timestamp UINT)
+  CREATE DIRECTED EDGE UsesApp (FROM User, TO App, frequency UINT)
+  CREATE DIRECTED EDGE MentionedIn (FROM Contact, TO Place, timestamp UINT)
+
+4.4 Hybrid Retrieval Pattern
+
+  Step 1: Graph retrieval (TigerGraph)
+    → 2-3 hop traversal from user/entity
+    → Returns candidate set with graph-based scores
+    → Features: degree centrality, component size, edge weights
+
+  Step 2: Vector retrieval (FAISS on GPU)
+    → kNN search against embedding index
+    → Returns candidate set with similarity scores
+
+  Step 3: Fusion
+    → Merge candidates, combine scores (learned weights)
+    → Deduplicate on entity ID
+
+  Step 4: Re-rank
+    → Cross-encoder or gradient-boosted model
+    → Sees both graph features + embedding distances
+
+  Step 5: Serve
+    → Top-K results → downstream consumer
+
+═══════════════════════════════════════════════════════════════════════════
+
+5. USE CASE 1: CAPITALIONE FRAUD DETECTION
+
+═══════════════════════════════════════════════════════════════════════════
+
+5.1 Business Context
+
+  20,000+ transactions per second. < 5ms p99 latency SLA.
+  Traditional rules miss 15-20% of sophisticated fraud (organized rings).
+  
+  FAISS catches: anomalous transactions in embedding space
+  TigerGraph catches: fraud rings — cards sharing devices/IPs/addresses
+
+5.2 Architecture
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  ISO 8583 Message (card transaction)                                 │
+  │       │                                                              │
+  │       ▼                                                              │
+  │  Rust Gateway — parse once → TxnView<'a> (zero-alloc borrowed refs) │
+  │       │                                                              │
+  │       ▼                                                              │
+  │  FeatureBlock (cacheline-aligned, 64-byte boundary)                  │
+  │  ┌────────────────────────────────────────────────────────────┐      │
+  │  │ amount_log: f32, time_sin/cos: f32, merchant_mcc: f32,   │      │
+  │  │ card_velocity_1h/24h: f32, device_risk: f32,              │      │
+  │  │ merchant_embedding[64]: f32, user_embedding[64]: f32      │      │
+  │  └────────────────────────────────────────────────────────────┘      │
+  │       │                                                              │
+  │  ┌────┴────────────────────────────┐                                │
+  │  │              │                   │                                │
+  │  ▼              ▼                   ▼                                │
+  │  XGBoost     FAISS GPU           TigerGraph                         │
+  │  Ensemble    IVF-PQ              2-hop Query                        │
+  │  (CPU)       128d, 10M vectors   Fraud Ring                         │
+  │  < 1ms       < 0.3ms            Detection                          │
+  │                                   < 2ms                              │
+  │  │              │                   │                                │
+  │  └──────────────┴───────────────────┘                                │
+  │              │                                                       │
+  │              ▼                                                       │
+  │  Weighted Ensemble → fraud_score                                    │
+  │  Features: model_scores + faiss_distances + graph_features          │
+  │              │                                                       │
+  │              ▼                                                       │
+  │  Go/No-Go Decision (< 3.8ms p99)                                   │
+  │              │                                                       │
+  │              ▼                                                       │
+  │  Arrow Event Buffer → Tier 2 (reasoning) / Tier 3 (triage)         │
+  └──────────────────────────────────────────────────────────────────────┘
+
+5.3 FAISS Configuration
+
+  // 10M transaction embeddings, 128d, on GPU
+  int d = 128;
+  int nlist = 4096;        // √(10M) ≈ 3162, round to 4096
+  int m = 16;              // 16 sub-quantizers → 16 bytes/vector
+  int nbits = 8;
+  
+  faiss::gpu::StandardGpuResources res;
+  faiss::gpu::GpuIndexIVFPQConfig config;
+  config.interleavedLayout = true;   // cuVS backend
+  
+  faiss::gpu::GpuIndexIVFPQ index(&res, d, nlist, m, nbits,
+                                   faiss::METRIC_L2, config);
+  index.train(n_train, train_data.data());
+  index.add(n_db, db_vectors.data());
+  
+  // At inference time
+  index.nprobe = 32;       // search 32 of 4096 clusters
+  index.search(1, query.data(), 10, distances.data(), labels.data());
+  // Returns top-10 similar historical transactions in ~0.3ms
+
+  Memory budget:
+    10M vectors × 16 bytes/vector (PQ) = 160 MB on GPU VRAM
+    + centroids + metadata ≈ 200 MB total
+    Fits easily in H100 80GB alongside other models
+
+5.4 TigerGraph Fraud Ring Detection
+
+  CREATE QUERY detect_fraud_ring(VERTEX<Card> seed, INT max_hops = 3)
+    FOR GRAPH FraudGraph
+    RETURNS (MapAccum<STRING, DOUBLE>)
+  {
+    SetAccum<VERTEX> @@visited;
+    MapAccum<STRING, DOUBLE> @@features;
+    
+    Start = {seed};
+    
+    // Hop 1: Card → recent transactions → merchants/devices
+    Hop1 = SELECT t FROM Start:s -(Transaction:e)- :t
+           WHERE e.timestamp > now() - 86400
+           ACCUM @@visited += t;
+    
+    // Hop 2: Shared entities → other cards
+    Hop2 = SELECT t FROM Hop1:s -(SharedDevice|SharedIP:e)- :t
+           WHERE t NOT IN @@visited
+           ACCUM @@visited += t;
+    
+    // Graph features → feed to ensemble scorer
+    @@features += ("ring_size"         -> @@visited.size());
+    @@features += ("shared_devices"    -> COUNT(Hop2 WHERE type=="Device"));
+    @@features += ("velocity_24h"      -> SUM(Hop1.amount));
+    @@features += ("distinct_merchants" -> COUNT(DISTINCT Hop1.merchant_id));
+    
+    RETURN @@features;
+  }
+
+5.5 Zero-Copy Data Flow
+
+  1. ISO 8583 bytes arrive on network buffer (per-core slab)
+  2. Rust TxnView<'a> borrows fields as &[u8] from slab — ZERO heap alloc
+  3. FeatureBlock constructed in-place in shared memory arena
+  4. FAISS: embedding extracted from FeatureBlock, passed to GPU
+     → distances written to arena
+  5. TigerGraph: graph features written to arena
+  6. XGBoost: reads FeatureBlock + FAISS distances + graph features 
+     from arena (same memory, no copies)
+  7. Ensemble score written to arena
+  8. 32-byte descriptor pushed to SPSC ring → event consumer
+  9. Arrow RecordBatch wraps arena memory → Tier 2/3 consumers
+
+  Total bytes COPIED per transaction: 47 bytes (descriptor + score)
+  Everything else: read by reference from shared memory
+
+5.6 Performance
+
+  Metric                    Target    Achieved
+  Tier 1 p99 latency        < 5ms     3.8ms
+  FAISS search latency      < 1ms     0.3ms
+  TigerGraph 2-hop          < 5ms     1.8ms
+  XGBoost ensemble          < 2ms     0.9ms
+  Fraud detection rate       > 90%    94%
+  False positive rate        < 5%     3.2%
+  Throughput                 20K TPS  24,500 TPS
+
+═══════════════════════════════════════════════════════════════════════════
+
+6. USE CASE 2: SIRI VOICE ASSISTANT
+
+═══════════════════════════════════════════════════════════════════════════
+
+6.1 Business Context
+
+  Multi-stage conversational AI pipeline: ASR → NLU → Search → Ranking → TTS
+  Stage C (NLU + Search + Ranking) budget: < 25ms p99
+  Challenge: Entity resolution ("Call John at his office") requires
+  understanding context, disambiguating entities, and finding the right
+  phone number from potentially thousands of contacts.
+
+6.2 Architecture
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  STAGE C: NLU + SEARCH + RANKING (< 25ms p99)                       │
+  │                                                                      │
+  │  From shared_state (ASR hypothesis, zero-copy):                      │
+  │  "Call John at his office"                                           │
+  │       │                                                              │
+  │       ▼                                                              │
+  │  Multi-Task DistilBERT (GPU, 8ms)                                   │
+  │  ┌─────────────────────────────────────────────────────────┐        │
+  │  │ CLS head → Intent: MAKE_CALL (0.94 confidence)          │        │
+  │  │ Token heads → NER: [John:CONTACT, office:LOCATION_TYPE] │        │
+  │  │ Mean pool → Query embedding ∈ ℝ^768 (STAYS ON GPU)      │        │
+  │  └─────────────────────────────────────────────────────────┘        │
+  │       │                                                              │
+  │  ┌────┴──────────────────┐                                          │
+  │  │                       │                                           │
+  │  ▼                       ▼                                           │
+  │  FAISS (GPU or CPU)     TigerGraph                                  │
+  │                          Knowledge Graph                             │
+  │  CLOUD: CAGRA            2-hop traversal                             │
+  │    10M entities, 768d    User → Contacts                             │
+  │    < 0.5ms               → filter by intent                          │
+  │                          < 2ms                                       │
+  │  ON-DEVICE: HNSW                                                     │
+  │    100K contacts, 768d                                               │
+  │    < 2ms on CPU                                                      │
+  │  │                       │                                           │
+  │  └───────────┬───────────┘                                           │
+  │              │                                                       │
+  │              ▼                                                       │
+  │  Candidate Fusion + Batched GPU Re-Ranking (< 0.8ms)                │
+  │  Features: emb_distance, graph_hops, frequency, recency             │
+  │              │                                                       │
+  │              ▼                                                       │
+  │  Result: John Smith, Office: +1-555-0123                            │
+  │  → Write to shared_state → Stage D (Response Orchestration)         │
+  └──────────────────────────────────────────────────────────────────────┘
+
+6.3 FAISS Configuration — Dual Mode (Cloud GPU + On-Device CPU)
+
+  // ═══ CLOUD: CAGRA on GPU (10M entities) ═══
+  int d = 768;
+  
+  faiss::gpu::StandardGpuResources res;
+  faiss::gpu::GpuIndexCagraConfig cagra_config;
+  cagra_config.intermediate_graph_degree = 64;
+  cagra_config.graph_degree = 32;
+  
+  faiss::gpu::GpuIndexCagra cloud_index(
+      &res, d, faiss::METRIC_INNER_PRODUCT, cagra_config);
+  cloud_index.train(n, data.data());
+  cloud_index.add(n, data.data());
+  
+  // Search: query embedding stays on GPU from NLU forward pass
+  cloud_index.search(1, d_query_embedding, 50,
+                     d_distances, d_labels);  // ~0.5ms
+  
+  // ═══ ON-DEVICE: HNSW on CPU (100K contacts per user) ═══
+  int M = 32;
+  faiss::IndexHNSWFlat device_index(d, M);
+  device_index.hnsw.efSearch = 128;
+  
+  device_index.add(n_contacts, contact_embeddings.data());
+  device_index.search(1, query.data(), 10,
+                      distances.data(), labels.data());  // ~2ms
+  
+  // ═══ HYBRID: Build on GPU, serve on CPU ═══
+  // Export CAGRA to HNSW format for CPU fallback
+  faiss::IndexHNSWFlat cpu_fallback(d, 32);
+  cloud_index.copyTo(&cpu_fallback);
+
+  Memory budgets:
+    Cloud:    10M × 768d × 4 bytes = 30 GB (GPU VRAM for flat)
+              With CAGRA: ~35 GB (graph overhead) → fits H100 80GB
+    On-Device: 100K × 768d × 4 bytes = 307 MB (+ HNSW graph ~100 MB)
+              Total ~400 MB → fits iPhone 16 Pro (8 GB RAM)
+
+6.4 TigerGraph for Contextual Entity Resolution
+
+  CREATE QUERY resolve_entity(
+    VERTEX<User> user,
+    STRING entity_name,
+    STRING intent,
+    UINT context_window     // seconds to look back
+  ) FOR GRAPH SiriKnowledgeGraph
+    RETURNS (ListAccum<TUPLE<STRING name, STRING phone, DOUBLE score>>)
+  {
+    ListAccum<TUPLE<STRING name, STRING phone, DOUBLE score>> @@results;
+    
+    // Hop 1: User's contacts matching entity name
+    Contacts = SELECT c FROM user:u -(Knows:e)- Contact:c
+               WHERE c.name LIKE entity_name + "%"
+               OR levenshtein(c.name, entity_name) < 3;
+    
+    // Filter by intent context
+    IF intent == "MAKE_CALL" THEN
+      Contacts = SELECT c FROM Contacts:c WHERE c.phone != "";
+    END;
+    
+    // Hop 2: Context-aware — recent interactions boost score
+    FOREACH c IN Contacts DO
+      DOUBLE score = 0.0;
+      score += 0.4 * log(1 + c.call_frequency);
+      score += 0.3 * (1.0 / (1 + hours_since(c.last_interaction)));
+      score += 0.2 * c.embedding_similarity;
+      score += 0.1 * (1.0 / (1 + c.graph_distance));
+      
+      @@results += TUPLE(c.name, c.phone, score);
+    END;
+    
+    RETURN @@results ORDER BY score DESC LIMIT 10;
+  }
+
+  Multi-Turn Example:
+    Turn 1: "What's the weather in Springfield?"
+      → FAISS returns: Springfield IL, MO, MA, OR (by embedding similarity)
+      → TigerGraph: User lives near Springfield IL (2-hop from home address)
+      → Result: Springfield, IL (graph context disambiguates)
+
+    Turn 2: "No, the one in Massachusetts"
+      → Context update: user.context_location = "Springfield, MA"
+      → No FAISS search needed — context override
+
+6.5 Zero-Copy Pipeline (C++ Shared Memory)
+
+  // Conversational state in hugepage-backed shared memory
+  struct ConversationalState {
+      // Fixed header (cacheline-aligned)
+      uint64_t session_id;
+      uint32_t asr_offset;          // ASR hypothesis → arena offset
+      uint32_t asr_length;
+      uint32_t nlu_embedding_offset; // NLU embedding → arena offset (768 floats)
+      uint32_t entity_results_offset; // FAISS + graph results
+      uint32_t ranking_offset;
+      uint8_t  stage_complete_mask;  // Bitfield: ASR|NLU|Search|Rank|TTS
+      uint32_t arena_offset;         // Bump allocator position
+  };
+
+  // Stage C accessor — zero-copy reads from previous stages
+  class SearchStageAccessor {
+      ConversationalState* state;
+      
+  public:
+      // Read ASR text without copy
+      std::string_view get_asr_text() {
+          return {(char*)state + state->asr_offset, state->asr_length};
+      }
+      
+      // Get embedding pointer (already on GPU if GPU path)
+      float* get_query_embedding() {
+          return (float*)((char*)state + state->nlu_embedding_offset);
+      }
+      
+      // Write search results to arena
+      void write_results(const SearchResult* results, size_t n) {
+          uint32_t offset = state->arena_offset;
+          memcpy((char*)state + offset, results, n * sizeof(SearchResult));
+          state->entity_results_offset = offset;
+          state->arena_offset = offset + n * sizeof(SearchResult);
+          state->stage_complete_mask |= SEARCH_COMPLETE;
+      }
+  };
+
+6.6 Performance
+
+  Metric                           Target    Achieved
+  NLU (multi-task DistilBERT)      < 10ms    8ms
+  FAISS CAGRA (cloud, top-50)      < 1ms     0.5ms
+  FAISS HNSW (on-device, top-10)   < 3ms     2ms
+  TigerGraph 2-hop                 < 3ms     1.8ms
+  Batched re-ranking               < 2ms     0.8ms
+  Stage C total p99                < 25ms    22ms
+  Entity resolution accuracy        > 90%    96%
+  Multi-turn context accuracy        > 80%   89%
+  Search relevance (NDCG@10)        > +20%   +26% vs baseline
+
+═══════════════════════════════════════════════════════════════════════════
+
+7. LINKEDIN-RELEVANT: HOW THIS MAPS TO SEARCH & FEED
+
+═══════════════════════════════════════════════════════════════════════════
+
+7.1 Direct Parallels
+
+  Your Experience                  LinkedIn Equivalent
+  ──────────────────────────────   ─────────────────────────────────
+  FAISS GPU vector search          GPU exhaustive kNN (EBR)
+  Multi-task BERT NLU              LLM query understanding (1.5-4B)
+  Dual-tower bi-encoder            EBR dual-tower (fine-tuned LLM)
+  Batched GPU re-ranking           SLM cross-encoder (0.6B via SGLang)
+  Zero-copy shared memory          PyTorch-native zero-copy inference
+  Apache Arrow cross-component     Columnar layouts + SIMD vectorization
+  TigerGraph knowledge graph       LinkedIn Economic Graph
+  CAGRA build GPU / serve CPU      Nearline GPU embedding + GPU index
+  Rust gateway + C++ FAISS         C++ data loader + custom CUDA kernels
+  SPSC ring buffer                 ZMQ batch send (SGLang)
+  Multi-task distillation          7B→1.7B→0.6B multi-teacher distill
+
+7.2 LinkedIn's Specific Optimizations You Should Know
+
+  A. Exhaustive kNN on GPU (not ANN)
+     → When: dedicated GPU + corpus < 100M + freshness matters
+     → How: Q × D^T via cuBLAS tensor cores
+     → Why: 100% recall, trivial index updates
+
+  B. SGLang for Prefill-Only Ranking
+     → Scoring-only path: skip decode loop (13.7× P99 improvement)
+     → Batch tokenization: async dynamic batching (10× P99)
+     → In-batch prefix caching: compute query KV once
+     → gc.freeze() + multi-process: eliminate Python bottlenecks
+
+  C. Model Compression Pipeline
+     → Structured pruning: remove MLP neurons + attention heads + layers
+     → Context pruning: 1.7B summarizer compresses job descriptions
+     → Embedding compression: encode description as single token
+     → Result: 290 → 22,000 items/sec/GPU (76× throughput)
+
+  D. Feed Retrieval with LLM Dual Encoders
+     → Percentile buckets for numerical features (30× correlation gain)
+     → Positives-only engagement history (2.6× faster, better quality)
+     → Hard negative mining (+3.6% recall with 2 hard negatives)
+     → Near-real-time embedding refresh via 3 nearline pipelines
+
+  E. Sequential Recommender (Generative Recommender)
+     → Causal transformer over 1000+ interactions
+     → Late fusion: count/affinity features after transformer
+     → GRMIS: custom Flash Attention variant (2× speedup)
+     → MMoE prediction head with per-task gating
+
+7.3 Interview Positioning
+
+  "My search & recommendation experience directly maps to LinkedIn's stack:
+  
+  - I built GPU-accelerated vector retrieval (FAISS) similar to LinkedIn's 
+    EBR system, with the same emphasis on keeping embeddings on GPU to 
+    minimize latency.
+  
+  - I designed zero-copy data pipelines (Rust + Arrow + shared memory) 
+    that parallel LinkedIn's PyTorch-native inference stack with columnar 
+    layouts and SIMD vectorization.
+  
+  - I integrated graph-based retrieval (TigerGraph) with vector search 
+    for hybrid candidate generation — similar to how LinkedIn combines 
+    the Economic Graph with embedding-based retrieval.
+  
+  - I implemented multi-task model distillation (3 BERT heads → 1 model) 
+    which parallels LinkedIn's 7B→1.7B→0.6B teacher-student pipeline.
+  
+  - My latency optimization work (3.8ms fraud scoring, 22ms search stage) 
+    demonstrates the same discipline LinkedIn applies to their sub-500ms 
+    P99 ranking SLA."
+
+═══════════════════════════════════════════════════════════════════════════
+
+8. DEPLOYMENT ON KUBERNETES (ON-PREM GPU CLUSTER)
+
+═══════════════════════════════════════════════════════════════════════════
+
+8.1 Pod Spec (FAISS GPU + TigerGraph sidecar)
+
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: search-scorer
+  spec:
+    nodeSelector:
+      accelerator: nvidia-a100
+    tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+    containers:
+    - name: scorer
+      image: registry.internal/search-scorer:latest
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+          memory: 32Gi
+        requests:
+          nvidia.com/gpu: 1
+          memory: 16Gi
+      volumeMounts:
+      - name: faiss-index
+        mountPath: /data/faiss
+      - name: shared-arena
+        mountPath: /dev/hugepages
+    - name: tigergraph-client
+      image: registry.internal/tg-client:latest
+      resources:
+        limits:
+          memory: 8Gi
+    volumes:
+    - name: faiss-index
+      persistentVolumeClaim:
+        claimName: faiss-index-pvc
+    - name: shared-arena
+      emptyDir:
+        medium: HugePages-2Mi
+        sizeLimit: 256Mi
+
+8.2 Host-Level Tuning
+
+  NUMA Pinning:    Pin pod to NUMA node closest to GPU
+  Hugepages:       2MB for shared arena, 1GB for FAISS index load
+  GPU Isolation:   MIG on A100 if sharing with other workloads
+  PCIe Topology:   Ensure GPU + NIC on same PCIe root complex
+  RMM Pool:        Enable RMM for FAISS GPU (avoid cudaMalloc overhead)
+  CPU Manager:     Static policy for guaranteed QoS pods
+
+8.3 Index Loading Strategy
+
+  Init Container:
+    1. Download latest index from feature store / S3
+    2. Load into shared volume
+  
+  Main Container:
+    1. Read index from PersistentVolume
+    2. Load into GPU VRAM: index_cpu_to_gpu()
+    3. Warm up with synthetic queries
+    4. Start serving
+
+  Index Refresh:
+    • Fraud: rebuild hourly (rolling window of 90-day transactions)
+    • Siri: rebuild daily (all entities), near-real-time for new contacts
+    • Blue-green deployment: build new index → swap pointer → no downtime
+
+═══════════════════════════════════════════════════════════════════════════
+
+9. PERFORMANCE BENCHMARKS
+
+═══════════════════════════════════════════════════════════════════════════
+
+9.1 FAISS Benchmarks (1M vectors, 768d)
+
+  Metric                FAISS GPU     FAISS CPU      FAISS CPU
+                        (IVF-PQ)      (IVF-PQ)       (HNSW)
+  ────────────────────  ──────────    ──────────     ──────────
+  Index Build Time      ~3s           ~12s           ~45s
+  Query Latency (top-10) ~0.3ms      ~1.5ms         ~2ms
+  QPS (single thread)   ~3,300        ~670           ~500
+  QPS (8 threads)       ~3,300        ~4,200         ~3,500
+  Memory (1M vectors)   ~3 GB VRAM    ~3 GB RAM      ~3.5 GB RAM
+
+9.2 cuVS Benchmarks (Deep100M — 100M × 96d, H100 GPU)
+
+  Metric                cuVS (GPU)    Classic GPU    CPU HNSW
+  ────────────────────  ──────────    ──────────     ──────────
+  IVF-PQ Build          4.7× faster   Baseline       N/A
+  IVF-PQ Search         8× lower      Baseline       N/A
+  CAGRA Build           12.3× faster  N/A            Baseline
+  CAGRA Search          4.7× faster   N/A            Baseline
+
+9.3 End-to-End Pipeline Benchmarks
+
+  Use Case 1: Fraud Detection
+    Component            Latency      Notes
+    Rust parse + feature < 0.2ms      Zero-alloc, slab-allocated
+    XGBoost ensemble     < 0.9ms      8 models, same FeatureBlock
+    FAISS GPU IVF-PQ     < 0.3ms      10M vectors, nprobe=32
+    TigerGraph 2-hop     < 1.8ms      Fraud ring detection
+    Ensemble + decision  < 0.6ms      Weighted combination
+    TOTAL                < 3.8ms      p99 (target: 5ms)
+
+  Use Case 2: Siri Search Stage
+    Component            Latency      Notes
+    NLU DistilBERT       < 8ms        3 task heads, 1 forward pass
+    FAISS CAGRA (cloud)  < 0.5ms      10M entities, GPU
+    FAISS HNSW (device)  < 2ms        100K contacts, CPU
+    TigerGraph 2-hop     < 1.8ms      Context resolution
+    Batched re-ranking   < 0.8ms      All candidates, 1 GPU pass
+    TOTAL (cloud)        < 22ms       p99 (target: 25ms)
+
+═══════════════════════════════════════════════════════════════════════════
+
+10. REFERENCES
+
+═══════════════════════════════════════════════════════════════════════════
+
+FAISS:
+  • Official docs: https://faiss.ai/
+  • GitHub Wiki — Index Selection: https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index
+  • GPU with cuVS: https://github.com/facebookresearch/faiss/wiki/GPU-Faiss-with-cuVS
+  • C API (Rust FFI): https://github.com/facebookresearch/faiss/blob/main/c_api/INSTALL.md
+
+NVIDIA cuVS:
+  • Blog: https://developer.nvidia.com/blog/enhancing-gpu-accelerated-vector-search-in-faiss-with-nvidia-cuvs/
+
+TigerGraph:
+  • GSQL Reference: https://docs.tigergraph.com/gsql-ref/current/intro/
+  • Graph Algorithms: https://docs.tigergraph.com/graph-ml/current/intro/
+
+LinkedIn Engineering (2026):
+  • Reimagining Search Stack: https://www.linkedin.com/blog/engineering/search/reimagining-linkedins-search-stack
+  • Next-Gen Feed: https://www.linkedin.com/blog/engineering/feed/engineering-the-next-generation-of-linkedins-feed
+  • SGLang Ranking: https://www.linkedin.com/blog/engineering/ai/scaling-llm-based-ranking-systems-with-sglang-at-linkedin
+  • GPU CUDA Search: https://dl.acm.org/doi/10.1145/3705328.3748116
+  • GPU PyTorch Search: https://arxiv.org/pdf/2407.13218
+  • SLM Efficiency: https://arxiv.org/pdf/2510.22101
+  • Embedding Compression (MixLM): https://arxiv.org/pdf/2512.07846
+
+Kubernetes:
+  • GPU Scheduling: https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/
+
+•••
