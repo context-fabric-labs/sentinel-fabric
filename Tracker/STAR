@@ -1,0 +1,105 @@
+STAR
+	1) High Latency Incidents - System experiencing slowness 
+		a) P-99 latency increased . TTFT spikes . 
+		b) GPU utilization dropped
+		c) Throughput dropped (Queue increase)
+
+		d) High CPU utilization
+		e) NUMA misallignment 
+		f) Session aware routing messed-up
+	2) Errors 
+		a) OOM on GPU
+		b) Requests rejected 
+		c) KV Cache eviction is high
+		d) NCCL timeout error 
+		e) RDMA packet dropped 
+	3) Quality Degradation
+		a) Accuracy droppeed on eval set 
+		b) Halucination rate increased 
+	4) 
+
+RunBook 1:- High Latency Incidents - System experiencing slowness
+	What you have observed 
+		a) P-99 latency increased . TTFT spikes . 
+			What we did in terms of identifying the root cause i.e. which tools we used 
+			What issues we have found (Any one or all of below, i will make this up in Story telling)
+				i) NUMA misallignment 
+				j) CPU Bottlenck , High CPU utilization
+				k) OOM on GPU
+			How fif you fix each one of above issues 
+			What lesson you have learned and how you will prevent this 
+RunBook 2:- Throughput dropped
+	What you have observed 
+		Request Queeu increased
+		Session aware routing failed 
+RunBook 2:- Quality Dropped
+	What you have observed 
+		Accuracy droppeed on eval set
+		Halucination rate increased
+
+RunBook 4:- Add anything 
+
+
+Search & Recommendation
+	Retrival
+		Sparse
+			Inverted Index
+			TF-IDF
+			BM-25
+		Desnse-Vector
+			Bi-Encoder
+			Cross-Encoder
+		Index
+			KNN
+			ANN
+			IVF
+			HNSW
+		Similarity
+			Educledian distance 
+			Cosine
+			dot product
+	Ranking 
+	Recommendation
+		Collaborative filtering
+		Matrix factorization
+		Content based filtering
+		Two tower model(Duel Encoder)
+	Sharding
+	Graph
+		Fundamentals
+			Knowledge Graph
+			retrival
+
+		TigerGraph
+Inferencing
+	Rust Gateway 
+	vLLM
+	SgLang
+	TesnorRT-LLM In-Process
+	TensorRT-LLM Integrated with SG-Lang 
+Observability, Profiling, Troubleshooting and Benchmarking
+Linux System
+GPU and CUDA
+System Programming 
+Framework and tools
+	Apache Arrow 
+	TigerGraph
+	PyTorch
+	FIASS
+	ONNX
+
+
+Question	
+	Search 
+		SUmmary of Throughput, Latency, QPS , trasction numbers by heart 
+		Summarey of complete infra i.e. nodes, hardware configuration, K8 configuration, scale etc. by heart
+		How pinning with HBM and CPU works 
+		Explain how search really works in Fraud detection and Siri 
+		Explain how recommendation works in Siri 
+		Explain cold start problems 
+		How really zero copy multi stage siri looks like from top , how it boil down for gioverenance and collaboration and contribution
+		How can you leverage LLM for Recommendation. Walk through of complete recommendation cse in general and in context with Siri 
+		One full flow of srearch and recommendation using phases like candidate generation (Retrival, pre-ranking, Ranking , re-ranking)
+
+
+

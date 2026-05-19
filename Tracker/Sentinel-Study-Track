@@ -1,0 +1,353 @@
+System Engineering 
+	CPU
+		L1,L2,L3 Caches . Cahe lines and 64 bytes blocks .
+	numactl
+		numactl --cpunodebind=0 -membind=0 ./your_benchmarking_code
+	intel memory latency checker 
+		mlc --latency_matrix -e -r
+	per c2c record .your_binary 
+
+	Memory 
+		Virtual vs Physicl Memory (pages are mapped to frames )
+		Common libaries can be loaded in same location and can be accessed by miltiple programs - shared pages 
+	Areas 
+		CFS(Compute)
+			Threads Context Switching , and Scheduling 
+		TLB(Memory)
+			Pages, Page Table
+		Network	
+			NUMA(Non Uniform Memory Architecture)
+				Processor Affinity
+				CPU Pinning
+			RDMA	
+				RDMA Programming 
+			NCCL
+		Storage
+	Lock Free Programming 
+
+	Performance 
+		Metrics 
+			Utilization
+			Saturations
+			Errors 
+		Tools 
+			top,uptime,netstat,vmstat,free,iostat,mpstat,ps,tcpdump,ss,iotop,slabtop,pcstat,numastat,numactl
+		Packages
+			Flamegraphs,perf,wireshark,eBPF,Intel VTune Profiler, Intel Advisor,Intel Inspector,HeapTrack,Hotspot,Tracy,Valagrind
+		Tuning
+		Code Coverage
+
+	eBPF telemetry 
+
+
+==============================================================================================================
+
+LLM & Inferencing 
+
+LLM 
+	Building LLM fram scratch - MegaTran
+	Architecture and Training Process
+	
+
+LLM
+		Attension
+			Multi Head attention :- each head has its own Q-K-V
+			Multi Query attention :- This solve the problem of mult--heasd attention by keeping Sigle K-V and multiple Q
+			Grouped Query Attention :- Its a hybrid of multi-head and Multi-Query where we group K-V into fewer block rathn single K-V head 
+			
+			Paged Attention
+			Flash Attention
+	Serving 
+		Inference Optimizatiuons 
+			Reducing model size
+				Knowledge Distillation
+					Online
+					Offline
+					HuggingFace TRL
+				Pruning 
+					Strctured Pruning 
+						Depth based Pruning :- Remove Layer 
+						Width Based Pruning :- Remoe Neurons from each layer 
+
+						Magnitude based Pruning :- Prune weight with smaller values 
+						Activation based Pruning :- Remove smaller activation
+
+						AWQ :- Activation aware pruning 
+						Caluculation of importance 
+					Unstrctured Pruning 
+					Lottery hidden network 
+				Quantization
+		Scaling 
+			NVIDIA DYNAMO + Grove + vLLM/SGLANG	 
+
+		Batching
+			Continuous Batching
+
+Inferencing 
+	Prefill vs Decode
+	Continous Batching
+	Paged Attension
+	Grouped Query Attension
+	Distillation  
+	Pruning
+	KV Cache 
+	Kernel Fusion 
+
+
+	Runtime Framework 
+		Details and comparison of vLLM,SGLANG,TessorRT LLM 
+		Working of RequestIDs, Batch in prefill and kv-cache. How do we identify the request , how does runtime manages KV, which data strctures it might be using. Implement KV-Store from scratch .
+		Compare different batching techniques like statis, dynamic, continous, micro-batch 
+		Multi-model use cases with Cascasde (Early Exit), Ensamble (Voting), Sequential . How we can leverage DAG 
+
+		Prefix caching
+		Sliding Window Attention
+		Session stickeness techniques like hashing (Refer sentinel)
+	How "STEERING" works when we add additional information/question for the session and response already running 
+
+
+==============================================================================================================
+
+GPU and CUDA
+
+GPU
+	Generation
+		Tesla, Fermi, Kepler, VOLTA(2017), Ampere, Hopper, Blackwell(2024)
+
+	Architecture
+		Physical Architecture
+			L1,L2, SM , DRAM (HBM)
+		Shared Memory 
+		Logical Architecture
+			L1/L2/Tensor cores/SM/Block/Warp/Partitions/Core/
+		Memory Hirarchy 
+			L1/L2/SRAM/Shared/Global
+
+	Occupancy 
+		Formula = warp used in a kernel/max warp per kernel 
+		Formula = threads used per SM / Max Threads per SM 
+		Theortotical vs Achived occupancy
+
+CUDA
+	Fundamentals 
+	Vector Ops
+	2D Indexing 
+	Reduction
+	MatMul
+	Tensor
+	stride
+	GEMM , Shared Memory Tiling
+	CUDA Graphs
+	Coalesced vs scattered access
+	CUDA Streams
+	waves
+	Libraries
+		Thrust
+		cuBLAS
+		cuTLAS
+	Profiling 
+		Tools
+			Runtime API (cudaDeviceProp), 
+			Error Checking API :- cudaError, cudaEvent 
+			Nvidia-SMI
+			cuda-memcheck :- Memory error 
+			cuda-gdb
+			Nvidia Nsight
+				Always do nvsys first for high level picture and then nvc for individual kernel
+				System :- For developer to do sysytem wise analysis 
+					nvsys
+				Compute :- Profiles individual kernel
+					nvc command . 
+					Sections and metrics :- Figure out importanant section and metrics .
+					Sections
+						SpeedOfLight : Is this kernel compute‑bound or memory‑bound?
+						MemoryWorkloadAnalysis :- Where is the memory bottleneck?
+						ComputeWorkloadAnalysis :- Which compute pipelines are busy?
+						Occupancy + LaunchStats — "Am I using the SM efficiently?"
+						SchedulerStats + WarpStateStats — "Why are warps stalled?"
+						SpeedOfLight_RooflineChart — "Where does this kernel sit on the roofline?"
+
+
+					Metrics
+					Example Command
+
+					ncu -o triage \
+					    -k regex:"<kernel_pattern>" \
+					    -c 5 \
+					    --section SpeedOfLight \
+					    --section LaunchStats \
+					    --section Occupancy \
+					    <your_app>
+
+
+
+				Graphics :- Its more for graphics application
+
+
+
+		Roofline analysis
+		Warp divergance
+
+		PyTorch Profiler 
+	Tools 
+		NVIDIA NSIGHT
+		NVIDIA-SMI
+		NCU
+
+
+
+Triton
+
+
+TPU
+	XLA + HLO / StableHLO
+	JAX Pallas 
+
+identifyig and fixing kernel issues where there are multiple kernels from Triton, pytorch, cuBlass, cuda graphs, Thrust
+
+
+Troubleshooting Guide 
+
+
+==============================================================================================================
+Programming
+
+CPP
+	RAAI
+		Standard practise of aquiring resources in constructir, using desctor and stand c++ unique poters, file etc.
+	Pointers and Smart Pointers
+	Template
+		Generic pattern , it creats respective function at runtime 
+		same_as for type checking 
+	ZERO data copy 
+	Memory Arena
+	NUMA based programming (https://www.youtube.com/watch?v=f0ZKBusa4CI)
+	Threading & Processes 
+		Unlike thread each Processes has its own memory whereas therads operates in the same memory 
+		pthreads are c style threads, we should not be using it instaed we should use std:thread which RAAI safe .
+
+	
+	Plugin and Libraries
+	FileIO
+	SIMD vectorization and CUGEMM libraries Smart Pointers, RAII, Futures, Template
+	OOPS
+	MPI(Extra)
+	Macro
+
+	How do you write the C++ program to take advantage of SIMD, NUMA , CFS , MemoryArena , Zero Copy , L1/L2/L3 cache 
+
+Python
+	Python essential concepts 
+	PyTorch
+		Eager/ torch.compile
+		Triton
+RUST
+	Socket Programming 
+	Proxy, Routing and Load Balancing
+	Memory Arena
+	FileIO
+	Owenership and borrowing
+	shadowing 
+	loop label, while , for 
+	Struct / Enum 
+	Error handling / Option / Result 
+	Dynamic Dispatch
+	Iterator
+	Smart Pointers
+	Frameworks
+		Takio
+		Axum
+	MPSC channels
+	ThreadPool
+
+Zero Copy 
+		POSIX shm_open, mmap, and memory-mapped files
+		Rust (memmap2 or raw mmap)
+		Python (multiprocessing.shared_memory)
+	Serialization/deSearlization
+		Protopub, Flatbuffer
+	Fast Network
+		io_uring, AF_XDP, DPDK, netmap, RDMA.
+	Apsche Arrow 
+
+==============================================================================================================
+Kubernetes & SLURM
+
+Virtualizations
+Containers
+MiniOS
+Networking
+	Protocals 
+	RDMA
+	NCCL 
+	Switches 
+
+Cloud and On-Prem 
+	AWS
+	GCP 
+	On-Prem
+		NVIDIA DGX
+		NVIDIA DPU 
+NVIDIA GROVE
+==============================================================================================================
+General ML and LLM 
+	Observability
+		Input Drift
+		Concept Drift
+	PCA
+	Feature ENgineering 
+
+
+==============================================================================================================
+Training 
+
+Training 
+	DDP; gradient all-reduce timing
+	FSDP / ZeRO (optimizer/grad/param sharding)
+	Tensor parallel (intra-node, bandwidth heavy)
+	Pipeline parallel (inter-node, bubble/latency tradeoffs)
+	
+Federeated Leaerning
+
+On-Device inference 
+
+
+==============================================================================================================
+Data Engineering 
+	Databases
+		Cassandra
+	File System 
+		Apache Arrow
+	Data Processing 
+		Spark
+		Flink
+	Messaging
+		Kafka 
+
+	
+===============================================================================================================
+
+Resume Building 
+	Resume 
+		Fiserv
+			Loan decesioning Agent with Sentinel Architecture( Mostly Helios )
+		CapitalOne
+			Fraud detection Platform, Nvidia Dynamo like serving  , Sentinel architecture(Helios + Melein). Optimized CUDA.
+		Apple
+			Siri ASR+TTS+Search together with optimized CUDA kernels 
+		Broadcom
+			WSS+DLP+CASB based AI infra , fast coordination beween models with ZERO data copy if possible
+		IBM
+			IBM Big Insight use case , BigSQL part .
+		HP
+			SOftware engineer with Java , Data engineer with ETL with MS SQL server 
+	LinkedIn
+	YouTube Videos 
+	Articles 
+
+STAR
+
+==============================================================================================================
+Benchmarking 
+
+

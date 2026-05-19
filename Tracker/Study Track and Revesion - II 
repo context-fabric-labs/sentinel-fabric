@@ -1,0 +1,207 @@
+System Engineering 
+	Platform and Infra
+		Host level settings 
+			CPU Isolation 
+			HugePage configuration 
+			Kernel Tuning 
+			IRQ Affinity for NIC interupt 
+			Prrempt_RT for ultra low latency 
+			NUMA pinning 
+		Kubernetes 
+			CPU Manager
+				KubeletConfiguration
+				POD spec with appropriate NUMA config for low latency 
+			Topology Manager Policies
+			Memory Manager 
+				Increae Shared Memory
+				IPC  Namespace Consideration
+				Huge Pages
+			Pod Disruption & Preemption Control
+			DevicePlugins
+			Volume configuration
+		Networking
+			Host side network configuration
+				Kernel network tuning 
+				NIC Ring Buffer and Multi-Queue configuration
+				DPDK
+			K8 side configuration
+				CNI
+					Calico
+					Cilium(eBPF)
+					SR-IOV
+						 Virtual Function (VF) , Direct NIC access
+				 RDMA
+				 	Direct access with SR-IOV
+	 	GPU
+	 		Device Plugins 
+	 		MIG, Time slice
+	 		GPU Direct Storage 
+	 		
+ 		Storage
+ 			NVME
+	
+	Performance Troubleshooting &  Profiling
+		Performance Troubleshooting
+			USE methods(Usage Standardidation Saturation) for Infra
+			RED methods ((Throughput))
+			On-CPU vs Off-CPU analysis
+			Tools
+				CPU
+					top/htop
+					uptime
+					mpstat
+					pidstat
+					ps
+				Memory
+					free
+					vstat
+					slabtop
+					pcstat
+				NUMA
+					numastat
+					numactl
+				Storage
+					iostat
+					iotop
+				Network
+					ss
+					netstat
+					tcpdump
+		Profiling
+			CPU
+				perf
+				Intel vTune 
+				Intel Inspector
+				Tracy 
+			GPU
+				NsIght System
+				Nsight Compute 
+			Memory
+				valagrind
+				heaptrack
+				tcmalloc(For Production)
+			Network
+				Wireshark
+			PyTorch Profiler 
+	
+	Benchmarking
+	 	Compute
+	 		HPL
+	 		HPCG
+	 		STREAM
+	 		Intel MLC
+	 	Network
+	 		iperf3
+	 		NCCL Tests
+	 	Storage
+	 		FIO
+	 		IOR
+	 	GPU
+	 		gpu-burn
+	 		DCGM diag
+	 		cuBLAS bench
+	 		MLPerf
+===================================================================================================	 		
+
+Inferencing 
+	LLM
+		Transformer Architecture 
+			Prefill - Decode Phase
+		Quantization
+		Optimization Techniques
+			Continous Batching
+			Dynamic Batching
+			Paged Attenion
+			Flashed Attenion 
+			Grouped Query Attension
+			Distillation  
+			Pruning
+			KV Cache 
+			Kernel Fusion
+			Prefix and Prompt caching
+			Sliding Window Attention
+		Advanced Optimization
+			Sepearte Prefill and Decode Phase
+			Spcculative Decoding
+			Canceling
+			Premption
+
+		LLM Runtimes 
+			vLLM
+			TensorRT-LLM
+			SGLang
+		Paraleeism 
+			Tensor
+			Data
+			Model 
+	Classic
+		Feature Enginereing
+		Observability
+		Multi-Model Patterns
+			Cascade
+			Ensemble
+			Sequential
+
+
+===================================================================================================
+System Programming
+		CPP
+			Memory Optimization 
+				NUMA Optimization 
+				Memory allocation
+				SIMD
+			Concurrency and ralallesism
+				Threads and Thread Pools
+				Lock Free Queue- SPSC
+			Zero-Copy Architecure 
+				Apache Arrow Integration
+				Seralizationa dn compression
+				RDMA
+		RUST
+			Consistent Hashing
+			Proxy, Routing and Load Balancing
+			Circuit Breakers
+===================================================================================================
+
+GPU & CUDA
+	GPU
+	CUDA
+		Kernels 
+			1-D
+			2-D
+			Reductions
+			GEMM
+		
+		Atomics
+		Warp premetives
+		Coalesced vs scattered access
+		Memeory 
+			Shared Memory 
+				Tiling
+				Bank Conflicts
+			Host-Drvice Transfer 
+				Pageble
+				Pinned
+				Mapped Zero-Copy 
+				Unified Memory 
+		Occupancy
+			Stall Categories
+		CUDA Streams
+		waves
+		Multi-Gpu operation
+		CUDA Graphs
+		Kernel fusion
+		Libraries
+			Thrust
+			cuBLAS
+			cuTLAS
+	Triton
+
+	Questions 
+		a) What kind of profiling you have done, what were the results, how did you analyze it,  and how do you optimize it 
+===================================================================================================
+
+Programming 
+	C++
+	RUST
+	Python

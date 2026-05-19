@@ -58,7 +58,7 @@ Kernel duration:   1.2 ms   ← this is the bottleneck
 		○ Attention kernel is O(T²) — you recognized this from the profile
 		○ Prefill is compute-bound — SOL confirmed it
 		○ The fix is system-level (prompt design, chunked prefill, caching), not kernel rewriting
-		
+--------------------------------------------------------------------------------------------------------------------
 Task 2: "Decode throughput dropped 40% after enabling CUDA Graphs"
 Context
 You enabled CUDA Graphs in vLLM for decode acceleration (--enforce-eager=false, which is default). But throughput actually dropped.
