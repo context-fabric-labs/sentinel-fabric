@@ -3049,654 +3049,466 @@ With Lustre/GPFS (cold, no local cache):
 
 ---
 
-# TROUBLESHOOTING RUNBOOKS — LAYERED INVESTIGATION METHOD
+# TROUBLESHOOTING RUNBOOKS — STAR-FORMATTED PRODUCTION INCIDENTS
 
-> **Method:** Every incident starts with an observable symptom at the APPLICATION layer (Layer 7). We work DOWNWARD through the 7-layer stack, forming and testing hypotheses at each layer. At each step we **ACCEPT** (this layer contributes to the problem) or **REJECT** (evidence rules this layer out). Only after isolating the correct layer(s) do we drill into the specific root cause.
-
-```
-INVESTIGATION FLOW:
-┌─────────────────────────────────────────────────────────────────┐
-│  Layer 7: APPLICATION — Is the symptom in business logic?        │
-│  → Check: request patterns, feature flags, config changes       │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 6: MODEL SERVING — Is the model runtime misbehaving?      │
-│  → Check: per-model latency, batch efficiency, cache metrics    │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 5: DATA MOVEMENT — Are copies/serialization slow?         │
-│  → Check: H2D times, arena utilization, ring buffer metrics     │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 4: GPU & ACCELERATOR — Is the GPU underperforming?        │
-│  → Check: nsys timeline, SM util, kernel launch pattern         │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 3: PLATFORM — Is K8s/cgroups/scheduling wrong?            │
-│  → Check: CPU throttling, QoS, topology manager, pod placement  │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 2: NETWORKING — Is the network path degraded?             │
-│  → Check: retransmits, NCCL transport, NIC errors, CNI          │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 1: LINUX/HOST — Is the host misbehaving?                  │
-│  → Check: NUMA placement, TLB misses, context switches, thermals│
-└─────────────────────────────────────────────────────────────────┘
-```
+> **Format:** Each runbook is a top-level *observable symptom* (what pager shows). Under each: what was observed → tools used for diagnosis → root causes discovered → how each was fixed → lessons & prevention. Designed as interview talking points — pick 1–2 root causes per story for a focused STAR narrative.
 
 ---
 
-## RunBook 1: "P99 Latency Spiked After Model Update"
+## RunBook 1: High Latency Incidents — "System Experiencing Slowness"
 
-> **Context:** CapitalOne fraud scoring. SLA = 5ms. P99 jumped from 3.8ms to 7.2ms immediately after model v3.3 deployment. No code changes — only model weights updated.
+> **Story Context:** CapitalOne fraud scoring (5ms SLA), Apple Siri pipeline (300ms SLA), Fiserv LLM orchestration (2.3s SLA)
+
+### What We Observed (Alerts That Fired)
+
+| Alert | Metric Value | Normal Baseline | Story |
+|-------|-------------|-----------------|-------|
+| P99 latency breached SLA | 7.2ms (CapitalOne), 420ms (Siri), 450ms TTFT (Fiserv) | 3.8ms, 280ms, 95ms | Runbook 5, 6, 7 |
+| TTFT spiked after model update | 190ms (was 45ms) | <50ms | CUDA Task 1 |
+| GPU utilization *dropped* despite high load | 18% SM util under 10K req/sec | 72% expected | CUDA Story 2 |
+| CPU utilization spiked to 92% | 92% (but not from useful work) | 35% | Runbook 8 |
+| Per-stage transition time spiked | Search→Orch: 45ms (was 5ms) | <10ms | Runbook 6 |
 
 ---
 
-### Layer 7 — APPLICATION & BUSINESS LOGIC
+### Root Cause A: CUDA Graph Invalidation (Silent Fallback to Eager)
 
-**Hypothesis:** "Did the request pattern change? Is a new feature flag sending more complex transactions?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Check request volume and feature distribution
-grep "request_features" /var/log/fraud-scoring/metrics.log | tail -100
-# Req/sec: 24,500 (same as before deployment)
-# Feature dimensions: 112 → 120 (model v3.3 added merchant-embedding)
-# No new feature flag enabled. Traffic pattern identical.
-
-# Check if latency correlates with specific transaction types
-curl -s localhost:9090/api/v1/query?query=fraud_p99_by_merchant_category
-# ALL categories affected equally — not a traffic pattern issue
-```
-
-**Verdict: ❌ REJECT** — Request volume, feature distribution, and traffic patterns are unchanged. The spike correlates exactly with the model deployment timestamp, not any application-level change. Move DOWN.
-
----
-
-### Layer 6 — MODEL SERVING & INFERENCE
-
-**Hypothesis:** "Is the new model v3.3 itself slower? Different architecture or more parameters?"
-
-**Investigation:**
-```bash
-# Per-model timing breakdown
-grep "model_inference_ms" metrics.log | awk '{print $3}' | sort -n | tail -5
-# XGBoost: 0.8ms (same)
-# ONNX transformer: 2.1ms (same)
-# FAISS lookup: 0.3ms (same)
-# Total model time: 3.2ms (SAME AS BEFORE!)
-
-# But end-to-end is 7.2ms — where's the extra 4ms?
-grep "stage_timing" metrics.log
-# pre_process:      0.2ms
-# model_inference:  3.2ms  ← Model itself is fine
-# OVERHEAD:         4.0ms  ← Something OUTSIDE model inference!
-```
-
-**Verdict: ❌ REJECT** — The model's own inference time (3.2ms) is unchanged. The 4ms overhead is NOT inside any model forward pass. The model serving layer is healthy. The extra latency is in the execution scaffolding around the model. Move DOWN.
-
----
-
-### Layer 5 — DATA MOVEMENT & ZERO-COPY
-
-**Hypothesis:** "Did the model update change the data pipeline? New feature dimensions could affect copy sizes."
-
-**Investigation:**
-```bash
-# Feature block size changed?
-grep "feature_block_bytes" metrics.log
-# v3.2: 56KB per request
-# v3.3: 72KB per request (new merchant-embedding: +16KB)
-
-# Arena overflow?
-grep "arena_overflow" metrics.log
-# arena_overflow: request_size=72KB > slab_capacity=64KB  ← HIT!
-# Fallback to malloc: 847 times in last minute
-
-# But malloc is only ~5µs... doesn't explain 4ms gap
-# Check H2D transfer time (GPU input)
-grep "h2d_transfer_us" metrics.log
-# v3.2: avg 45µs
-# v3.3: avg 52µs (slightly bigger features, but negligible)
-```
-
-**Verdict: ⚠️ PARTIAL** — Arena overflow exists (slab too small for 72KB features) but the malloc fallback only adds ~5µs, not 4ms. Note this for a secondary fix, but it's NOT the primary latency source. Move DOWN.
-
----
-
-### Layer 4 — GPU & ACCELERATOR
-
-**Hypothesis:** "Is the GPU execution itself different? New model might have changed the kernel launch pattern."
-
-**Investigation:**
-```bash
-# Nsight Systems timeline: capture under load
+# 1. Nsight Systems — timeline shows individual kernel launches instead of graph replay
 nsys profile --trace=cuda,osrt,nvtx --cuda-graph-trace=node -o post-update ./fraud-scoring
 
-# Compare kernel launch pattern
+# 2. Stats report confirms graph not being used
 nsys stats post-update.nsys-rep --report cuda_api_sum | grep -i "launch\|graph"
-# cudaLaunchKernel:  count=47  avg=3.2µs  ← Individual launches!
-# cudaGraphLaunch:   count=0               ← GRAPH NOT USED!
+# cudaLaunchKernel: count=47   ← Back to eager!
+# cudaGraphLaunch:  count=0    ← Graph NOT used!
 
-# Compare with pre-update baseline
-nsys stats pre-update.nsys-rep --report cuda_api_sum | grep -i "launch\|graph"
-# cudaLaunchKernel:  count=0               ← No individual launches
-# cudaGraphLaunch:   count=1   avg=5µs     ← GRAPH ACTIVE!
-
-# Check CUDA Graph status in application metrics
-grep "cuda_graph_hit_rate" metrics.log
-# cuda_graph_hit_rate: 0.00  ← ZERO! Graph completely inactive!
+# 3. Application metrics (custom)
+grep "cuda_graph_hit_rate" /var/log/metrics.log  # Should be 99%+, was 0%
 ```
 
-**Verdict: ✅ ACCEPT — ROOT CAUSE ISOLATED** — The CUDA Graph pre-captured for v3.2 (45 kernels) doesn't match v3.3's kernel layout (47 kernels — 2 extra tree layers). Shape validation fails silently, falling back to eager execution. Each kernel launch costs 3.2µs × 47 kernels = 150µs dispatch overhead (vs 5µs with graph replay). Combined with per-kernel synchronization: **4ms total overhead matches exactly.**
+**What We Found:** New model v3.3 added 2 extra tree layers (45→47 kernels). Pre-captured CUDA Graph was compiled for 45 kernels. Shape validation failed silently → fell back to eager execution → 30× more launch overhead (150µs vs 5µs).
 
----
-
-### Root Cause Deep Dive: CUDA Graph Invalidation (Silent Fallback to Eager)
-
-**Why Silent?** CUDA's `cudaGraphExecUpdate()` returns `cudaGraphExecUpdateError` and the runtime falls back to `cudaLaunchKernel` — no error, no log, no alert. The system "works" but 30× slower on dispatch.
-
-**Fix:**
+**How We Fixed It:**
 ```cpp
-// 1. Make invalidation LOUD — alert immediately
+// 1. Made graph invalidation LOUD (alert + metric, never silent)
 if (!validate_graph_shape(model)) {
-    LOG_WARN("CUDA Graph shape mismatch — recapturing for v{}", model.version);
+    LOG_WARN("CUDA Graph shape mismatch — recapturing");
     recapture_graph(model, &graph_exec);
-    emit_metric("cuda_graph.recapture", 1);  // PagerDuty if this fires in prod
+    emit_metric("cuda_graph.recapture", 1);  // Alerts on this
 }
 
-// 2. Recapture during blue-green warmup BEFORE traffic switch
+// 2. Recapture graphs during blue-green warmup BEFORE traffic switch
 void blue_green_warmup(Model& new_model, ScoringBuffers& buf) {
     for (int bs : {1, 4, 8, 12, 16}) {
         capture_scoring_graph(buf, new_model, bs);
     }
-    assert(validate_graph_output(buf, new_model));  // Validate BEFORE serving
+    assert(validate_graph_output(buf, new_model));
 }
 ```
 
-**Secondary Fix (Layer 5):** Resize arena slabs for v3.3 schema:
-```cpp
-size_t slab = next_power_of_two(schema.total_feature_bytes() + 4096);  // 128KB
-```
+**Lesson:** CUDA Graph invalidation has zero error logs by default — 30× latency regression with silent fallback. Always instrument graph-hit vs eager-fallback as a Prometheus counter.
 
-**Prevention:**
-- CI test: load new model → capture graph → replay → assert shape match
-- Graph-hit vs eager-fallback as a Prometheus counter (alert on any eager)
-- Feature schema change → automatic arena capacity validation
-
-**Outcome:** P99 returned to 3.8ms immediately after graph recapture. Arena fix was secondary (5µs) but prevented future issues.
+**Prevention:** Automated CI test that loads new model → captures graph → replays → asserts shape match. Fails pipeline before production.
 
 ---
 
-### Interview Delivery (2 min)
+### Root Cause B: NUMA Misalignment (Cross-Socket Memory Access)
 
-> **S:** "CapitalOne fraud scoring, 24,500 TPS, 5ms SLA. P99 jumped to 7.2ms immediately after model v3.3 deployed."
->
-> **T:** "I owned the diagnosis. No code change — only model weights updated. I needed to isolate whether this was an app-level, model, data, or GPU issue."
->
-> **A:** "I walked down the stack. Application layer — request patterns unchanged, REJECT. Model serving layer — per-model inference time identical at 3.2ms, REJECT. Data movement — arena overflow existed but only 5µs impact, PARTIAL. GPU layer — Nsight Systems showed cudaGraphLaunch count=0, cudaLaunchKernel count=47. The pre-captured CUDA Graph was compiled for 45 kernels but v3.3 added 2 tree layers. Shape validation failed silently — fell back to eager with 30× dispatch overhead."
->
-> **R:** "Graph recapture fixed it instantly. Added CI test: every model update must validate graph shape. Added Prometheus counter for eager-fallback — now we detect this in seconds, not from SLA alerts."
-
----
-
-## RunBook 2: "Throughput Gradually Decaying Over 48 Hours"
-
-> **Context:** Fiserv LLM orchestration cluster. 4×H100 per node, vLLM serving 70B model. Throughput dropped from 850 tok/s to 510 tok/s over two days. No deployment. No traffic change.
-
----
-
-### Layer 7 — APPLICATION & BUSINESS LOGIC
-
-**Hypothesis:** "Did request patterns change? Longer prompts? Different use case mix?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Check prompt length distribution over 48h
-curl localhost:9090/api/v1/query_range?query=avg(prompt_tokens)&start=-48h
-# Day 0: avg 320 tokens
-# Day 1: avg 335 tokens
-# Day 2: avg 340 tokens  ← Slight increase but not enough to explain 40% drop
+# 1. Check NUMA topology
+numactl --hardware                   # Node layout
+lstopo-no-graphics                   # CPU → NUMA → PCIe → GPU → NIC mapping
 
-# Check concurrent sessions
-curl localhost:9090/api/v1/query?query=active_sessions
-# Day 0: 45 concurrent
-# Day 1: 42 concurrent
-# Day 2: 38 concurrent  ← Declining (because throughput is lower, not cause)
+# 2. Check process NUMA distribution
+numastat -p $(pgrep inference)       # Per-node allocation — look for "other_node"
+
+# 3. GPU-to-NIC NUMA relationship
+nvidia-smi topo -m                   # GPU2 on different NUMA from mlx5_0!
+
+# 4. AllReduce timing (multi-GPU)
+nsys profile --trace=cuda,nvtx,nccl --gpu-metrics-device=all -o tp4-drift ./vllm-serve
+# Timeline shows GPU #2 completing AllReduce 3ms after others
 ```
 
-**Verdict: ❌ REJECT** — Prompt length increased marginally (6%), but that doesn't explain a 40% throughput drop. Session count is declining as a CONSEQUENCE (queuing causes timeouts). Not an application-layer issue. Move DOWN.
+**What We Found:** After a kernel update, NVIDIA driver re-enumerated GPUs. NCCL ring order changed. GPU #2 now cross-NUMA for AllReduce traffic. Added ~3ms per collective × 80 layers × 2 collectives = straggler bottleneck slowing all GPUs.
+
+**How We Fixed It:**
+```bash
+# Pin CUDA device order explicitly
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+
+# Force NCCL topology
+export NCCL_TOPO_FILE=/etc/nccl/h100_4gpu_topo.xml
+
+# Pin to correct NUMA node
+numactl --cpunodebind=0 --membind=0 vllm serve ... --tensor-parallel-size 4
+
+# Long-term: TP=2 (NVLink pair) + PP=2 to avoid cross-NUMA AllReduce
+```
+
+**Lesson:** GPU topology is NOT static. Driver updates, BIOS changes, and kernel upgrades re-enumerate devices. Always verify NUMA alignment after any system-level change.
+
+**Prevention:** Topology pinning in infrastructure-as-code (Terraform/Ansible). On any hardware change, validate topology before admitting node to serving pool.
 
 ---
 
-### Layer 6 — MODEL SERVING & INFERENCE
+### Root Cause C: Prefill/Decode Interference (GPU Monopolization)
 
-**Hypothesis:** "Is the model serving runtime degrading? KV cache, scheduler, batching behavior?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# vLLM internal metrics
-curl localhost:8000/metrics | grep -E "cache|preempt|running|waiting"
-# vllm:gpu_cache_usage_perc       0.94   ← VERY HIGH (was 0.65 on Day 0)
-# vllm:num_preemptions_total      7,842  ← MASSIVE (was <50 on Day 0)
-# vllm:num_requests_running       28     ← LOW (capacity is 50+)
-# vllm:num_requests_waiting       12     ← QUEUING!
+# 1. nsys timeline capture during P99 spike
+nsys profile --trace=cuda,nvtx --duration=60 -o llm-jitter ./vllm-serve
 
-# GPU memory check (does the HW have room?)
-nvidia-smi -q -d MEMORY
-# Total: 80GB, Used: 72GB, Free: 8GB
-# But KV allocator says 94% full — where's the discrepancy?
+# Timeline reveals:
+# Normal:  |--decode (12ms)--|--decode (12ms)--|
+# Spike:   |--decode (12ms)--|--PREFILL (85ms)---|--decode (12ms)--|
+#                             ↑ 4096-token prefill blocks ALL decodes
 
-# Block fragmentation
-curl http://localhost:8000/debug/block_stats
-# total_blocks: 32768
-# allocated_blocks: 30,800 (94%)
-# blocks_in_long_sessions: 18,200 (59% of allocated!)
-# largest_contiguous_free: 128 blocks  ← FRAGMENTED
+# 2. Confirm with kernel duration
+nsys stats llm-jitter.nsys-rep --report cuda_gpu_kern_sum
+# flash_attn_fwd (prefill, T=4096): 82ms  ← This is the blocker
 ```
 
-**Verdict: ✅ ACCEPT — ROOT CAUSE LAYER IDENTIFIED** — The model serving layer's KV cache allocator is fragmented. Long-lived compliance-checking sessions (10+ turns, hours-long) hold scattered 16-token blocks. Short-burst requests can't find contiguous free regions despite physical memory being available. Preemptions (7,842!) indicate constant eviction/reallocation → throughput waste.
+**What We Found:** vLLM's default scheduler allows large prefill operations to execute on same GPU as active decode. A single 4096-token prefill takes 82ms during which ALL in-flight decodes are stalled. TPOT P99 = 180ms (SLA: 50ms).
 
----
-
-### Verification: Confirming It's NOT Lower Layers
-
-Before accepting Layer 6 definitively, quickly verify layers below aren't contributing:
-
+**How We Fixed It:**
 ```bash
-# Layer 4 — GPU healthy?
-nvidia-smi -q -d PERFORMANCE
-# GPU clock: 2100 MHz (max boost — not throttling)
-# SM utilization during active inference: 78% (healthy when running)
-
-# Layer 3 — K8s not throttling?
-kubectl top pod vllm-worker-0
-# CPU: 2.1/8 cores (well within limits, no throttle)
-cat /sys/fs/cgroup/cpu.stat | grep throttled
-# nr_throttled: 0
-
-# Layer 1 — Host OK?
-numastat -p $(pgrep vllm)
-# All allocations on local NUMA node (correct)
-```
-
-**Lower layers healthy — problem confirmed at Layer 6 (model serving runtime).**
-
----
-
-### Root Cause Deep Dive: KV Cache Fragmentation (PagedAttention)
-
-**Why Gradual?** PagedAttention uses 16-token blocks, allocated on demand. Long-lived sessions accumulate scattered blocks over hours. As blocks fragment:
-- New requests need contiguous blocks → can't find them
-- Allocator reports "94% full" despite physical memory available
-- Scheduler preempts (evicts) existing requests to reclaim blocks
-- Preempted requests must recompute KV → wasted GPU cycles
-- Net throughput drops as useful-compute-ratio decreases
-
-**Timeline of decay:**
-```
-Hour 0:  Blocks contiguous. 50 concurrent. 850 tok/s.
-Hour 8:  10 long sessions hold scattered blocks. 48 concurrent. 800 tok/s.
-Hour 24: 25 long sessions. External fragmentation 30%. Preemptions start. 680 tok/s.
-Hour 48: Fragmentation 60%. Preemptions 130/min. Only 28 concurrent. 510 tok/s.
-```
-
-**Fix:**
-```bash
-# Immediate: rolling restart (clears fragmentation, resets allocator)
-kubectl rollout restart deployment/vllm-worker
-
-# Better: prefix caching + recompute-based preemption
+# Chunked prefill: break large prefills into 512-token chunks
 vllm serve meta-llama/Llama-3.1-70B \
-  --enable-prefix-caching \
-  --preemption-mode recompute
+  --enable-chunked-prefill \
+  --max-num-batched-tokens 512
 
-# Best: session-TTL eviction + defragmentation
-# Evict sessions idle >5 minutes (release their scattered blocks)
-# Track fragmentation_ratio as operational metric
+# Result: 4096-token prefill → 8 chunks of 10ms each
+# Decode can interleave between chunks → TPOT P99: 45ms (within SLA)
 ```
 
-**Prevention:**
-- `preemptions_per_minute` as a RATE alert (not absolute threshold)
-- Dashboard: fragmentation_ratio = allocated_blocks / usable_blocks
-- Rolling restart schedule every 12h (until proper defrag implemented)
-- Long-session isolation: route compliance sessions to dedicated pool
+**Lesson:** GPU can only run one thing at a time on an SM. Prefill monopolizes compute. Chunked prefill should be DEFAULT ON for any production deployment with latency SLAs.
 
-**Outcome:** Rolling restart recovered throughput immediately (850 tok/s). Prefix caching + 5-min idle eviction provided long-term stability.
+**Prevention:** Always deploy with `--enable-chunked-prefill`. The 10% throughput cost is worth the 4× P99 improvement.
 
 ---
 
-### Interview Delivery (2 min)
+### Root Cause D: H2D Transfer Regression (Pageable Memory Fallback)
 
-> **S:** "Fiserv 70B LLM cluster, 4×H100 per node. Throughput decayed from 850 to 510 tok/s over 48 hours. No deployment, no traffic change."
->
-> **T:** "I needed to find why a stable system degraded gradually with no obvious trigger."
->
-> **A:** "I started at the application layer — prompt lengths barely changed, REJECT. Model serving layer — vLLM metrics showed KV cache at 94% with 7,842 preemptions. But nvidia-smi showed 8GB physically free! The block allocator was FRAGMENTED — long-lived compliance sessions held scattered 16-token blocks. New requests couldn't find contiguous regions. I verified GPU wasn't throttling, K8s wasn't throttling, NUMA was correct — all lower layers healthy."
->
-> **R:** "Rolling restart recovered immediately. Long-term fix: prefix caching, 5-minute idle-session eviction, and a fragmentation_ratio dashboard. Key lesson: gradual degradation is harder to catch than cliff failures — you need rate-of-change alerts, not just threshold alerts."
-
----
-
-## RunBook 3: "Multi-GPU Deployment Not Delivering Expected Speedup"
-
-> **Context:** Fiserv deploying 70B model with TP=4 on 4×H100. Expected ~45 tok/s. Getting only 25 tok/s (2.1× speedup instead of ~3.5×). One GPU consistently slower.
-
----
-
-### Layer 7 — APPLICATION & BUSINESS LOGIC
-
-**Hypothesis:** "Is the workload distribution uneven? Are some requests harder?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# All requests go through same serving endpoint — no request-level GPU routing
-# Throughput is uniformly slow across ALL requests, not just some
-curl localhost:8000/metrics | grep request_latency
-# p50: 85ms, p99: 140ms — consistently slow (not bimodal)
+# 1. nsys transfer analysis
+nsys stats trace.nsys-rep --report cuda_gpu_mem_time_sum
+# [CUDA memcpy HtoD]: avg=485µs   ← Was ~250µs! Doubled!
+
+# 2. Check for pinned vs pageable (look for staging copies in timeline)
+# nsys timeline shows "[CUDA memcpy HtoD]" with internal staging annotation
+
+# 3. Verify pinned memory status
+cat /proc/meminfo | grep Mlocked
 ```
 
-**Verdict: ❌ REJECT** — Uniform degradation across all requests. Not a workload distribution issue. Move DOWN.
+**What We Found:** vLLM upgrade (0.4.x → 0.5.x) changed tokenizer output buffer from `pin_memory()` to standard pageable tensor. CUDA driver must now stage through internal pinned buffer before DMA → doubles H2D time for all prompts.
+
+**How We Fixed It:**
+```python
+# Pin tokenizer output buffers explicitly
+class PinnedTokenizerWrapper:
+    def __init__(self, tokenizer, max_seq_len=8192):
+        self.pinned_buffer = torch.empty(max_seq_len, dtype=torch.long).pin_memory()
+
+    def encode(self, text):
+        tokens = self.tokenizer.encode(text)
+        self.pinned_buffer[:len(tokens)].copy_(torch.tensor(tokens))
+        return self.pinned_buffer[:len(tokens)]  # Already pinned → fast DMA
+```
+
+**Lesson:** Framework upgrades break pinned memory assumptions silently. A `pin_memory()` call removed in a refactor has no functional test failure but causes 2× latency.
+
+**Prevention:** After any framework upgrade, validate H2D transfer times in staging. Add regression test: `assert avg_h2d_time < 1.2 * baseline`.
 
 ---
 
-### Layer 6 — MODEL SERVING & INFERENCE
+### Root Cause E: Shared Memory Arena Fragmentation (Siri Pipeline)
 
-**Hypothesis:** "Is the model runtime misconfigured? Wrong TP degree, bad scheduling?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Verify TP configuration
-curl localhost:8000/metrics | grep gpu
-# All 4 GPUs active, tensor-parallel-size=4 confirmed
-# No preemptions, no queuing — scheduler is fine
+# 1. Check shared memory utilization
+cat /proc/<pid>/smaps | grep -A4 "/dev/shm/siri_session"
 
-# Per-GPU timing
-nsys profile --trace=cuda,nvtx,nccl --gpu-metrics-device=all -o tp4 ./vllm-serve
-# GPU 0: layer_forward avg 8.2ms
-# GPU 1: layer_forward avg 8.0ms
-# GPU 2: layer_forward avg 11.3ms  ← 3ms SLOWER!
-# GPU 3: layer_forward avg 8.1ms
-# AllReduce: GPU 2 finishes last EVERY TIME → others wait
+# 2. Arena fragmentation metrics
+grep "arena_compaction\|arena_alloc_fail" /var/log/siri/pipeline.log
 
-# What's different about GPU 2's compute? Same kernels, same data...
-ncu --set full --target-processes all --kernel-name "gemm" ./vllm-serve
-# GPU 0-1-3: GEMM throughput 78% of peak
-# GPU 2: GEMM throughput 77% of peak  ← Compute is FINE!
+# 3. Verify stage transition time
+# Custom metric: stage_transition_time_ms{from="search", to="orchestration"}
 ```
 
-**Verdict: ⚠️ PARTIAL** — Layer 6 reveals the SYMPTOM (GPU 2 is 3ms slower at AllReduce), but the model runtime itself is configured correctly. GPU 2's compute kernels run at the same speed. The slowdown is specifically in the collective communication. Move DOWN to investigate network/topology.
+**What We Found:** New Siri Suggestions feature wrote variable-length user-history embeddings (4KB–32KB) into shared `ConversationalState` arena. Arena used fixed-offset design. Variable data fragmented it → compaction cycles before next stage could write → 45ms added per transition.
 
----
-
-### Layer 5 — DATA MOVEMENT & ZERO-COPY
-
-**Hypothesis:** "Is there a data transfer bottleneck to/from GPU 2?"
-
-**Investigation:**
-```bash
-# H2D/D2H transfer times per GPU (from nsys)
-nsys stats tp4.nsys-rep --report cuda_gpu_mem_time_sum
-# GPU 0: HtoD avg 45µs, DtoH avg 32µs
-# GPU 1: HtoD avg 44µs, DtoH avg 31µs
-# GPU 2: HtoD avg 47µs, DtoH avg 33µs  ← Same as others
-# GPU 3: HtoD avg 45µs, DtoH avg 32µs
-```
-
-**Verdict: ❌ REJECT** — Host-to-device and device-to-host transfers are identical across all GPUs. The data movement layer is fine. Move DOWN.
-
----
-
-### Layer 4 — GPU & ACCELERATOR
-
-**Hypothesis:** "Is GPU 2's hardware degraded? Throttling, ECC errors, clock issues?"
-
-**Investigation:**
-```bash
-# GPU clocks and throttling
-nvidia-smi -q -d CLOCK,PERFORMANCE | grep -A5 "GPU 0000:82"  # GPU 2
-# SM Clock: 2100 MHz (max boost — not throttling)
-# Memory Clock: 2619 MHz (full speed)
-# Performance State: P0 (max)
-# Throttle Reasons: None
-
-# ECC errors
-nvidia-smi -q -d ECC
-# GPU 2: Volatile SBE: 0, DBE: 0  ← Clean
-
-# Temperature
-nvidia-smi -q -d TEMPERATURE
-# GPU 2: 72°C (within range, no thermal throttle)
-```
-
-**Verdict: ❌ REJECT** — GPU 2 hardware is healthy. Full clock speed, no throttling, no ECC errors, no thermal issues. The GPU accelerator itself is fine. Move DOWN.
-
----
-
-### Layer 2 — NETWORKING & COMMUNICATION
-
-**Hypothesis:** "Is the inter-GPU communication path for GPU 2 different/slower?"
-
-**Investigation:**
-```bash
-# CRITICAL CHECK: GPU topology
-nvidia-smi topo -m
-#        GPU0  GPU1  GPU2  GPU3
-# GPU0    X    NV12  SYS   NV12
-# GPU1   NV12   X    SYS   NV12
-# GPU2   SYS   SYS    X    NV12
-# GPU3   NV12  NV12  NV12   X
-
-# KEY FINDING:
-# GPU0↔GPU1: NV12 (NVLink — 600 GB/s bidirectional)
-# GPU0↔GPU2: SYS  (PCIe cross-socket — 32 GB/s!)  ← 18× SLOWER!
-# GPU2↔GPU3: NV12 (NVLink — good within pair)
-
-# NCCL ring order check
-NCCL_DEBUG=INFO python -c "import torch.distributed; ..." 2>&1 | grep Ring
-# Ring 0: 0→1→3→2→0  ← GPU 2 uses PCIe to talk to GPU 0!
-
-# Bandwidth test confirms
-./build/all_reduce_perf -b 1M -e 1G -f 2 -g 4
-# busBW: 180 GB/s (expected 450 GB/s with full NVLink mesh)
-```
-
-**Verdict: ✅ ACCEPT — ROOT CAUSE LAYER IDENTIFIED** — GPU 2 is connected to GPUs 0 and 1 via PCIe (cross-NUMA socket), not NVLink. The AllReduce ring must traverse a 32 GB/s PCIe link instead of 600 GB/s NVLink → 18× bandwidth reduction on that hop → GPU 2 becomes the straggler → all GPUs wait for it.
-
----
-
-### Layer 1 — LINUX/HOST (Confirming the topology root cause)
-
-```bash
-# WHY is GPU 2 on a different socket? Check NUMA mapping
-lstopo-no-graphics | grep -A2 "GPU\|NUMANode"
-# NUMANode 0: GPU0, GPU1, GPU3, mlx5_0
-# NUMANode 1: GPU2  ← WRONG SOCKET!
-
-# After kernel update, driver re-enumerated GPUs
-dmesg | grep -i "nvidia\|pci.*10de"
-# [boot] nvidia: GPU 0000:82:00.0 → NUMA node 1  ← Re-mapped!
-```
-
-**Verdict: ✅ ACCEPT (contributing)** — Kernel update re-enumerated PCIe devices, placing GPU 2 on NUMA node 1 while the NVLink mesh connects GPUs on NUMA node 0.
-
----
-
-### Root Cause Deep Dive: NVLink Topology Break After Kernel Update
-
-**Why did this happen?** NVIDIA driver enumerates GPUs by PCIe BDF (Bus:Device:Function) order. A kernel update changed PCIe enumeration order → GPU formerly at BDF 41:00.0 moved to 82:00.0 → different NUMA node → NVLink mesh breaks for AllReduce.
-
-**Fix:**
-```bash
-# Immediate: force NCCL ring to stay on NVLink pairs
-# Option A: TP=2 within NVLink pair (guaranteed full bandwidth)
-vllm serve ... --tensor-parallel-size 2  # Only use NVLink-connected pair
-
-# Option B: TP=2 + PP=2 (pipeline parallel across pairs)
-vllm serve ... --tensor-parallel-size 2 --pipeline-parallel-size 2
-
-# Option C: Pin GPU topology explicitly
-export CUDA_VISIBLE_DEVICES=0,1,3  # Exclude the cross-NUMA GPU
-export NCCL_TOPO_FILE=/etc/nccl/h100_topo.xml  # Force known-good topology
-
-# Long-term: pin GPU order in infrastructure-as-code
-# Ansible role validates nvidia-smi topo -m matches expected before serving
-```
-
-**Prevention:**
-- Node admission script: validate `nvidia-smi topo -m` matches reference topology
-- After ANY kernel/driver update: run NCCL all_reduce_perf before admitting to serving pool
-- Alert on AllReduce busBW < 80% of spec (catches topology issues instantly)
-
-**Outcome:** Switching to TP=2 within NVLink pair → 42 tok/s (near theoretical). Adding PP=2 across pairs → 48 tok/s total (exceeds original 45 tok/s target).
-
----
-
-### Interview Delivery (2 min)
-
-> **S:** "Fiserv 70B model, TP=4 on 4×H100. Expected 45 tok/s, getting only 25. One GPU consistently lagging."
->
-> **T:** "I needed to find why TP=4 was only giving 2.1× speedup instead of ~3.5×."
->
-> **A:** "Systematic layer walk-down. Application layer — uniform slowdown, REJECT. Model serving — nsys showed GPU 2 finishing AllReduce 3ms late every iteration, but its compute was identical. PARTIAL — symptom visible here, cause below. Data movement — H2D identical across GPUs, REJECT. GPU hardware — full clocks, no ECC, no throttle, REJECT. Network/Communication — nvidia-smi topo showed GPU 2 connected via PCIe SYS (32 GB/s) while others used NVLink (600 GB/s). A kernel update re-enumerated PCIe devices."
->
-> **R:** "Switched to TP=2 on NVLink pair + PP=2 across pairs. Got 48 tok/s — exceeding our target. Added topology validation to node admission. Key lesson: GPU topology is NOT static. Driver and kernel updates can re-enumerate devices silently."
-
----
-
-## RunBook 4: "CPU Spike to 92% With No Traffic Increase"
-
-> **Context:** CapitalOne fraud scoring. Normal CPU usage 35%. Suddenly spikes to 92% — but request throughput DROPPED by 88%. CPU is burning cycles on something that isn't useful work.
-
----
-
-### Layer 7 — APPLICATION & BUSINESS LOGIC
-
-**Hypothesis:** "Did traffic spike? New feature increasing compute?"
-
-**Investigation:**
-```bash
-# Request rate
-curl localhost:9090/api/v1/query?query=fraud_requests_per_second
-# Current: 2,940 req/s (was 24,500 — DROPPED 88%!)
-# This isn't a traffic spike causing CPU — CPU spike is causing throughput drop
-
-# Feature dimensions unchanged, no deployment
-kubectl get deployment fraud-scoring -o jsonpath='{.spec.template.metadata.annotations}'
-# Last deploy: 3 days ago (unchanged)
-```
-
-**Verdict: ❌ REJECT** — Traffic didn't spike (it dropped). CPU spike is the CAUSE of throughput collapse, not a symptom of increased work. Move DOWN.
-
----
-
-### Layer 6 — MODEL SERVING & INFERENCE
-
-**Hypothesis:** "Are models consuming excessive CPU? New model version?"
-
-**Investigation:**
-```bash
-# Model inference timing
-grep "model_inference_ms" metrics.log | tail -5
-# XGBoost: 0.9ms (normal)
-# ONNX: 2.2ms (normal)
-# Models are fine when they DO run — but they're running less often
-
-# What's consuming the CPU?
-perf top -p $(pgrep fraud-scoring)
-#  68.2%  fraud-scoring  spsc_ring::try_push  ← SPIN LOOP!
-#  12.1%  fraud-scoring  score_batch          (actual work)
-#   8.4%  fraud-scoring  __sched_yield
-#   4.2%  [kernel]       _raw_spin_lock
-```
-
-**Verdict: ⚠️ PARTIAL** — Models are healthy, but `perf top` reveals 68% of CPU time is in `spsc_ring::try_push`. This is a spin-lock in the data movement layer (SPSC ring buffer). Move DOWN.
-
----
-
-### Layer 5 — DATA MOVEMENT & ZERO-COPY
-
-**Hypothesis:** "The SPSC ring between tiers is full, causing Tier 0 to spin-wait."
-
-**Investigation:**
-```bash
-# Ring buffer metrics
-grep "ring_buffer" /var/log/fraud-scoring/metrics.log
-# ring_buffer_full: tier0_to_tier2 = 1.0 (100% FULL!)
-# ring_spin_count: 847,293/sec
-# ring_consumer_alive: tier2 = false  ← CONSUMER IS DOWN!
-
-# Tier 2 status
-kubectl get pods -l tier=tier2
-# tier2-reasoning-0: CrashLoopBackOff (restarting every 90s)
-# tier2-reasoning-1: CrashLoopBackOff
-
-# Why is Tier 2 crashing?
-kubectl logs tier2-reasoning-0 --previous | tail -20
-# RuntimeError: CUDA out of memory. Tried to allocate 2.4 GB
-# Killed by OOM after 87 seconds
-```
-
-**Verdict: ✅ ACCEPT — ROOT CAUSE LAYER IDENTIFIED** — The SPSC ring from Tier 0 → Tier 2 is full because Tier 2 crashed (GPU OOM). The ring implementation spins indefinitely waiting for space. Tier 0's hot path (fraud scoring) is blocked by a spin-loop designed for µs-level contention, now running for MINUTES.
-
----
-
-### Tracing the Root Cause Upstream: Why Did Tier 2 OOM?
-
-```bash
-# Check Tier 2 config
-kubectl get configmap tier2-config -o yaml | grep max_model_len
-# max_model_len: 16384  ← Was 8192! Changed in hotfix 3 days ago
-
-# Memory accounting
-python -c "
-model=16; max_seqs=50; kv_per_seq_16k=1.2  # GB at 16384 tokens
-needed = model + (max_seqs * kv_per_seq_16k)  # 16 + 60 = 76 GB
-gpu_total = 80
-print(f'Needed: {needed}GB, Available: {gpu_total}GB, Margin: {gpu_total-needed}GB')
-# Margin: 4GB — any traffic spike → OOM!
-"
-```
-
-**Root Cause Chain:**
-```
-Config drift (max_model_len=16384, 3 days ago)
-  → Traffic spike → 50+ concurrent → Tier 2 GPU OOM → crash loop
-    → SPSC ring fills (consumer dead)
-      → Tier 0 spin-loop (designed for µs, running for minutes)
-        → 68% CPU wasted on spinning
-          → Actual scoring throughput drops 88%
-```
-
----
-
-### Root Cause Deep Dive: Tier Isolation Failure
-
-**The fundamental bug:** Tier 0 (hot path, SLA-critical) has an UNBOUNDED dependency on Tier 2 (warm path, best-effort). A downstream crash propagates UPSTREAM through the spin-loop.
-
-**Fixes (in order of criticality):**
-
+**How We Fixed It:**
 ```cpp
-// Fix 1: BOUNDED spin — never block Tier 0 on Tier 2
+// Replace fixed-offset with tiered arena + variable-length pool
+struct ConversationalState {
+    alignas(64) char asr_region[8192];      // Fixed stages
+    alignas(64) char nlu_region[8192];
+    alignas(64) char search_pool[65536];    // Variable pool (64KB)
+    uint32_t search_pool_offset;            // Bump pointer
+    struct SearchResult { uint32_t offset; uint32_t length; float score; } results[32];
+};
+```
+
+**Lesson:** Shared memory arenas designed for fixed-size writes break when features evolve to variable-length data. Design for variable from the start.
+
+**Prevention:** Feature-flag arena layout changes. Deploy new arena structure independently before enabling new features.
+
+---
+
+### Root Cause F: Per-Core Arena Overflow (CapitalOne)
+
+**Tools Used:**
+```bash
+# 1. Application error logs
+grep "arena_overflow" /var/log/fraud-scoring/metrics.log
+# arena_overflow: request_size=72KB > slab_capacity=64KB
+
+# 2. Check arena usage distribution
+grep "arena_usage_bytes" metrics.log | awk '{print $2}' | sort -n | tail -20
+```
+
+**What We Found:** Model v3.3 added merchant-embedding feature (8KB float vector) to FeatureBlock. Per-request memory: 56KB → 72KB. Arena slab hardcoded at 64KB.
+
+**How We Fixed It:**
+```cpp
+// Dynamic slab sizing from feature schema
+size_t slab = next_power_of_two(schema.total_feature_bytes() + 4096);  // 128KB for v3.3
+```
+
+**Lesson:** Arena sizes must be schema-versioned. Never hardcode capacity based on current feature set.
+
+**Prevention:** CI test: load schema → compute required slab → assert slab_config >= required. Fails pipeline if schema grows past capacity.
+
+---
+
+## RunBook 2: Throughput Collapse — "Requests Queuing, GPU Underutilized"
+
+> **Story Context:** CapitalOne (10K req/sec/GPU target), Fiserv (500+ concurrent), Broadcom (2M+ req/sec), LLM cluster (60% throughput collapse over 48h)
+
+### What We Observed (Alerts That Fired)
+
+| Alert | Metric Value | Normal Baseline | Story |
+|-------|-------------|-----------------|-------|
+| Request queue depth growing | 45 waiting (was 0-5) | <10 | Runbook 7 |
+| GPU SM utilization LOW under load | 18% (should be 72%) | 70%+ | CUDA Story 2 |
+| Throughput per GPU dropped | 510 tok/s (was 850) | >800 | CUDA Task 2 |
+| KV cache preemptions climbing | 120/min (normal: <5) | <5/min | Runbook 7 |
+| Session affinity miss rate spiked | 30% misses (was <1%) | <1% | Runbook 6 |
+| CPU spin-loop burning cores | 92% CPU (from spinning, not work) | 35% | Runbook 8 |
+
+---
+
+### Root Cause A: KV Cache Fragmentation (Gradual Degradation Over Days)
+
+**Tools Used:**
+```bash
+# 1. vLLM metrics
+curl localhost:8000/metrics | grep -E "cache|preempt"
+# vllm:gpu_cache_usage_perc    0.94  ← Cache "full"
+# vllm:num_preemptions_total   7,842 (in 1 hour)  ← Massive evictions
+# vllm:num_requests_running    28    ← Only 28! (capacity should be 50+)
+
+# 2. nvidia-smi shows memory available
+nvidia-smi -q -d MEMORY  # 20GB appears free — but KV allocator says FULL
+
+# 3. Block-level fragmentation check
+curl http://localhost:8000/debug/block_stats
+# Reveals: scattered blocks from long-lived sessions, external fragmentation
+```
+
+**What We Found:** PagedAttention uses 16-token blocks. Long-lived compliance-checking sessions (10+ turns over hours) held scattered blocks. Short-burst requests couldn't find contiguous free blocks → allocator reports "full" despite physical memory available. Degradation built over 48 hours without pod restart.
+
+**How We Fixed It:**
+```bash
+# Immediate: rolling pod restart every 12h (clears fragmentation)
+# Better: prefix caching + recompute-based preemption
+vllm serve ... --enable-prefix-caching --preemption-mode recompute
+
+# Best: session-TTL eviction (evict sessions idle >5min)
+```
+
+**Lesson:** Gradual degradation is harder to detect than cliff failures. KV cache fragmentation builds over days with no single alarm threshold.
+
+**Prevention:** Track `preemptions/min` as a RATE alert (not absolute). Dashboard fragmentation_ratio (allocated/usable). Rolling restart schedule.
+
+---
+
+### Root Cause B: Single-Request Processing (GPU Parallelism Wasted)
+
+**Tools Used:**
+```bash
+# 1. nsys timeline under realistic traffic
+nsys profile --trace=cuda,osrt,nvtx --duration=30 -o throughput ./fraud-scoring
+
+# 2. DCGM metrics confirm low utilization
+dcgmi dmon -e 252,253  # SM util: 18%, Memory BW: 5%
+
+# 3. Nsight Compute roofline
+ncu --set roofline --kernel-name "forward" ./fraud-scoring
+# GEMMs well below roofline at batch=1 — memory-latency-bound, not compute-bound
+```
+
+**What We Found:** Processing one request at a time. GPU has thousands of CUDA cores but batch=1 uses fraction. GPU idle ~50% between inferences. 1,000 req/sec/GPU vs 10,000 target.
+
+**How We Fixed It:**
+```cpp
+// Micro-batching with bounded time window + deadline awareness
+struct AdaptiveAccumulator {
+    int max_batch = 16;           // Max requests per batch
+    uint64_t max_wait_us = 500;   // Max 500µs accumulation
+    uint64_t deadline_margin = 2'000'000;  // 2ms safety margin
+
+    void dispatch_when_ready() {
+        if (count >= max_batch) dispatch();
+        if (oldest_deadline - now < deadline_margin) dispatch();  // STRICT
+        if (now - window_start > max_wait_us) dispatch();
+    }
+};
+```
+
+**Results:** 1,000 → 10,000 req/sec/GPU (10×). SM utilization: 18% → 72%. P99 stayed within 5ms SLA.
+
+**Lesson:** Micro-batching is the single biggest throughput lever for GPU inference. Even batch=4 gives 3× vs batch=1.
+
+**Prevention:** Never deploy GPU inference with batch=1 in production. Always implement bounded micro-batching.
+
+---
+
+### Root Cause C: CUDA Graphs Stealing KV Cache Memory
+
+**Tools Used:**
+```bash
+# 1. vLLM metrics after enabling CUDA Graphs
+curl localhost:8000/metrics | grep cache
+# vllm:gpu_cache_usage_perc  0.94   ← Almost full
+# vllm:num_requests_waiting  12     ← Requests queuing
+# vllm:num_preemptions_total 847    ← Mass evictions
+
+# 2. Memory accounting
+# CUDA Graph workspace: 847 MB (pre-allocated for all shape buckets)
+# KV cache available: reduced from 32GB → 24GB
+# Max concurrent: dropped from 64 → 38 requests
+```
+
+**What We Found:** CUDA Graphs require static memory allocation for worst-case decode shapes. With many shape buckets × large max_model_len, graph workspace consumed 8GB → KV cache reduced → fewer concurrent requests → lower throughput. Throughput dropped 40%.
+
+**How We Fixed It:**
+```bash
+# Reduce max-model-len (if prompts fit)
+--max-model-len 2048
+
+# OR: hybrid mode — graphs for short sequences, eager for long
+# OR: limit graph capture budget (fewer shape variants)
+```
+
+**Lesson:** CUDA Graphs trade MEMORY for LATENCY. At high concurrency, the memory cost exceeds the latency benefit. Profile both dimensions.
+
+**Prevention:** Memory budget validation: `model_weights + graph_workspace + (max_seqs × kv_per_seq) < GPU_TOTAL - 8GB_buffer`.
+
+---
+
+### Root Cause D: SPSC Ring Overflow Causing CPU Spin-Loop (Cascading)
+
+**Tools Used:**
+```bash
+# 1. Ring buffer metrics
+grep "ring_buffer_full\|ring_spin_count" metrics.log
+# ring_buffer_full: tier0_to_tier2 = 1.0 (100%!)
+# ring_spin_count: 847,293/sec
+
+# 2. CPU profile shows spin dominating
+perf top -p $(pgrep fraud-scoring)
+# 68.2% spsc_ring::try_push (SPIN LOOP!)
+# 12.1% score_batch (actual useful work)
+```
+
+**What We Found:** Tier 2 crash-loop → can't drain SPSC ring → ring fills → Tier 0 spin-waits (designed for µs-level contention, not minutes) → burns CPU → degrades scoring throughput by 88%.
+
+**How We Fixed It:**
+```cpp
+// Never spin indefinitely. Bounded try + overflow to durable queue
 bool publish_to_tier2(SPSCRing& ring, const ArrowBatch& batch, DurableQueue& overflow) {
-    for (int i = 0; i < 10; i++) {       // Max 10 attempts (~50ns total)
+    for (int i = 0; i < 10; i++) {       // Max 10 attempts (~50ns)
         if (ring.try_push(batch)) return true;
         _mm_pause();
     }
-    // Ring full — don't spin! Overflow to durable queue (Kafka/Redis)
-    overflow.push(batch.serialize_to_ipc());
-    batch.release();  // Release refcount! (prevents memory leak)
+    overflow.push(batch);                  // Kafka/Redis — guaranteed delivery
     emit_metric("tier2.ring_overflow", 1);
-    return true;  // NEVER block Tier 0
+    return true;  // NEVER block Tier 0 on Tier 2 availability
 }
 ```
 
-```bash
-# Fix 2: Restore Tier 2 memory budget
-kubectl set env deployment/tier2 VLLM_MAX_MODEL_LEN=8192 VLLM_MAX_NUM_SEQS=48
-# Margin: 80 - 16 - (48*0.6) = 35GB buffer → stable
+**Lesson:** Tier isolation must include backpressure handling. "Fire-and-forget" async patterns need bounded retry. Never let downstream failure create CPU-burning spin loops upstream.
 
-# Fix 3: Memory budget as readiness probe
-# Pod doesn't accept traffic if config would OOM under load
+**Prevention:** Circuit breaker between tiers. If Tier 2 unavailable >30s, mark "degraded" and skip (scoring still works, just without reasoning).
+
+---
+
+### Root Cause E: Session-Affine Routing Failure (Kubernetes Rolling Update)
+
+**Tools Used:**
+```bash
+# 1. Session migration rate
+grep "session_migration\|affinity_miss" /var/log/siri/router.log | wc -l
+# 30% of sessions lost affinity after node drain
+
+# 2. Shared memory lifecycle
+ls -la /dev/shm/siri_session_* | wc -l  # Dropping during update
+
+# 3. Cold-start fallback path triggered
+# P99 spikes to 900ms for affected sessions (full recomputation)
 ```
 
+**What We Found:** Session-affine router used pod IP as affinity key. During rolling update, pods get new IPs. Consistent hashing ring didn't drain gracefully → sessions rerouted before shared memory state migrated → 30% of sessions hit cold-start path (850ms).
+
+**How We Fixed It:**
+```cpp
+// Graceful drain with state handoff
+void handle_drain_signal(Router& router, WorkerNode& draining) {
+    draining.set_accepting(false);                    // Stop new sessions
+    for (auto& session : draining.active_sessions()) {
+        auto snapshot = session.serialize_prefix();   // Lightweight state
+        auto target = router.find_new_affinity(session.id);
+        target.prewarm_session(session.id, snapshot); // Pre-warm on new node
+        router.atomic_reroute(session.id, target);    // Switch one-by-one
+    }
+}
+```
+
+**Lesson:** Session affinity is fragile during topology changes. Rolling updates, drains, and autoscaling all break sticky routing.
+
+**Prevention:** Chaos engineering: regularly drain nodes in staging. Exercise migration path before production discovers it. Never rely on "sessions will just reconnect."
+
+---
+
+### Root Cause F: HPA Scaling Storm (Competing Metrics)
+
+**Tools Used:**
+```bash
+# 1. HPA state
+kubectl get hpa -A
+# tier0-hpa: 92%/60% CPU  → scaled to MAX (20 pods)  ← Reacting to spin loop!
+# tier2-hpa: 100%/70%     → 8 pods PENDING (no GPU)
+
+# 2. Pending pods
+kubectl get pods --field-selector=status.phase=Pending
+# tier2-reasoning: Pending (0/1 GPU available)
+
+# 3. Cluster autoscaler
+kubectl logs -n kube-system cluster-autoscaler
+# Scale-up: need 4 GPU nodes, ETA 12-15 minutes
+```
+
+**What We Found:** Tier 0 CPU spike (from spin loop) triggered its CPU-based HPA. But Tier 0 doesn't NEED more replicas — it needs Tier 2 to recover. Meanwhile Tier 2's HPA requests GPUs that aren't available. Both HPAs competing → resource deadlock.
+
+**How We Fixed It:**
 ```yaml
-# Fix 4: HPA on request throughput, NOT CPU
+# Tier 0 HPA: use request throughput, NOT CPU
 metrics:
   - type: Pods
     pods:
@@ -3705,671 +3517,535 @@ metrics:
       target:
         type: AverageValue
         averageValue: "2000"
+
+# Priority classes: Tier 0 always wins resources
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tier0-critical
+value: 1000000
 ```
 
-**Prevention:**
-- Circuit breaker: if Tier 2 unavailable >30s, mark degraded, skip publishing entirely
-- Memory budget validation as init-container: `model_mem + max_seqs × kv_per_seq < GPU - 8GB`
-- Chaos engineering: kill Tier 2 under load regularly — spin-loop would be caught immediately
+**Lesson:** CPU utilization is a SYMPTOM, not a demand signal. Scaling on symptoms (spin loops) makes everything worse.
 
-**Outcome:** Bounded retry fixed the cascade within seconds of deployment. Tier 0 throughput restored to 24,500 TPS regardless of Tier 2 status.
+**Prevention:** Custom metrics (request throughput, queue depth) as primary HPA signal. Priority classes ensure critical tier always gets resources.
 
 ---
 
-### Interview Delivery (2 min)
+## RunBook 3: Quality Degradation — "Model Outputs Are Wrong/Garbage"
 
-> **S:** "CapitalOne fraud scoring, 24.5K TPS, 5ms SLA. CPU spiked to 92% but throughput DROPPED 88%. Not a load increase — something was burning cycles."
->
-> **T:** "I needed to find what was consuming CPU that wasn't useful work, and why it was killing our scoring pipeline."
->
-> **A:** "Layer walk-down. Application — traffic dropped, not spiked (CPU is cause, not effect), REJECT. Model serving — models ran fine when invoked, but `perf top` showed 68% in `spsc_ring::try_push`, PARTIAL. Data movement — the SPSC ring to Tier 2 was 100% full because Tier 2 was in CrashLoopBackOff from GPU OOM. The ring implementation spins forever waiting for space. Root cause chain: config drift 3 days ago made max_model_len=16384 → OOM under spike → ring fills → Tier 0 spins."
->
-> **R:** "Bounded retry with 10 attempts + overflow to durable queue. Tier 0 now never blocks on Tier 2. Added memory budget validation as readiness probe, and chaos testing that kills Tier 2 under load. The fundamental lesson: SLA-critical paths must have BOUNDED dependencies on best-effort downstream services."
+> **Story Context:** Fiserv LLM (15% accuracy improvement story), CapitalOne (fraud detection accuracy), Broadcom (security classification)
 
----
+### What We Observed (Alerts That Fired)
 
-## RunBook 5: "Model Outputs Degrading on Long Prompts"
-
-> **Context:** Fiserv loan document processing. LLM generates accurate explanations for short prompts (<1024 tokens) but outputs become repetitive/incoherent on longer documents (>2048 tokens). Quality evaluation dropped from 87% → 72%.
+| Alert | Metric Value | Normal Baseline | Story |
+|-------|-------------|-----------------|-------|
+| Accuracy dropped on eval set | 72% (was 87%) | >85% | CUDA Task 5 |
+| Output becomes repetitive/nonsensical | Hallucination rate 40% | <5% | Runbook 3 |
+| FP8 garbage on long prompts (>2048 tokens) | Garbled after ~1500 tokens | Coherent | CUDA Task 5 |
+| Fraud false positive rate spiked | 12% (was 3%) | <5% | CapitalOne |
+| Security model confidence dropped | avg 0.6 (was 0.9) | >0.85 | Broadcom |
 
 ---
 
-### Layer 7 — APPLICATION & BUSINESS LOGIC
+### Root Cause A: FP8 Precision Loss in Attention (Long Sequences)
 
-**Hypothesis:** "Are longer prompts inherently harder? Is the prompt template broken for long docs?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Quality by prompt length bucket
-curl localhost:9090/api/v1/query?query=eval_accuracy_by_length
-# <512 tokens:  89% accuracy (normal)
-# 512-1024:     86% accuracy (normal)
-# 1024-2048:    78% accuracy (slightly degraded)
-# >2048:        52% accuracy (GARBAGE!)
+# 1. Compare BF16 vs FP8 outputs
+python -c "
+from vllm import LLM
+llm_bf16 = LLM('model', dtype='bfloat16')
+llm_fp8 = LLM('model', quantization='fp8')
+# Run same long prompt through both → output diverges after ~1500 tokens
+"
 
-# Same prompts on BF16 reference model
-python eval.py --model bf16_baseline --dataset long_prompts
-# <512:   90%
-# 512-1024: 87%
-# 1024-2048: 85%
-# >2048:  84%   ← BF16 handles long prompts FINE!
+# 2. Profile attention kernel numerics
+ncu --set full --kernel-name "flash_attn" ./inference --input-len 2048
+
+# 3. Check softmax accumulation precision
+# FP8 E4M3: only 3-bit mantissa → sum of exponentials loses precision over 2048+ positions
 ```
 
-**Verdict: ⚠️ PARTIAL** — The degradation correlates with prompt length AND is specific to our production model (not BF16 reference). This points to a quantization/precision issue in the model serving layer, not application logic. Move DOWN.
+**What We Found:** FP8 attention with long sequences has numerical precision issues in softmax reduction. Sum of exponentials over 2048+ positions loses precision when accumulated in FP8/FP16 without proper scaling. Output diverges progressively after ~1500 tokens.
 
----
-
-### Layer 6 — MODEL SERVING & INFERENCE
-
-**Hypothesis:** "Is the serving runtime truncating or mishandling long prompts?"
-
-**Investigation:**
+**How We Fixed It:**
 ```bash
-# Check for truncation
-grep "truncat" /var/log/inference/service.log
-# No truncation events — full prompts being processed
-
-# Check serving config
-kubectl get configmap inference-config -o yaml | grep -E "max_model_len|quantization|dtype"
-# max_model_len: 4096 (sufficient for our docs)
-# quantization: fp8
-# kv-cache-dtype: auto
-
-# Key insight: production uses FP8, reference uses BF16
-# Let's compare outputs token-by-token
-python compare_outputs.py --model prod_fp8 --reference bf16 --input long_doc.txt
-# Token 1-1000:    99.2% agreement (nearly identical)
-# Token 1000-1500: 94.1% agreement (slight divergence)
-# Token 1500-2000: 78.3% agreement (significant divergence)
-# Token 2000+:     42.1% agreement (outputs are DIFFERENT)
-```
-
-**Verdict: ✅ ACCEPT — ROOT CAUSE LAYER IDENTIFIED** — The FP8 quantized model diverges from BF16 progressively with sequence length. The divergence starts around 1500 tokens and becomes severe past 2048. This is a precision issue in the attention mechanism's softmax accumulation under FP8.
-
----
-
-### Verification: Confirming It's NOT Lower Layers
-
-```bash
-# Layer 4 — GPU compute correct?
-# The GPU is doing exactly what it's told (FP8 math) — it's not a hardware error
-nvidia-smi -q -d ECC
-# No ECC errors — memory is fine, it's a numerical precision issue
-
-# Layer 3 — No K8s interference
-kubectl top pod | grep inference
-# Resources well within limits — not a scheduling issue
-
-# Layer 1 — No host issues
-# Same behavior on multiple nodes — host-independent → confirmed L6 issue
-```
-
----
-
-### Root Cause Deep Dive: FP8 Softmax Accumulation Precision Loss
-
-**Why does length matter?** Softmax computes `exp(x_i) / sum(exp(x_j))` over ALL positions. In FP8 E4M3:
-- Mantissa: only 3 bits (8 representable values per exponent)
-- Accumulating 2048+ exponentials in FP8/FP16 → significant rounding error
-- Error compounds across attention layers (80 layers × 2048 positions)
-- After ~1500 tokens, accumulated error exceeds useful signal
-
-**Evidence chain:**
-```python
-# Layer-by-layer divergence analysis
-for layer in range(80):
-    divergence = compute_kl_divergence(fp8_attn[layer], bf16_attn[layer], seq_len=2048)
-    # Layer 0: 0.001 (negligible)
-    # Layer 20: 0.03 (small)
-    # Layer 40: 0.12 (growing)
-    # Layer 60: 0.45 (significant)
-    # Layer 79: 0.89 (output is essentially random)
-```
-
-**Fix:**
-```bash
-# Option A: Mixed precision — attention in BF16, weights in FP8
+# Mixed precision: attention stays in BF16, only weights/linear layers use FP8
 vllm serve model \
   --quantization fp8 \
-  --kv-cache-dtype bfloat16  # KV stays in BF16 → attention precision preserved
+  --kv-cache-dtype auto  # BF16 for KV cache (attention precision preserved)
 
-# Option B: FP8 with higher-precision softmax accumulator (TensorRT-LLM)
-# Uses FP32 accumulator for softmax reduction regardless of input dtype
-
-# Option C: Max sequence length gate for FP8
-# Requests >1500 tokens → routed to BF16 instance
+# Rule: Reductions (softmax, LayerNorm) ALWAYS need higher-precision accumulators
 ```
 
-**Prevention:**
-- Eval suite with prompts at multiple lengths: 512, 1024, 2048, 4096
-- Compare FP8 vs BF16 perplexity at each length — alert if divergence > 5%
-- Document: "FP8 is safe for sequences <1500 tokens. Beyond that, use BF16 KV cache or BF16 attention accumulator."
+**Lesson:** FP8 is NOT a drop-in replacement for all operations. Reductions with long accumulations amplify precision loss.
 
-**Outcome:** Setting `--kv-cache-dtype bfloat16` restored accuracy to 84% on long prompts (matching BF16 reference) while keeping FP8 for linear layers (50% memory savings preserved).
+**Prevention:** Eval suite with long-context prompts (4K+ tokens) as gate before FP8 deployment. Compare perplexity against BF16 baseline at multiple sequence lengths.
 
 ---
 
-### Interview Delivery (2 min)
+### Root Cause B: KV Cache Corruption from ECC Errors
 
-> **S:** "Fiserv loan document processing. LLM outputs degrading on long documents — 87% accuracy dropped to 72%, specifically on prompts >2048 tokens."
->
-> **T:** "I needed to determine whether this was a prompt quality issue, a serving issue, or something lower."
->
-> **A:** "Layer walk-down. Application — same prompts worked fine on BF16 reference, so it's not prompt difficulty, PARTIAL (points down). Model serving — token-by-token comparison showed FP8 output diverging from BF16 progressively: 99% agreement at token 1000, only 42% at token 2000. The softmax accumulation in FP8 E4M3 has only 3 mantissa bits — accumulating over 2048 positions compounds rounding error across 80 attention layers. Verified GPU was healthy, K8s not interfering."
->
-> **R:** "Set kv-cache-dtype to bfloat16 — restored accuracy to 84% on long prompts while keeping FP8 for linear layers. Added eval gate: any quantized model must pass perplexity tests at multiple sequence lengths before deployment. Lesson: FP8 is NOT a drop-in replacement — reductions need higher-precision accumulators."
-
----
-
-## RunBook 6: "Siri Search Latency Spike During Rolling Update"
-
-> **Context:** Apple Siri conversational pipeline. SLA = 300ms end-to-end. During routine Kubernetes rolling update, 30% of sessions hit 850ms+ latency for ~2 minutes. No code change.
-
----
-
-### Layer 7 — APPLICATION & BUSINESS LOGIC
-
-**Hypothesis:** "Did user query patterns change? New intent types?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Query distribution during spike
-grep "intent_type" /var/log/siri/metrics.log | sort | uniq -c
-# Same distribution as always — no new intents, no traffic spike
-# But: 30% of requests hitting slow path correlates with specific SESSION IDs
-# These sessions were previously on nodes that just drained
+# 1. Check ECC error counters
+nvidia-smi -q -d ECC
+# Volatile ECC DBE (Double-Bit Error): 3  ← FATAL: uncorrectable!
 
-curl localhost:9090/api/v1/query?query=latency_by_session_age
-# New sessions (created in last 2min): avg 850ms  ← SLOW!
-# Existing sessions (>5min old): avg 280ms        ← NORMAL!
+# 2. DCGM health check
+dcgmi health -g 1 -c
+# GPU 0: FAIL (Double-bit ECC error detected)
+
+# 3. Application symptom: random garbage in output (not consistent pattern)
 ```
 
-**Verdict: ⚠️ PARTIAL** — Not a query pattern issue, but we can see that NEWLY ROUTED sessions (after drain) are slow while existing sessions are fine. This points to a session/routing issue. Move DOWN.
+**What We Found:** Double-bit ECC error corrupted a few KV cache blocks. Affected requests produced garbage. Error was intermittent because only requests hitting those specific blocks were affected.
 
----
-
-### Layer 6 — MODEL SERVING & INFERENCE
-
-**Hypothesis:** "Are newly-routed sessions hitting cold model caches?"
-
-**Investigation:**
+**How We Fixed It:**
 ```bash
-# Model inference time for affected vs unaffected
-grep "model_inference" metrics.log | grep "session_migrated=true"
-# NLU: 8ms (same as warm sessions)
-# Search retrieval: 15ms (same)
-# Ranking: 12ms (same)
-# Models are warm — it's not model cold-start
+# 1. Immediate: drain and replace affected GPU
+kubectl cordon <node>
+kubectl drain <node> --ignore-daemonsets
 
-# But what IS different?
-grep "stage_transition" metrics.log | grep "session_migrated=true"
-# ASR→NLU: 2ms (normal)
-# NLU→Search: 3ms (normal)
-# Search→Orchestration: 385ms ← 77× SLOWER!
-# Orchestration→TTS: 2ms (normal)
+# 2. Reset ECC counters to verify fix (after GPU replacement)
+nvidia-smi -r  # Reset GPU
+nvidia-smi --ecc-config=1  # Ensure ECC enabled
+
+# 3. Add DCGM-based alerting on SBE (single-bit = early warning)
+dcgmi policy -g 1 --set 1,1  # Alert on any ECC error
 ```
 
-**Verdict: ⚠️ PARTIAL** — Model inference is fine, but the transition between Search and Orchestration stages takes 385ms for migrated sessions. This is NOT model compute — it's inter-stage data movement. Move DOWN.
+**Lesson:** ECC double-bit errors are SILENT at application level — no CUDA error returned. Output is just wrong. Must monitor hardware errors proactively.
+
+**Prevention:** DCGM exporter → Prometheus → alert on ANY ECC error. SBE trending up = GPU failing, replace proactively.
 
 ---
 
-### Layer 5 — DATA MOVEMENT & ZERO-COPY
+### Root Cause C: Embedding Dimension Mismatch After Model Update (Siri)
 
-**Hypothesis:** "Session state isn't available on the new node — shared memory arena missing."
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Check shared memory on NEW node for migrated sessions
-ls /dev/shm/siri_session_* | wc -l
-# Only 12 session arenas (should be ~40 for current load)
-# The migrated sessions DON'T HAVE pre-built arenas on new node!
+# 1. Profile search stage kernels
+nsys profile --trace=cuda,nvtx -o siri-search ./siri-pipeline --stage=search
+nsys stats siri-search.nsys-rep --report cuda_gpu_kern_sum | grep -i "gemm\|projection"
+# cublas_sgemm_128x32: 500 calls, 35ms avg  ← UNEXPECTED projection!
 
-# What happens when arena is missing?
-grep "arena_miss\|cold_rebuild" /var/log/siri/pipeline.log
-# "Session abc123: arena not found, rebuilding ConversationalState from scratch"
-# "Recomputing NLU embeddings (768-dim), search context, user history..."
-# Rebuild time: 380ms  ← MATCHES THE 385ms TRANSITION!
-
-# Why? Session router uses pod IP as affinity key
-kubectl get pods -o wide | grep siri-worker
-# siri-worker-7 TERMINATED (drained)
-# siri-worker-12 NEW (replacement) — new IP!
-# Sessions routed to worker-7 now land on worker-12 → no shared memory state
+# 2. Check dimensionality
+# NLU outputs 768-dim (BERT-large), FAISS index built with 256-dim
+# Projection layer (768→256) running on EVERY query: 35ms overhead
 ```
 
-**Verdict: ✅ ACCEPT — ROOT CAUSE LAYER IDENTIFIED** — During rolling update, pods get new IPs. Session-affine router loses affinity for drained pods. Sessions rerouted to new pods don't have pre-built shared memory arenas (ConversationalState). Full state rebuild (NLU embeddings, search context, user history) costs 380ms. This IS the 850ms spike: 380ms rebuild + 470ms normal processing (first request is also uncached).
+**What We Found:** New recommendation model outputs 768-dim embeddings (BERT-large), but FAISS search index was built with 256-dim. A runtime projection layer was added to bridge the gap — runs synchronously before every search, adding 35ms.
+
+**How We Fixed It:**
+```cpp
+// Option A: Project at INDEX BUILD TIME (offline, zero runtime cost)
+void build_search_index(const EmbeddingStore& store) {
+    auto projected = projection.forward(store.embeddings);  // 768→256 offline
+    faiss_index.add(projected);  // Index stores 256-dim
+}
+// At query time: project single query vector only (0.05ms for 1 vector vs 35ms for batch)
+
+// Option B: Cache user projections per session
+auto& cached = projection_cache.get_or_compute(user_id, raw_embedding);
+```
+
+**Lesson:** Embedding dimension mismatches have runtime cost. When upstream models change output dimensions, solve at index-build time, not query time.
+
+**Prevention:** Dimension contract in model registry. When NLU team publishes new embedding model, registry enforces compatibility checks against downstream consumers.
 
 ---
 
-### Verification: Lower Layers Healthy
+### Root Cause D: Config Drift — max_model_len Causing Truncation
 
+**Tools Used:**
 ```bash
-# Layer 3 — K8s doing its job correctly (drain + reschedule is normal)
-kubectl get events --field-selector reason=DrainStarted
-# Drain executed normally. No premature kills.
+# 1. Check config
+kubectl get configmap inference-config -o yaml
+# max_model_len: 2048  ← Was 4096! Someone changed it
 
-# Layer 2 — Network fine
-# Latency from router to new pod: 0.3ms (same as old pod)
+# 2. Application logs
+grep "truncat" /var/log/inference/service.log
+# "Input truncated from 3200 to 2048 tokens"  ← Losing critical context!
 
-# Layer 1 — New pod on same NUMA, same CPU policy
-kubectl describe pod siri-worker-12 | grep -A5 "Topology\|CPU"
-# CPU Manager: assigned isolated CPUs (correct)
+# 3. Quality correlation
+# All quality drops are on prompts > 2048 tokens (truncation removes key information)
 ```
 
-**Lower layers healthy — problem is definitively at Layer 5 (session state migration).**
+**What We Found:** A hotfix 3 days earlier reduced `max_model_len` from 4096 to 2048 to fix an OOM issue. This silently truncated long prompts (loan documents, fraud context), removing critical information the model needed for accurate answers.
+
+**How We Fixed It:**
+```bash
+# Restore max_model_len with proper memory budget
+vllm serve ... \
+  --max-model-len 4096 \
+  --kv-cache-dtype fp8 \          # 2× more KV capacity → no OOM
+  --enable-prefix-caching          # Share system prompt across requests
+```
+
+**Lesson:** Configuration changes that fix one issue (OOM) can silently cause another (quality). Config drift without eval validation is dangerous.
+
+**Prevention:** Any config change to `max_model_len`, `quantization`, or `temperature` must re-run eval suite before merge. GitOps with mandatory approval + eval gate.
 
 ---
 
-### Root Cause Deep Dive: Session-Affine Routing Without State Migration
+## RunBook 4: Cascading Failures — "Multiple Tiers Degrading Simultaneously"
 
-**The design gap:** Session affinity assumes pods are STABLE. Rolling updates violate this assumption. The system had no mechanism to pre-warm session state on destination pods before rerouting traffic.
+> **Story Context:** CapitalOne three-tier fraud system, Fiserv multi-model orchestration. These are the most impressive interview stories because they demonstrate system-level thinking.
+
+### What We Observed (Alerts That Fired — ALL AT ONCE)
+
+| Alert | Metric | Story |
+|-------|--------|-------|
+| Tier 2 pods in CrashLoopBackOff | Restart every 90s | Runbook 8 |
+| Tier 0 CPU spike to 92% | Not from scoring — from spinning | Runbook 8 |
+| Request throughput at 12% of normal | System-wide collapse | Runbook 8 |
+| Host memory growing 500MB/hour | Arrow buffer leak | Runbook 8 |
+| HPA scaled both tiers to MAX | Competing for resources | Runbook 8 |
+| After 48h: OOM killer fires | Memory leak → total outage | Runbook 8 |
+
+---
+
+### The Cascade Timeline
+
+```
+T+0:00   Config drift (max_model_len=16384) deployed 3 days ago — no immediate effect
+T+0:00   Traffic spike → 50+ concurrent Tier 2 sessions → GPU OOM → crash loop
+T+2:00   SPSC ring fills (Tier 2 not draining)
+T+2:30   Tier 0 spin-loop starts → CPU spikes to 92%
+T+3:00   Arrow buffer leak begins (overflow path doesn't release refcount)
+T+3:00   Tier 0 HPA triggers on CPU → scales to max (WRONG — spin loop isn't load)
+T+3:30   Tier 2 HPA → requests GPUs → Pending (no capacity)
+T+5:00   More Tier 0 pods = more spin loops = more waste
+T+8:00   System at 12% throughput (most compute wasted)
+T+48:00  Arrow leak → OOM killer → full outage
+```
+
+---
+
+### Root Cause A: Trigger — Config Drift Causing GPU OOM on Spike
+
+**Tools Used:**
+```bash
+kubectl logs <tier2-pod> --previous | grep -i "oom\|cuda"
+# RuntimeError: CUDA out of memory. Tried to allocate 2.4 GB
+# (GPU 0: 80 GB total, 78.9 GB allocated, 1.1 GB free)
+
+kubectl get configmap -o yaml | grep max_model_len
+# max_model_len: 16384  ← Was 8192! Changed in hotfix 3 days ago
+```
+
+**What We Found:** A Helm values override set `max_model_len=16384` (was 8192). Under light load, only 20-30 sessions ran (fit in memory). Traffic spike to 50+ → OOM → crash loop.
+
+**Fix:**
+```bash
+kubectl set env deployment/tier2 VLLM_MAX_MODEL_LEN=8192 VLLM_MAX_NUM_SEQS=48
+
+# Prevention: init container validates memory budget before serving
+# model_mem + graph_workspace + (max_seqs × kv_per_seq × max_len) < GPU_TOTAL - 8GB
+```
+
+---
+
+### Root Cause B: Amplifier — SPSC Ring Spin-Loop
+
+**What Happened:** Tier 2 crash → can't drain ring → Tier 0 spins indefinitely on full ring → 68% of CPU wasted on spinning.
+
+**Fix:** Bounded retry (10 attempts) + overflow to durable queue. **Never block Tier 0 on Tier 2 availability.**
+
+---
+
+### Root Cause C: Amplifier — Arrow Buffer Reference Leak
+
+**Tools Used:**
+```bash
+# Memory growth tracking
+cat /proc/$(pgrep fraud-scoring)/status | grep VmRSS
+# VmRSS growing 500MB/hour linearly
+
+grep "arrow_buffer_refcount_leaked" metrics.log
+# 312 leaked buffers/hour
+```
+
+**What We Found:** Overflow path copied Arrow batch pointer to durable queue WITHOUT calling `release()` on the original. Buffers accumulated forever.
 
 **Fix:**
 ```cpp
-// Graceful drain with state handoff
-void handle_drain_signal(Router& router, WorkerNode& draining) {
-    draining.set_accepting(false);                     // Stop new sessions
-
-    for (auto& session : draining.active_sessions()) {
-        // 1. Serialize lightweight state (prefix KV, embeddings, user context)
-        auto snapshot = session.serialize_prefix();     // ~2KB, not full arena
-
-        // 2. Pick destination and pre-warm
-        auto target = router.find_new_affinity(session.id);
-        target.prewarm_session(session.id, snapshot);  // Rebuild arena BEFORE traffic
-
-        // 3. Atomic reroute (only after pre-warm completes)
-        router.atomic_reroute(session.id, target);
-    }
-
-    // Only NOW can the pod terminate
-    draining.signal_ready_to_terminate();
-}
+// Serialize to durable queue (independent copy), then release original
+auto serialized = batch.serialize_to_ipc();
+queue.push(std::move(serialized));
+batch.release();  // Decrement refcount → returns to pool
 ```
 
-```yaml
-# K8s: give drain handler time to migrate
-spec:
-  terminationGracePeriodSeconds: 120  # 2min for state migration
-  lifecycle:
-    preStop:
-      exec:
-        command: ["/bin/sh", "-c", "/app/drain_sessions.sh"]
-```
+---
 
-**Prevention:**
-- Chaos engineering: drain random nodes under load in staging weekly
-- Readiness check: new pod isn't "ready" until it has received session state
-- Session affinity uses stable ID (not pod IP) + explicit handoff protocol
-- Canary drain: migrate 1 session first, validate latency, then drain remaining
+### Root Cause D: Amplifier — HPA Scaling on Wrong Metric
 
-**Outcome:** Zero-downtime rolling updates. Session migration latency reduced from 380ms (cold rebuild) to 8ms (pre-warmed snapshot restore). Users experience no interruption during updates.
+**What Happened:** CPU spike from spin-loop → Tier 0 HPA says "need more pods!" → scales to MAX → more spin loops → more waste. Meanwhile Tier 2 can't get GPUs because cluster is "full" of useless Tier 0 replicas.
+
+**Fix:** HPA uses `requests_per_second` (actual demand) not CPU%. Priority classes ensure Tier 0 > Tier 2 for resource allocation.
 
 ---
 
-### Interview Delivery (2 min)
+### Lessons From The Cascade
 
-> **S:** "Apple Siri pipeline, 300ms SLA. During routine K8s rolling update, 30% of sessions hit 850ms for about 2 minutes."
->
-> **T:** "I needed to find why a standard rolling update was causing latency spikes for a subset of users."
->
-> **A:** "Layer walk-down. Application — no traffic change, but affected sessions were specifically ones that got rerouted after node drain, PARTIAL. Model serving — model inference times identical on new and old pods, REJECT. Data movement — shared memory arenas missing on new pods! Session router used pod IP as affinity key. New pods = new IPs = broken affinity = sessions land on pods with no pre-built ConversationalState arena. Full state rebuild costs 380ms. Lower layers all healthy."
->
-> **R:** "Implemented graceful drain: preStop hook serializes lightweight session state, pre-warms on destination pod, then atomic reroute. Migration latency: 380ms → 8ms. Added chaos testing — weekly random drains in staging. Lesson: session affinity without state migration is fragile by design."
+1. **Any single failure should NOT cascade.** The config drift was 3 days old. The system should have survived a Tier 2 crash without affecting Tier 0 scoring.
+
+2. **Bounded retries everywhere.** Spin-loops are for microsecond contention, not minute-level unavailability. Every inter-tier communication needs a timeout + fallback.
+
+3. **Error paths need the same rigor as happy paths.** The Arrow leak was in overflow code — code that only runs when things are already broken. These paths are the MOST critical to test.
+
+4. **Rate-of-change alerts catch gradual failures.** The memory leak was 500MB/hour — invisible in threshold alerts, obvious in trend alerts.
+
+### What I'd Do Differently (Interview Answer)
+
+> "Three things I'd change. First: **circuit breakers between tiers** — if Tier 2 is unavailable for 30 seconds, stop trying. Tier 0 scoring still works, just without explanations. This prevents ALL downstream symptoms.
+
+> Second: **memory budget validation as a readiness probe** — the pod shouldn't accept traffic if its config violates `model_mem + max_seqs × kv_per_seq < available`. This catches config drift before traffic hits it.
+
+> Third: **chaos engineering** — regularly kill Tier 2 under load in staging. The spin-loop behavior would have been caught in the first test run."
 
 ---
 
-## RunBook 7: "Arrow Buffer Memory Leak — Host Memory Growing 500MB/Hour"
+## RunBook 5: Network & Multi-GPU Scaling Issues — "TP/PP Not Delivering Expected Speedup"
 
-> **Context:** CapitalOne fraud scoring. Host memory (VmRSS) growing linearly at 500MB/hour. No increase in traffic. After 48 hours → OOM killer fires → full outage.
+> **Story Context:** Fiserv 70B model on 4×H100, Broadcom multi-region, NCCL collective operations
+
+### What We Observed
+
+| Alert | Metric Value | Expected | Story |
+|-------|-------------|----------|-------|
+| TP=4 only 2.1× speedup | 25 tok/s (4×H100) | ~45 tok/s (near 4×) | CUDA Task 4 |
+| NCCL timeout errors | `NCCL WARN Timeout` | None | Runbook 4 |
+| One GPU consistently slower | GPU #2 AllReduce 3ms late | All equal | Runbook 7 |
+| Inter-node collective slow | AllReduce 5× slower than spec | Spec bandwidth | Runbook 4 |
 
 ---
 
-### Layer 7 — APPLICATION & BUSINESS LOGIC
+### Root Cause A: Incomplete NVLink Mesh (PCIe Fallback)
 
-**Hypothesis:** "Are we accumulating more data per request? Caching too aggressively?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Request characteristics unchanged
-grep "features_per_request\|response_size" metrics.log
-# Same as always — 120 features, ~2KB response
+# 1. Topology check
+nvidia-smi topo -m
+# GPU0↔GPU1: NV12 (NVLink — good)
+# GPU0↔GPU2: SYS  (PCIe cross-socket — BAD!)
+# GPU2↔GPU3: NV12 (NVLink — good)
+# → Only 2 NVLink PAIRS, not full mesh
 
-# Application-level caches
-grep "cache_size\|cache_entries" metrics.log
-# LRU cache: 10,000 entries (capped, not growing)
-# No unbounded caches in application logic
+# 2. NCCL bandwidth test
+./build/all_reduce_perf -b 1M -e 1G -f 2 -g 4
+# busBW: 180 GB/s (expected: 450 GB/s with full mesh)
 ```
 
-**Verdict: ❌ REJECT** — Application isn't accumulating data. Request sizes constant, caches bounded. Move DOWN.
-
----
-
-### Layer 6 — MODEL SERVING & INFERENCE
-
-**Hypothesis:** "Is a model leaking memory? GPU memory growing?"
-
-**Investigation:**
+**How We Fixed It:**
 ```bash
-# GPU memory
-nvidia-smi --query-gpu=memory.used --format=csv -l 60
-# Stable at 34GB. Not growing. GPU leak ruled out.
+# Option A: Use TP=2 (stay on NVLink pair)
+vllm serve ... --tensor-parallel-size 2
 
-# Model inference allocation
-grep "model_alloc\|tensor_pool" metrics.log
-# Tensor pool: stable at 2GB (reuses buffers correctly)
+# Option B: TP=2 × PP=2 (less AllReduce, more pipeline overlap)
+vllm serve ... --tensor-parallel-size 2 --pipeline-parallel-size 2
+
+# Option C: Request full NVLink-mesh node (DGX/HGX H100)
 ```
-
-**Verdict: ❌ REJECT** — GPU memory and model allocations are stable. This is a HOST memory leak, not GPU. Move DOWN.
 
 ---
 
-### Layer 5 — DATA MOVEMENT & ZERO-COPY
+### Root Cause B: NCCL Using TCP Instead of InfiniBand
 
-**Hypothesis:** "Is a buffer/arena leaking? Reference count issue in the inter-tier data path?"
-
-**Investigation:**
+**Tools Used:**
 ```bash
-# Track host memory growth
-for i in $(seq 1 10); do
-  sleep 60
-  cat /proc/$(pgrep fraud-scoring)/status | grep VmRSS
-done
-# VmRSS: 4,200 MB → 4,208 MB → 4,216 MB → ... (linear growth!)
+# 1. NCCL debug output
+NCCL_DEBUG=INFO python serve.py 2>&1 | grep "Using"
+# "Using network Socket"  ← BAD! Should be "NET/IB"
 
-# Identify WHAT is growing
-# Use jemalloc profiling
-MALLOC_CONF="prof:true,prof_interval:1073741824" ./fraud-scoring &
-jeprof --show_bytes ./fraud-scoring /tmp/jeprof.heap
-# 87% of growth in: arrow::Buffer::Allocate
-# Call path: overflow_path → copy_batch_to_queue → arrow::Buffer::Allocate
-
-# Check Arrow buffer pool reference counts
-grep "arrow_buffer_refcount" metrics.log
-# active_buffers: 847 (growing at 312/hour!)
-# released_buffers: 535 (much less than allocated!)
-# LEAKED: 312 buffers/hour × ~1.6MB each = 500MB/hour ✓
+# 2. IB device check
+ibstat  # State: Down  ← IB not working!
+lsmod | grep ib_uverbs  # Not loaded!
 ```
 
-**Verdict: ✅ ACCEPT — ROOT CAUSE LAYER IDENTIFIED** — Arrow buffers are being allocated in the overflow path (Tier 0 → durable queue) but never released. Reference count increment without corresponding decrement. Growing at 312 buffers/hour × 1.6MB = exactly 500MB/hour.
+**How We Fixed It:**
+```bash
+# Load IB modules
+modprobe ib_uverbs
+modprobe mlx5_ib
+
+# Pin NCCL to IB device
+export NCCL_IB_HCA=mlx5_0
+export NCCL_IB_DISABLE=0
+export NCCL_NET_GDR_LEVEL=5  # Enable GPUDirect RDMA
+```
 
 ---
 
-### Root Cause Deep Dive: Reference Count Leak in Overflow Path
+### Root Cause C: GPUDirect RDMA Not Active
 
-**Why only in overflow path?** The normal SPSC ring path correctly releases buffers (tested extensively). But the OVERFLOW path (only triggered when Tier 2 is behind/crashed) copies the Arrow batch pointer to Kafka WITHOUT calling `release()` on the original buffer.
+**Tools Used:**
+```bash
+lsmod | grep nvidia_peermem  # Empty! Module not loaded
+# Without nvidia_peermem: GPU → CPU RAM → NIC → remote (2× copies)
+# With nvidia_peermem: GPU → NIC → remote (direct, no CPU copy)
+```
 
-**The bug:**
+**How We Fixed It:**
+```bash
+modprobe nvidia_peermem
+
+# Verify GPU and NIC on same NUMA node (required for GDR)
+cat /sys/class/infiniband/mlx5_0/device/numa_node  # Must match GPU NUMA
+```
+
+**Lesson:** Always verify: NVLink topology, NCCL transport selection, GPUDirect RDMA status. A single missing kernel module can 2× your AllReduce latency.
+
+**Prevention:** Node admission: validate `nvidia-smi topo -m`, `ibstat`, `lsmod | grep nvidia_peermem` before joining serving pool.
+
+---
+
+## RunBook 6: Resource Exhaustion — "OOM, Buffer Pool Depletion, Memory Leaks"
+
+> **Story Context:** All stories — every production system eventually hits resource limits
+
+### What We Observed
+
+| Alert | Metric Value | Normal | Story |
+|-------|-------------|--------|-------|
+| GPU OOM at 60% expected capacity | 38 concurrent (expected 64) | 64 | CUDA Task 7 |
+| Pinned memory allocation failed | cudaMallocHost returns error | Always succeeds | Runbook 5 |
+| Buffer pool exhaustion | acquire time: 15µs (was 50ns) | <100ns | Runbook 6 |
+| Host memory growing linearly | +500MB/hour | Stable | Runbook 8 |
+| /dev/shm full | 100% (shared memory) | <80% | Runbook 6 |
+
+---
+
+### Root Cause A: KV Cache OOM (Over-Provisioned max_model_len)
+
+**Tools Used:**
+```bash
+# Memory accounting
+curl localhost:8000/metrics | grep cache
+# gpu_cache_usage: 0.97 at only 38 requests
+
+# Calculate expected vs actual
+python -c "
+model=16; cuda_overhead=7; gpu=80  # GB
+available = gpu - model - cuda_overhead  # 57 GB
+kv_per_req = 2*32*8*128*4096*2 / 1e9  # 0.5 GB at max_model_len=4096
+expected = available / kv_per_req  # 114!
+print(f'Expected: {expected:.0f}, Actual: 38')
+# Problem: max_model_len=4096 but avg actual usage only 800 tokens
+# 75% of allocated KV is WASTED
+"
+```
+
+**How We Fixed It:**
+```bash
+--max-model-len 2048          # If prompts fit (2× more concurrent)
+--enable-prefix-caching        # Share KV blocks across similar prompts
+--kv-cache-dtype fp8           # 2× more KV capacity
+```
+
+---
+
+### Root Cause B: Pinned Memory Exhaustion During Blue-Green Swap
+
+**Tools Used:**
+```bash
+nvidia-smi -q -d MEMORY | grep -A5 "Pinned"
+ulimit -l  # Locked memory limit — may be too low
+cat /proc/meminfo | grep Mlocked
+```
+
+**What We Found:** Blue-green model swap has BOTH old and new model buffers allocated simultaneously. Doubles pinned memory. `RLIMIT_MEMLOCK` sized for single-model only.
+
+**How We Fixed It:**
 ```cpp
-// BROKEN: overflow path leaks refcount
-void overflow_to_kafka(SPSCRing& ring, const ArrowBatch& batch, KafkaProducer& kafka) {
-    // Copy batch pointer to Kafka message
-    kafka.produce(batch.data(), batch.size());  // Kafka makes its own copy
-    // BUG: batch.release() NEVER CALLED!
-    // Original buffer stays allocated forever → pool exhausted → new mallocs → leak
+// Stagger: free old BEFORE allocating new
+void atomic_model_swap(ScoringBuffers& buf, Model& new_model) {
+    drain_inflight(buf, 50);         // Wait max 50ms
+    cudaGraphExecDestroy(buf.graph_exec);
+    cudaFreeHost(buf.h_features);    // Release old pinned memory FIRST
+    cudaFreeHost(buf.h_scores);
+    init_buffers(buf, MAX_BATCH, new_model.num_features());  // Allocate new
+    capture_scoring_graph(buf, new_model, MAX_BATCH);
 }
 ```
 
-**The fix:**
+---
+
+### Root Cause C: gRPC Buffer Pool Exhaustion (Feature Load Change)
+
+**Tools Used:**
+```bash
+grep "buffer_pool" /var/log/pipeline.log
+# pool_size=4096 in_use=4091 free=5 fallback_count=847  ← Exhausted!
+
+# perf: allocation path cache misses
+perf stat -e cache-misses -p $(pgrep siri-search) -- sleep 10
+```
+
+**What We Found:** Siri Suggestions streams 32 results per session × millions sessions. Each chunk acquires a buffer. Pool sized for pre-Suggestions traffic (4096 buffers). Exhausted → falls back to malloc (15µs each).
+
+**How We Fixed It:**
 ```cpp
-// FIXED: serialize independently, then release original
-void overflow_to_kafka(SPSCRing& ring, const ArrowBatch& batch, KafkaProducer& kafka) {
-    auto serialized = batch.serialize_to_ipc();     // Independent copy for Kafka
-    kafka.produce(serialized.data(), serialized.size());
-    batch.release();                                 // Decrement refcount → returns to pool
-    emit_metric("tier2.overflow_with_release", 1);
+// 1. Resize pool for peak feature load
+constexpr int POOL_SIZE = MAX_SESSIONS * MAX_CHUNKS_PER_SESSION * 1.5;  // 32768
+
+// 2. Batch streaming: 8 results per buffer instead of 1
+for (int i = 0; i < results.count; i += 8) {
+    auto* buf = pool.acquire();  // 4 acquires per session (was 32)
+    serialize_batch(results, i, min(i+8, results.count), buf);
+    stream.Write(buf);
+    pool.release(buf);
 }
 ```
 
-**Why was this missed?**
-- The overflow path only runs when Tier 2 is slow/unavailable
-- Unit tests for the normal path pass (that path releases correctly)
-- Integration tests never kill Tier 2 long enough to trigger overflow at scale
-- The leak is slow enough (500MB/hour) that short test runs don't surface it
+**Lesson:** Buffer pools must be sized for PEAK feature load, not average. New features can 8× the buffer acquire rate overnight.
 
-**Prevention:**
-- Unit test: assert `pool.active_count()` before and after overflow path
-- Integration test: kill Tier 2 for 10 minutes under load, verify VmRSS stable
-- Rate-of-change alert: `deriv(process_resident_memory_bytes[5m]) > 50MB/hour`
-- Valgrind/ASAN runs on overflow code path specifically
-
-**Outcome:** One-line fix (`batch.release()`). Memory became flat immediately. Added leak detection: rate-of-change alert on VmRSS catches any future leak within 1 hour.
+**Prevention:** Auto-scale pool if >80% utilized for 30s (double, with hard cap). Alert at 70%.
 
 ---
 
-### Interview Delivery (2 min)
+## Quick-Reference: Symptoms → Root Cause → Story Mapping
 
-> **S:** "CapitalOne fraud scoring. Host memory growing 500MB/hour linearly. No traffic change. After 48 hours → OOM kill → outage."
+| Symptom | Most Likely Root Cause | Tools | Story to Tell |
+|---------|----------------------|-------|---------------|
+| P99 spike immediately after deploy | CUDA Graph invalidation | nsys (graph vs eager) | CapitalOne model update |
+| P99 spike on long prompts only | Prefill O(T²) or FP8 precision | ncu roofline, dtype comparison | CUDA Task 1/5 |
+| Gradual throughput decay over days | KV cache fragmentation | vLLM preemption metrics | LLM infra (Fiserv) |
+| GPU util low under load | Batch=1, parallelism wasted | nsys + DCGM | CapitalOne micro-batching |
+| GPU util HIGH but P99 bad | Prefill blocking decode | nsys timeline | LLM infra (vLLM scheduling) |
+| CPU spike with no work increase | Spin-loop from downstream failure | perf top (spin function) | Cascading failure |
+| One GPU slower than others | NUMA misalignment / NVLink | nvidia-smi topo + numastat | Fiserv TP deployment |
+| Quality degrades on long context | FP8 softmax precision | BF16 comparison | CUDA Task 5 |
+| Memory growing linearly | Reference count leak | VmRSS tracking | Arrow buffer cascade |
+| OOM earlier than expected | max_model_len over-provision | Memory budget calc | CUDA Task 7 |
+| Session latency spike after drain | Affinity routing broken | migration metrics | Siri rolling update |
+| Throughput drops after CUDA Graphs | Graphs stealing KV memory | vLLM cache metrics | CUDA Task 2 |
+| H2D transfer time doubled | Pageable memory fallback | nsys mem_time_sum | vLLM upgrade regression |
+| HPA scales but doesn't help | Scaling on wrong metric | kubectl get hpa | Cascading failure |
+
+---
+
+## Interview Delivery Cheat Sheet
+
+> Pick ONE RunBook, TWO root causes within it, and tell the STAR story:
+
+**Template (2 minutes):**
+
+> **S:** "We were running [system] at [scale] with [SLA]. Alert fired showing [specific metric]."
 >
-> **T:** "Find and fix the memory leak before the next OOM (had ~12 hours remaining)."
+> **T:** "My job was to diagnose and fix this within [timeframe] while maintaining [availability]."
 >
-> **A:** "Layer walk-down. Application — no unbounded caches, request sizes constant, REJECT. Model serving — GPU memory flat, tensor pools stable, REJECT. Data movement — jemalloc profiling showed 87% of growth in arrow::Buffer::Allocate on the overflow path. The SPSC ring overflow-to-Kafka code copied the batch without calling release() on the original. Normal path tested, overflow path untested. 312 leaked buffers/hour × 1.6MB = exactly 500MB/hour."
+> **A:** "First I ran [tool 1] which showed [finding]. This pointed me to [root cause]. I then confirmed with [tool 2] showing [evidence]. The fix was [specific change]. But I also discovered [second issue] using [tool 3] — the root cause was [explanation] and I fixed it by [change]."
 >
-> **R:** "One-line fix: added batch.release() after Kafka serialization. VmRSS immediately flat. Added rate-of-change alert on memory, and integration tests that exercise the overflow path under sustained Tier 2 failure. Lesson: error paths need the SAME rigor as happy paths — they're actually MORE critical because they run when things are already broken."
+> **R:** "P99 dropped from [X] to [Y] — [N×] improvement. Throughput recovered to [Z]. The key lesson was [insight], and I prevented recurrence by [specific prevention measure]."
 
----
-
-## RunBook 8: "Cascading Multi-Tier Failure — Everything Degrading Simultaneously"
-
-> **Context:** CapitalOne three-tier fraud system. Multiple alerts fire simultaneously. This is the most complex runbook — it demonstrates how a SINGLE root cause cascades through multiple layers when isolation boundaries are weak.
-
----
-
-### Layer 7 — APPLICATION & BUSINESS LOGIC (Multiple Alerts)
-
-| Alert | Value | Expected |
-|-------|-------|----------|
-| Fraud scoring throughput | 2,940/sec | 24,500/sec |
-| Tier 2 pods | CrashLoopBackOff | Running |
-| CPU utilization | 92% | 35% |
-| HPA scaled to MAX | 20 pods | 4-6 pods |
-| Memory growing | +500MB/hour | Stable |
-
-**First question: What changed?**
-```bash
-# Recent deployments
-kubectl get events --sort-by=.metadata.creationTimestamp | grep -i "deploy\|config"
-# 3 days ago: helm upgrade tier2 (values override)
-# Nothing since then — this is a DELAYED failure
-
-# The 3-day-old change:
-kubectl get configmap tier2-config -o yaml | diff - tier2-config-backup.yaml
-# max_model_len: 16384 (was 8192)
-```
-
-**Verdict:** Multiple layers affected simultaneously. This is a CASCADE. We need to find the TRIGGER and trace the propagation path.
-
----
-
-### Cascade Analysis: Tracing Layer by Layer
-
-**Step 1: Find the FIRST thing that broke (time-series correlation)**
-```bash
-# Plot timeline of when each alert fired
-curl localhost:9090/api/v1/query_range?query=up{job="tier2"}&start=-2h
-# T+0:00  Tier 2 pod restarts begin (first failure)
-# T+2:00  SPSC ring fullness reaches 100%
-# T+2:30  CPU spike begins
-# T+3:00  Memory growth begins (overflow path triggered)
-# T+3:00  HPA scales Tier 0 (reacting to CPU)
-# T+5:00  Throughput collapse visible
-
-# FIRST FAILURE: Tier 2 GPU OOM
-kubectl logs tier2-reasoning-0 --previous | head -5
-# RuntimeError: CUDA out of memory. Tried to allocate 2.4 GB
-```
-
-**Step 2: Why did Tier 2 OOM NOW (config was 3 days old)?**
-```bash
-# Traffic spike hit at T+0:00
-# max_model_len=16384 → KV per request: 1.2GB
-# At 50 concurrent: 50 × 1.2GB = 60GB KV + 16GB model = 76GB (of 80GB total)
-# Normal traffic (30 concurrent): 30 × 1.2 = 36 + 16 = 52GB (fits!)
-# Spike to 50: OOM!
-```
-
----
-
-### Layer-by-Layer Cascade Propagation
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ TRIGGER (Layer 6): Config drift + traffic spike → GPU OOM → crash   │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ AMPLIFIER 1 (Layer 5): SPSC ring fills → Tier 0 spin-loop          │
-│ Evidence: ring_buffer_full=1.0, spin_count=847K/sec                 │
-│ WHY: Ring designed for µs contention, facing minutes of full ring   │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ AMPLIFIER 2 (Layer 5): Overflow path leaks Arrow buffers            │
-│ Evidence: VmRSS +500MB/hour, arrow refcount growing                 │
-│ WHY: overflow_to_kafka() missing batch.release()                    │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ AMPLIFIER 3 (Layer 3): HPA scales on CPU (wrong metric)             │
-│ Evidence: 20 pods all spinning → wastes cluster resources           │
-│ WHY: CPU-based HPA interprets spin-loop as "needs more replicas"    │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ FINAL STATE (Layer 7): 88% throughput loss, OOM in 48h              │
-│ Evidence: 2,940/sec (was 24,500), VmRSS on OOM trajectory          │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### Fixes By Layer (Bottom-Up)
-
-**Layer 6 Fix — Prevent the trigger:**
-```bash
-# Memory budget validation as readiness probe
-# Pod won't accept traffic if: model + max_seqs × kv_per_seq > GPU - 8GB buffer
-vllm serve ... --max-model-len 8192 --max-num-seqs 48
-```
-
-**Layer 5 Fix — Prevent spin-loop cascade:**
-```cpp
-// Bounded retry (10 attempts), then overflow. NEVER spin indefinitely.
-if (!ring.try_push_bounded(batch, 10)) {
-    overflow.push(batch.serialize_to_ipc());
-    batch.release();  // Fix memory leak too!
-}
-```
-
-**Layer 3 Fix — Prevent HPA amplification:**
-```yaml
-# Scale on actual demand, not CPU symptoms
-metrics:
-  - type: Pods
-    pods:
-      metric:
-        name: fraud_scoring_requests_per_second
-```
-
-**Layer 7 Fix — Circuit breaker for graceful degradation:**
-```cpp
-// If Tier 2 unavailable >30s, stop trying. Scoring still works.
-if (tier2_circuit_breaker.is_open()) {
-    // Score without explanation (hot path still serves!)
-    return score_result;  // Skip Tier 2 publish entirely
-}
-```
-
----
-
-### Key Insight: Isolation Boundaries
-
-The fundamental lesson: **Each layer failure should be CONTAINED within that layer.**
-
-| Boundary | Should Prevent | Actually Happened |
-|----------|---------------|-------------------|
-| Tier 2 OOM → Tier 0 | Tier 0 unaffected by Tier 2 crash | Spin-loop burned Tier 0 CPU |
-| Memory leak → System | Bounded memory, auto-restart | Grew 48h until OOM kill |
-| HPA scaling | Scale on demand, not symptoms | Scaled on spin-loop CPU |
-| Single tier → All tiers | Circuit breaker, graceful degrade | Total system collapse |
-
----
-
-### Interview Delivery (2 min)
-
-> **S:** "CapitalOne three-tier fraud system. Everything broke at once: Tier 2 crashing, CPU at 92%, throughput at 12% of normal, memory leaking."
->
-> **T:** "Simultaneous failures across multiple layers. I needed to find the trigger, trace the cascade, and fix the isolation gaps."
->
-> **A:** "Timeline analysis first: Tier 2 OOM was the first alert (config drift made max_model_len=16384 three days prior — only triggered on traffic spike). Then cascade: SPSC ring fills → Layer 5 spin-loop → Layer 5 Arrow refcount leak in overflow path → Layer 3 HPA amplifies by scaling on CPU. Each amplifier was a missing isolation boundary. Fixes were layered: memory budget probe (prevent trigger), bounded ring retry (prevent spin), batch.release() (prevent leak), request-based HPA (prevent amplification), circuit breaker (prevent cascade)."
->
-> **R:** "Five fixes across three layers. System now survives Tier 2 crashes with zero Tier 0 impact. We chaos-test this monthly. The lesson: cascading failures reveal missing ISOLATION BOUNDARIES. Fix the boundaries, not just the trigger."
-
----
-
-## Quick-Reference: Layer Isolation Checklist
-
-When investigating, use this to decide which layer to check first:
-
-| Symptom Pattern | Start At | Why |
-|----------------|----------|-----|
-| Spike correlates with deployment | Layer 4/6 (GPU/Model) | Kernel/graph/config changes |
-| Gradual decay over hours/days | Layer 6 (KV cache, fragmentation) | Stateful accumulation |
-| Affects subset of sessions | Layer 5 (routing, shared memory) | State affinity broken |
-| CPU high but throughput low | Layer 5 (spin-loops, contention) | Wasted cycles on blocking |
-| One GPU slower than others | Layer 2/1 (topology, NUMA) | Physical placement issue |
-| Quality degrades with length | Layer 6 (quantization, precision) | Numerical error accumulation |
-| Memory growing linearly | Layer 5 (buffers, refcounts) | Leak in error/overflow path |
-| Multiple alerts simultaneously | TRACE CASCADE (find trigger) | Single root → multiple symptoms |
-
----
-
-## Hypothesis Testing Framework
-
-At each layer, follow this protocol:
-
-```
-1. FORM HYPOTHESIS: "Layer X is the problem because [specific reasoning]"
-2. CHOOSE TOOL: Select the cheapest/fastest tool that can DISPROVE the hypothesis
-3. COLLECT EVIDENCE: Run the tool, capture specific numbers
-4. DECIDE:
-   - REJECT: Evidence clearly rules out this layer → move DOWN
-   - PARTIAL: Symptom visible here but cause is below → note and move DOWN
-   - ACCEPT: Evidence confirms root cause IS in this layer → DRILL IN
-5. VERIFY: After accepting, quickly check one layer below to confirm
-   lower layers aren't contributing
-```
-
-**Key discipline:**
-- Never skip layers (even if you have a gut feeling)
-- Always have EVIDENCE for accept/reject (not assumptions)
-- "PARTIAL" is valid — symptoms manifest above root cause
-- Cascades touch multiple layers — trace the propagation PATH
-
----
-
-## Interview Delivery Template (All RunBooks)
-
-**Opening (10 sec):** State the observable symptom and business impact.
-
-**Investigation (60 sec):** Walk through 2-3 layers you tested:
-- "First I checked Layer X — [tool] showed [metric], which ruled it out / pointed lower."
-- "Then Layer Y — [tool] revealed [finding], confirming the root cause was in [layer]."
-
-**Root Cause (30 sec):** Explain WHY at the mechanism level.
-
-**Fix + Prevention (20 sec):** What you changed and how you prevented recurrence.
-
-**Power phrases:**
-- "I rejected the obvious hypothesis because the evidence showed..."
-- "The symptom was at Layer 7 but the root cause was at Layer 4 — without walking down systematically I would have wasted time on [wrong thing]"
-- "The dangerous part was the SILENCE — no error logs, no alerts, just gradual degradation"
-- "Each layer failure should be CONTAINED. The cascade happened because isolation boundaries were missing"
-- "I fixed the immediate issue AND the systemic gap that allowed it to cascade"
+**Power phrases for profiling stories:**
+- "The nsys timeline made it immediately obvious that..."
+- "Without profiling, we would have assumed [wrong thing]. The data showed..."
+- "The fix wasn't a kernel optimization — it was a scheduling/routing/config change informed by understanding the GPU execution model"
+- "The dangerous part was that it was SILENT — no errors, no logs, just gradual degradation"
 
 ---
 
