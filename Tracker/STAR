@@ -1,3 +1,415 @@
+
+Target 05/28 - 7 days 
+	STAR			:- 50 %	:- 1 day
+	Search			:- 70 % :- 1 day
+	Inferencing		:- 70 %	:- 1 day
+	System	(K8)	:- 70 %	:- 1 day
+	CUDA & GPU		:- 50 %	:- 1 day
+	C++ & RUST		:- 30 %	:- 1 day
+	DSA 			:- 20 %	:- 1 day
+	Data Science/NLP:- 50 %	:- 1 day
+
+	* Daily one STAR story must be complete - 1 Hr
+	* Daily one topic on RUST and C++ which is relevant - 1 Hr 
+	* Daily some DSA warn-up - 30 min 
+
+
+
+=========
+
+Linux System and HPC
+	CPU 
+		Issues
+			CFS CLIFF
+			NUMA CLIFFS
+			Excessive threads
+		Tools 
+
+		Optimizations
+			Isolation
+				GRUB_CMDLINE_LINUX="isolcpus=4-19,24-39 nohz_full=4-19,24-39 rcu_nocbs=4-19,24-39"
+			NUMA Pinning
+				Host :- 
+					numactl --cpunodebind=0 --membind=0 -- ./fraud-scorer.
+				K8 :- 
+					CPU Manager, kind: ClusterConfiguration and kind: KubeletConfiguratio with static policy , 
+					Resource and Limits 
+				Application(C++)
+					pthread_setaffinity_np
+	GPU
+		Optimization
+			Topology aware scgeduling :- Ensure pod lands on NUMA node local to the GPU
+				topologySpreadConstraints in k8
+			MIG partitiioning 
+			Time slice, sharing GPU among POD 
+	Memory
+		Issues
+			TLB CLiff
+		Optimization
+			HugePages on Host
+			Volume with HugePage and shared memory (IPC Namespace) on K8
+	Network
+			Host:
+				AF_XDP (Instead DPDK due to high operation challenges)
+				NIC Ring Buffer and Multi-Queue configuration . iouring 
+			K8:
+				SR-IV CNI pluging. RDMA access via SR-IOV.
+	Storage
+		NVME
+		Lustre 
+
+
+Metrics 
+			Utilization
+			Saturations
+			Errors 
+		Tools 
+			top,uptime,netstat,vmstat,free,iostat,mpstat,ps,tcpdump,ss,iotop,slabtop,pcstat,numastat,numactl
+		Packages
+			Flamegraphs,perf,wireshark,eBPF,Intel VTune Profiler, Intel Advisor,Intel Inspector,HeapTrack,Hotspot,Tracy,Valagrind
+		Tuning
+		Code Coverage
+	Custamization
+		eBPF
+		CXL
+	Performance Troubleshooting &  Profiling
+			Cluster level:-
+					DGCM Exporter
+					Node Exporter 
+					vLLM metrics 
+				Node Level
+					htop
+					numastat
+		Performance Troubleshooting
+			USE methods(Usage Standardidation Saturation) for Infra
+			RED methods ((Throughput))
+			On-CPU vs Off-CPU analysis
+			Tools
+				CPU
+					top/htop
+					uptime
+					mpstat
+					pidstat
+					ps
+				Memory
+					free
+					vstat
+					slabtop
+					pcstat
+				NUMA
+					numastat
+					numactl
+				Storage
+					iostat
+					iotop
+				Network
+					ss
+					netstat
+					tcpdump
+		Profiling
+			CPU
+				perf
+				Intel vTune 
+				Intel Inspector
+				Tracy 
+			GPU
+				NsIght System
+				Nsight Compute  		
+			Memory
+				valagrind
+				heaptrack
+				tcmalloc(For Production)
+			Network
+				Wireshark
+			PyTorch Profiler 
+	
+	Benchmarking
+	 	Compute
+	 		HPL
+	 		HPCG
+	 		STREAM
+	 		Intel MLC
+	 	Network
+	 		iperf3
+	 		NCCL Tests
+	 	Storage
+	 		FIO
+	 		IOR
+	 	GPU
+	 		gpu-burn
+	 		DCGM diag / Expoeter
+	 		cuBLAS bench
+	 	MLPerf
+
+
+
+
+===================================================================================================
+
+
+Search & Recommendation
+	Query
+		expansion
+	Retrival
+		Sparse
+			Inverted Index
+			TF-IDF
+			BM-25
+		Desnse-Vector
+			Embeddings
+				Incremental Embeddings
+			Bi-Encoder
+			Cross-Encoder
+		Index
+			Types
+				KNN
+				ANN
+				IVF
+				HNSW
+				CAGRA
+			Partition statretegies
+			Incremetal & Full build
+		Similarity
+			Educledian distance 
+			Cosine
+			dot product
+	Fusion
+		RRF
+	Ranking 
+		MMR
+	Recommendation
+		Collaborative filtering
+		Matrix factorization
+		Content based filtering
+		Two tower model(Duel Encoder. 
+	Sharding
+	Graph
+		Fundamentals
+			Knowledge Graph
+			retrival
+		TigerGraph
+	
+
+Parking
+	Q17: How do you keep data on GPU across pipeline stages to avoid PCIe transfers?
+	Q23: How do you build an observability stack for shared-memory pipelines where traditional tracing doesn't work?
+	Q24: How do you monitor FAISS index quality over time in production?
+	Q28: How do you handle failure modes in a real-time scoring pipeline?
+	Q31: How do you train embedding models for retrieval?
+	Q32: What is the difference between symmetric and asymmetric embedding models?
+	Q37: How do you handle the cold-start problem for new items in a recommendation system?
+	Index sizing on GPU and sharding , replication and scaling. Failure handling , backup 
+	How do you build the staging pipeline for pre-release testing and debugging prod issues 
+
+Notes	
+	Search 
+		SUmmary of Throughput, Latency, QPS , trasction numbers by heart 
+		Summarey of complete infra i.e. nodes, hardware configuration, K8 configuration, scale etc. by heart
+		How pinning with HBM and CPU works 
+		Explain how search really works in Fraud detection and Siri 
+		Explain how recommendation works in Siri 
+		Explain cold start problems 
+		How really zero copy multi stage siri looks like from top , how it boil down for gioverenance and collaboration and contribution
+		How can you leverage LLM for Recommendation. Walk through of complete recommendation cse in general and in context with Siri 
+		One full flow of srearch and recommendation using phases like candidate generation (Retrival, pre-ranking, Ranking , re-ranking. 
+=======================================================================
+
+
+GPU & CUDA
+	GPU
+		Generation
+			Tesla, Fermi, Kepler, VOLTA(2017), Ampere, Hopper, Blackwell(2024)
+
+		Architecture
+			Physical Architecture
+				L1,L2, SM , DRAM (HBM)
+			Shared Memory 
+			Logical Architecture
+				L1/L2/Tensor cores/SM/Block/Warp/Partitions/Core/
+			Memory Hirarchy 
+				L1/L2/SRAM/Shared/Global
+
+			Kernel Launch
+				  -> Grid
+				     -> Blocks
+				        -> Warps (32 threads each)
+				           -> Threads
+
+			- Thread: Smallest execution unit. Has its own registers, program counter, and local state.
+			- Warp: Group of 32 threads scheduled together on NVIDIA GPUs. This is the basic unit of execution.
+			- Block: Group of threads that can cooperate via shared memory and `__syncthreads()`.
+			- Grid: All blocks launched for a kernel.
+			- SM (Streaming Multiprocessor):** Hardware unit that executes blocks and warps.
+
+		Occupancy 
+			Formula = warp used in a kernel/max warp per kernel 
+			Formula = threads used per SM / Max Threads per SM 
+			Theortotical vs Achived occupancy
+
+	========================
+	CUDA
+		Fundamentals 
+			Vector Ops
+			2D Indexing 
+			Reduction
+			MatMul
+			Tensor
+			stride
+			GEMM , Shared Memory Tiling
+			CUDA Graphs
+			Coalesced vs scattered access
+			CUDA Streams
+			waves
+			Atomics
+			Warp premetives
+			Warp Divergence
+			Coalesced vs scattered access
+		Memeory 
+			Shared Memory 
+				Tiling
+				Bank Conflicts
+			Host-Drvice Transfer 
+				Pageble
+				Pinned
+				Mapped Zero-Copy 
+				Unified Memory 
+		Occupancy
+			Stall Categories
+		CUDA Streams
+		waves
+		Multi-Gpu operation
+		CUDA Graphs
+		Kernel fusion
+		Libraries
+			Thrust
+			cuBLAS
+			cuTLAS
+		Profiling 
+		Tools
+			Runtime API (cudaDeviceProp), 
+			Error Checking API :- cudaError, cudaEvent 
+			NVIDIA NSIGHT
+			NVIDIA-SMI
+			NCU
+			cuda-memcheck :- Memory error 
+			cuda-gdb
+			Roofline analysis
+			Nvidia Nsight
+				Always do nvsys first for high level picture and then nvc for individual kernel
+				System :- For developer to do sysytem wise analysis 
+					nvsys
+				Compute :- Profiles individual kernel
+					nvc command . 
+					Sections and metrics :- Figure out importanant section and metrics .
+					Sections
+						SpeedOfLight : Is this kernel compute‑bound or memory‑bound?
+						MemoryWorkloadAnalysis :- Where is the memory bottleneck?
+						ComputeWorkloadAnalysis :- Which compute pipelines are busy?
+						Occupancy + LaunchStats — "Am I using the SM efficiently?"
+						SchedulerStats + WarpStateStats — "Why are warps stalled?"
+						SpeedOfLight_RooflineChart — "Where does this kernel sit on the roofline?"
+
+					Metrics
+					Example Command
+
+					ncu -o triage \
+					    -k regex:"<kernel_pattern>" \
+					    -c 5 \
+					    --section SpeedOfLight \
+					    --section LaunchStats \
+					    --section Occupancy \
+					    <your_app>
+
+		    PyTorch Profiler
+	Triton
+
+
+
+
+================================================================================
+
+================================================================================
+System Programming
+CPP
+	RAAI
+		Standard practise of aquiring resources in constructir, using desctor and stand c++ unique poters, file etc.
+	Pointers and Smart Pointers
+	Template
+		Generic pattern , it creats respective function at runtime 
+		same_as for type checking 
+	ZERO data copy 
+	Memory Arena
+	NUMA based programming (https://www.youtube.com/watch?v=f0ZKBusa4CI)
+	Threading & Processes 
+		Unlike thread each Processes has its own memory whereas therads operates in the same memory 
+		pthreads are c style threads, we should not be using it instaed we should use std:thread which RAAI safe .
+
+	
+	Plugin and Libraries
+	FileIO
+	SIMD vectorization and CUGEMM libraries Smart Pointers, RAII, Futures, Template
+	OOPS
+	MPI(Extra)
+	Macro
+
+	How do you write the C++ program to take advantage of SIMD, NUMA , CFS , MemoryArena , Zero Copy , L1/L2/L3 cache 
+
+Python
+	Python essential concepts 
+	PyTorch
+		Eager/ torch.compile
+		Triton
+RUST
+	Socket Programming 
+	Proxy, Routing and Load Balancing
+	Memory Arena
+	FileIO
+	Owenership and borrowing
+	shadowing 
+	loop label, while , for 
+	Struct / Enum 
+	Error handling / Option / Result 
+	Dynamic Dispatch
+	Iterator
+	Smart Pointers
+	Frameworks
+		Takio
+		Axum
+	MPSC channels
+	ThreadPool
+
+Zero Copy 
+		POSIX shm_open, mmap, and memory-mapped files
+		Rust (memmap2 or raw mmap)
+		Python (multiprocessing.shared_memory)
+	Serialization/deSearlization
+		Protopub, Flatbuffer
+	Fast Network
+		io_uring, AF_XDP, DPDK, netmap, RDMA.
+	Apsche Arrow 
+
+================================================================================
+DevOps and Cloud
+Kubernetes , RAY & SLURM
+
+Virtualizations
+Containers
+MiniOS
+Networking
+	Protocals 
+	RDMA
+	NCCL 
+	Switches 
+
+Cloud and On-Prem 
+	AWS
+	GCP 
+	On-Prem
+		NVIDIA DGX
+		NVIDIA DPU 
+NVIDIA GROVE
+
+===============================================================================
 STAR
 	1. High Latency Incidents - System experiencing slowness 
 		a.  P-99 latency increased . TTFT spikes . 
@@ -38,68 +450,3 @@ RunBook 2:- Quality Dropped
 		Halucination rate increased
 
 RunBook 4:- Add anything 
-
-
-Search & Recommendation
-	Retrival
-		Sparse
-			Inverted Index
-			TF-IDF
-			BM-25
-		Desnse-Vector
-			Bi-Encoder
-			Cross-Encoder
-		Index
-			KNN
-			ANN
-			IVF
-			HNSW
-		Similarity
-			Educledian distance 
-			Cosine
-			dot product
-	Ranking 
-	Recommendation
-		Collaborative filtering
-		Matrix factorization
-		Content based filtering
-		Two tower model(Duel Encoder. 
-	Sharding
-	Graph
-		Fundamentals
-			Knowledge Graph
-			retrival
-
-		TigerGraph
-Inferencing
-	Rust Gateway 
-	vLLM
-	SgLang
-	TesnorRT-LLM In-Process
-	TensorRT-LLM Integrated with SG-Lang 
-Observability, Profiling, Troubleshooting and Benchmarking
-Linux System
-GPU and CUDA
-System Programming 
-Framework and tools
-	Apache Arrow 
-	TigerGraph
-	PyTorch
-	FIASS
-	ONNX
-
-
-Question	
-	Search 
-		SUmmary of Throughput, Latency, QPS , trasction numbers by heart 
-		Summarey of complete infra i.e. nodes, hardware configuration, K8 configuration, scale etc. by heart
-		How pinning with HBM and CPU works 
-		Explain how search really works in Fraud detection and Siri 
-		Explain how recommendation works in Siri 
-		Explain cold start problems 
-		How really zero copy multi stage siri looks like from top , how it boil down for gioverenance and collaboration and contribution
-		How can you leverage LLM for Recommendation. Walk through of complete recommendation cse in general and in context with Siri 
-		One full flow of srearch and recommendation using phases like candidate generation (Retrival, pre-ranking, Ranking , re-ranking. 
-
-
-
