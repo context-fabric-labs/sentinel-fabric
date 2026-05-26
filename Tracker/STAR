@@ -1,14 +1,17 @@
 
-Target 05/28 - 7 days 
-	STAR			:- 50 %	:- 1 day
-	Search			:- 70 % :- 1 day
-	Inferencing		:- 70 %	:- 1 day
-	System	(K8)	:- 70 %	:- 1 day
-	CUDA & GPU		:- 50 %	:- 1 day
-	Data Science/NLP:- 50 %	:- 1 day
-	C++ & RUST		:- 30 %	:- 1 day
-	DSA 			:- 20 %	:- 1 day
-	
+Target 05/28 - 5 days 
+	STAR			:- 70 %	:- 2 Hr
+	Search			:- 70 % :- 2 Hr
+	Inferencing		:- 80 %	:- 1 Hr
+	System	(K8)	:- 80 %	:- 1 Hr
+	CUDA & GPU		:- 60 %	:- 2 Hr
+	Data Science/NLP:- 70 %	:- 1 Hr
+	Training		:- 60 % :- 1 Hr
+	C++ & RUST		:- 60 %	:- 2 Hr
+
+	======================================
+	DSA 			:- 30 %	:- 0 day
+	======================================
 
 	* Daily one STAR story must be complete - 1 Hr
 	* Daily one topic on RUST and C++ which is relevant - 1 Hr 
@@ -219,7 +222,7 @@ Notes
 GPU & CUDA
 	GPU
 		Generation
-			Tesla, Fermi, Kepler, VOLTA(2017), Ampere, Hopper, Blackwell(2024)
+			Tesla, Fermi, Kepler, VOLTA(2017), Ampere, Hopper, Blackwell(2024), Rubin (Future)
 
 		Architecture
 			Physical Architecture
@@ -341,10 +344,11 @@ System Programming
 			shm_open
 			mmap
 		SIMD
+		aligns :- For explicitly setting the variables of dedicated cache lines
 		SPSC Queue
 		Atomic
 		Threading 
-			std::thgread
+			std::thread
 			pthread
 		Macros and Preprocessor
 
@@ -352,6 +356,10 @@ System Programming
 			Templates
 			RAII(Resource Acquisition Is Initialization)
 				Smart Pointers
+
+
+		
+
 
 
 	RUST
@@ -363,7 +371,7 @@ System Programming
 		Channels: MPSC
 		Shared Memory(memmap2)
 		Iterators
-		Dynamic Dispatch
+		Dynamic Dispatch :- Polymorphism
 		ThreadPool
 
 ================================================================================
@@ -505,3 +513,16 @@ RunBook 2:- Quality Dropped
 		Halucination rate increased
 
 RunBook 4:- Add anything 
+
+Tasks :-
+	Make sure how XGBoost, BERT, FIASS and TigerGraph are working together 
+	How data is ingested for FIASS search, what kind of data and how the index works 
+	How we insert the data to tigerGraph
+
+	In CapitalOne and Apple how the Infra looks like, how do we deploy the services on kuberenets and how is the placement , what is the capacity
+
+Videos to Watch 
+	Benchmarking
+	eBPF
+Must Do
+	TigerGraph - GSQL
