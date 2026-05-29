@@ -1,0 +1,232 @@
+g
+You are my senior interview-prep coach for a Principal AI Security Engineer interview.
+
+Context:
+I am interviewing for a Principal AI Security Engineer role focused on Security for AI / GenAI / agents / platform security. Treat this as different from “AI for security.” The role emphasizes end-to-end security architecture across AWS, cloud-native platforms, identity systems, networking, data platforms, CI/CD, AI/GenAI systems, deterministic guardrails, agent/tool authorization, policy enforcement outside the model, model/data lifecycle security, observability, and production security controls.
+
+My background to use:
+
+* AI/HPC systems engineer with low-latency distributed systems background.
+* Built Rust gateway/control-plane style architectures.
+* Worked on LLM serving, vLLM/SGLang/TensorRT-LLM, GPU/Kubernetes, admission control, circuit breakers, observability, and guardrail pipelines.
+* Built fraud/identity-like decisioning systems using XGBoost, Transformer, FAISS, TigerGraph, and feature stores.
+* Strong systems focus: Rust, C++, CUDA, Kubernetes, AWS/EKS, service mesh, policy enforcement, zero-copy data paths, SLO-driven production systems.
+* I want to position myself as someone who secures AI platforms by making security controls deterministic, auditable, fail-safe, and external to the model.
+
+Please create an interview-ready markdown guide named:
+
+coupang_principal_ai_security_interview_prep.md
+
+The guide should include the following sections:
+
+1. Role Interpretation
+    Explain the role in plain English:
+
+* Security for AI, not mainly AI for security.
+* What the interviewer likely wants to hear.
+* What risks they care about: prompt injection, indirect prompt injection, data exfiltration, model misuse, agent abuse, tool abuse, cross-tenant leakage, unsafe authorization, secrets leakage, CI/CD compromise, model registry compromise, and KMS/IAM/policy partial failures.
+
+2. My 60-Second Opening Pitch
+    Write a polished, interview-ready opening pitch that connects my AI systems background to AI security:
+
+* Model is not the security boundary.
+* Authorization, data access, tenant isolation, tool invocation, guardrails, audit, and policy enforcement must happen outside the model.
+* Security controls must be treated as production infrastructure with SLOs, observability, fail-safe modes, and blast-radius containment.
+
+3. Core Architecture: Secure GenAI / Agent Platform
+    Create an ASCII architecture diagram for:
+
+User / API Client
+→ AI Gateway / Policy Enforcement Point
+→ Identity Context / Tenant Context
+→ Prompt/Input Guardrails
+→ RAG Retrieval with data authorization
+→ LLM / Agent Runtime
+→ Tool Broker / Action Authorizer
+→ Output Guardrails
+→ Audit / Detection / Incident Response
+
+For each layer, explain:
+
+* What security control it enforces.
+* What can go wrong.
+* How to fail safely.
+* What metrics/alerts to collect.
+
+4. Deterministic Guardrail Design
+    Explain how to design guardrails that are not just prompt instructions:
+
+* Input validation
+* Prompt injection detection
+* Data classification
+* Tool invocation policy
+* Output policy
+* PII/secrets detection
+* Rate/cost/token budgets
+* Human-in-the-loop escalation
+* Audit log
+* Fallback/deny behavior
+
+Include strong interview phrases such as:
+
+* “The model can reason, but it cannot authorize.”
+* “Prompt instructions are not security controls.”
+* “Tool access must be mediated by a deterministic policy engine.”
+* “The agent should receive scoped, short-lived, auditable capability tokens.”
+
+5. Threat Model Table
+    Create a table using STRIDE-style thinking for a GenAI agent system. Include:
+
+* Asset
+* Threat
+* Attack example
+* Security control
+* Detection signal
+* Safe failure mode
+
+Must cover:
+
+* Prompt injection
+* Indirect prompt injection from retrieved content
+* Tool abuse
+* Confused deputy
+* Data exfiltration
+* Cross-tenant leakage
+* Model registry compromise
+* Training data poisoning
+* Secrets leakage
+* CI/CD compromise
+* KMS/IAM/policy outage
+* Agent privilege escalation
+
+6. IAM / Authorization / Policy Engine Deep Dive
+    Prepare concise interview notes on:
+
+* RBAC vs ABAC vs ReBAC
+* OPA/Rego or Cedar-style policy engines
+* AWS IAM
+* OIDC/JWT
+* mTLS
+* SPIFFE/SPIRE
+* short-lived tokens
+* JIT access
+* service-to-service authentication
+* workload identity
+* tenant isolation
+* confused deputy prevention
+* fail-open vs fail-closed tradeoffs
+
+Give example answers for:
+
+* “How would you authorize an AI agent to call internal APIs?”
+* “What happens if the policy engine is down?”
+* “How do you design authorization safe under partial failure?”
+* “How do you prevent cross-tenant data exposure?”
+
+7. Secure RAG Design
+    Design a secure RAG system:
+
+* User identity and tenant carried into retrieval
+* Metadata filtering is mandatory, not optional
+* Retrieval must enforce ACL before chunks reach the model
+* Vector DB/FAISS/RAG store should not bypass authorization
+* Protect against poisoned documents and indirect prompt injection
+* Separate untrusted retrieved content from trusted system/developer instructions
+* Add citations/provenance
+* Log retrieval decisions
+
+Include a short whiteboard answer for:
+“Design secure enterprise RAG for internal documents.”
+
+8. Secure ML / Model Lifecycle
+    Prepare notes for:
+
+* training data lineage
+* data classification
+* PII handling
+* feature store access control
+* model registry access control
+* signed model artifacts
+* evaluation gates
+* red-team testing
+* prompt-injection evals
+* model versioning
+* canary rollout
+* rollback
+* secrets management
+* tenant-isolated evaluation and deployment
+* model endpoint authorization
+
+9. Production Reliability of Security Controls
+    Explain:
+
+* security control SLOs
+* error budgets
+* policy cache snapshots
+* deterministic fallback
+* degradation ladder
+* audit durability
+* incident response
+* high-signal alerts
+* blast radius containment
+* what to do during IAM/KMS/policy system failure
+
+Provide example metrics:
+
+* policy_eval_latency_p99
+* deny_rate_by_policy
+* tool_invocation_denied_count
+* prompt_injection_detected_count
+* cross_tenant_access_blocked_count
+* guardrail_timeout_count
+* model_endpoint_unauthorized_attempts
+* retrieval_acl_filter_rate
+* suspicious_agent_loop_count
+
+10. My STAR Stories Adapted to This Role
+    Create 5 STAR stories using my background:
+    A. LLM Guardrail Fusion Pipeline as Security for AI / deterministic guardrails / difficult customer
+    B. Rust AI Gateway as policy enforcement point / admission / circuit breaker / tenant controls
+    C. Secure ML model lifecycle / model deployment / versioning / audit / rollback
+    D. LLM serving failure debugging as production reliability of AI platform
+    E. XGBoost + Transformer + FAISS + TigerGraph fraud platform adapted as high-assurance AI decisioning
+
+For each STAR story include:
+
+* Situation
+* Task
+* Action
+* Result
+* Tags
+* 45-second version
+* 2-minute version
+* likely follow-up questions
+
+11. System Design Questions and Answers
+    Prepare detailed model answers for:
+
+* Design a secure GenAI agent platform.
+* Design tool authorization for AI agents.
+* Design secure RAG for enterprise documents.
+* Design model registry and deployment security.
+* Design policy engine reliability under partial failure.
+* Threat model an AI shopping assistant that can call internal APIs.
+* Prevent data exfiltration from an LLM assistant.
+* Prevent cross-tenant leakage in multi-tenant model serving.
+
+12. Rapid Study Sheet
+    Create a 1-page cram sheet:
+
+* must-know concepts
+* diagrams to memorize
+* 15 interview phrases to use
+* 10 mistakes to avoid
+* questions I should ask the interviewer
+
+Important style:
+
+* Write in my voice: senior AI systems engineer, practical, production-focused, not academic.
+* Be precise and interview-ready.
+* Use diagrams, tables, and bullets.
+* Avoid unsupported claims.
+* If you make assumptions, label them clearly.
