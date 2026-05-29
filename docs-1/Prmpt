@@ -1,1 +1,332 @@
 
+You are my senior interview-prep coach for a Socure-style AI Engineer interview focused on identity verification, fraud prevention, risk decisioning, identity graph, and real-time AI systems.
+
+Context:
+This interview is more likely AI for fraud/security/identity risk, not purely Security for AI. I need to prepare for real-time identity/fraud decisioning systems using ML, graph, vector search, feature engineering, and production model serving.
+
+My background to use:
+
+* AI/HPC systems engineer with production-scale low-latency systems experience.
+* Built fraud decisioning architecture using Rust Gateway, FeatureBlock, XGBoost, compact Transformer/BERT-style model, FAISS, TigerGraph, CUDA/GPU microbatching, and online feature cache.
+* Strong understanding of LLM inference separately, but for this interview emphasize real-time ML decisioning, identity graph, fraud modeling, feature freshness, similarity search, explainability, and production reliability.
+* My core architecture:
+    Transaction/identity event arrives
+    → Rust parses/builds FeatureBlock
+    → recent behavior from online feature cache
+    → parallel branches:
+    compact Transformer for behavioral/context features
+    FAISS for similar identity/fraud patterns
+    TigerGraph for relationship/fraud-ring features
+    → XGBoost final calibrated fraud/risk score
+    → decision: approve, decline, step-up, manual review.
+
+Please create an interview-ready markdown guide named:
+
+socure_ai_identity_fraud_interview_prep.md
+
+The guide should include the following sections:
+
+1. Role Interpretation
+    Explain the likely interview focus:
+
+* identity verification
+* synthetic identity fraud
+* first-party fraud
+* account takeover
+* device/IP/email/phone/address risk
+* identity graph
+* real-time decisioning
+* fraud scoring
+* ML model serving
+* explainability and compliance
+* high-throughput, low-latency architecture
+
+Clarify how this differs from Coupang-style Security for AI.
+
+2. My 60-Second Opening Pitch
+    Write a polished opening pitch:
+
+* I build high-scale AI decisioning systems.
+* I combine behavioral sequence models, graph relationships, vector similarity, tabular features, and calibrated models.
+* I care about latency, feature freshness, explainability, production reliability, and operational controls.
+* I can connect AI systems engineering with fraud/identity risk decisioning.
+
+3. Core System Design: Real-Time Identity Fraud Decisioning Engine
+    Create an ASCII architecture diagram for:
+
+Identity application / transaction event
+→ Rust/API gateway
+→ online feature cache
+→ FeatureBlock
+→ parallel branches:
+A. Transformer behavioral model
+B. FAISS similarity search
+C. TigerGraph identity graph query
+→ feature join
+→ XGBoost/calibrated risk model
+→ policy/threshold decision
+→ audit/event stream
+→ feedback loop / model monitoring
+
+For each layer, explain:
+
+* input
+* output
+* latency budget
+* failure mode
+* fallback
+* observability
+
+4. Identity/Fraud Feature Engineering
+    Create a detailed feature list grouped by:
+
+* identity features
+* email features
+* phone features
+* address features
+* device features
+* IP/location features
+* document/liveness features
+* velocity features
+* graph features
+* similarity features
+* model-derived Transformer features
+* historical behavior features
+
+For each feature, explain:
+
+* why it matters
+* how it is computed
+* whether it is hot-path, cached, streaming, or offline
+* what leakage risk to avoid
+
+Examples:
+
+* email_age_days
+* phone_tenure
+* address_stability
+* device_reuse_count
+* identities_per_device
+* devices_per_identity
+* ip_geo_distance
+* txn_count_5m
+* unique_merchants_24h
+* synthetic_identity_cluster_score
+* nearest_fraud_pattern_distance
+* graph_shared_device_count
+* graph_fraud_neighbor_ratio
+
+5. XGBoost + Transformer + FAISS + TigerGraph Architecture
+    Explain in detail:
+
+* What each component does
+* Why not use only one model
+* Why XGBoost remains final calibrated decision layer
+* Why Transformer is a feature generator, not necessarily final decision model
+* What FAISS searches
+* What TigerGraph searches
+* How all outputs become final XGBoost features
+
+Use this exact mental model:
+
+* Transformer = behavioral sequence/context understanding
+* FAISS = similar fraud/identity patterns
+* TigerGraph = suspicious relationships and fraud rings
+* XGBoost = final calibrated decision
+
+6. Transformer Input Design for Identity/Fraud
+    Explain what the Transformer consumes:
+
+* current identity application / transaction
+* last N events
+* device/session history
+* email/phone/address history
+* merchant or behavior profile if relevant
+* categorical embeddings
+* numerical normalized features
+* entity embeddings
+
+Show example tensor:
+[batch, sequence_len, hidden_dim]
+
+Explain:
+
+* sequence transformer over recent events
+* tabular transformer / FT-Transformer
+* why not convert everything to natural language text for the hot path
+* how recent behavior comes from online feature cache, not REST calls
+
+7. FAISS Design
+    Explain:
+
+* What records are embedded
+* transaction/application embeddings
+* identity profile embeddings
+* device/session embeddings
+* known fraud pattern embeddings
+* synthetic identity cluster embeddings
+* merchant/device behavior embeddings if relevant
+
+Explain one index vs multiple indexes:
+
+* historical_identity_application_index
+* known_fraud_pattern_index
+* device_behavior_index
+* recent_hot_index
+* cold_historical_index
+
+Cover:
+
+* HNSW vs IVF/PQ
+* index freshness
+* hot/cold index
+* recall@k
+* top-k neighbor risk features
+* why FAISS stores vectors/IDs, not full records
+
+8. TigerGraph / Identity Graph Design
+    Create a graph schema:
+    Person/Identity
+    Email
+    Phone
+    Address
+    Device
+    IP
+    Document
+    BankAccount
+    Application
+    FraudCase
+
+Edges:
+USES_EMAIL
+USES_PHONE
+USES_DEVICE
+USES_IP
+LIVES_AT
+SUBMITTED_DOCUMENT
+LINKED_BANK_ACCOUNT
+HAS_APPLICATION
+MARKED_FRAUD
+SHARES_DEVICE_WITH
+SHARES_ADDRESS_WITH
+
+Provide example GSQL-style queries:
+
+* shared device / IP risk
+* 2-hop fraud ring
+* synthetic identity cluster
+* address/phone reuse
+* device-to-many-identities ratio
+* fraud neighbor count
+* recent velocity features
+
+For each query, show the resulting XGBoost features.
+
+9. Latency and Throughput Story
+    Create a realistic hypothetical scale model:
+
+* average TPS
+* peak TPS
+* p99 latency budget
+* hot path vs warm path vs cold path
+* microbatching policy for GPU branch
+* why we do not call REST APIs in the hot path
+* how feature cache is updated by streaming pipeline
+* how GPU microbatching works while decisions remain per identity/application
+
+Include:
+
+* per-transaction decision
+* microbatched GPU execution
+* strict max wait window
+* fallback on cache miss
+
+10. Custom CUDA / Streams / CUDA Graph Role
+    Explain how custom CUDA fits:
+
+* feature packing from FeatureBlock to Transformer tensor
+* FAISS query vector construction
+* L2 normalization
+* top-k summarization
+* not replacing TensorRT/cuBLAS/FAISS
+
+Explain CUDA streams:
+
+* copy_stream
+* transformer_stream
+* faiss_stream
+* post_stream
+* events for dependencies
+
+Explain CUDA Graph:
+
+* only for stable GPU microbatch subgraph
+* bucketed batch sizes
+* not for Rust parsing, TigerGraph, XGBoost, or decision logic
+
+11. Explainability, Compliance, and Model Monitoring
+    Prepare notes on:
+
+* feature importance
+* SHAP-style explanation
+* reason codes
+* score calibration
+* threshold selection
+* manual review
+* fairness and bias checks
+* drift detection
+* fraud pattern drift
+* data leakage prevention
+* training/serving skew
+* feedback loop from chargebacks/manual labels
+
+12. STAR Stories for Socure Interview
+    Create 5 STAR stories:
+    A. Real-time fraud/identity hot path using XGBoost + Transformer + FAISS + TigerGraph
+    B. Feature freshness and online feature cache without REST calls
+    C. Graph-based fraud ring detection
+    D. Vector similarity for fraud/synthetic identity pattern matching
+    E. Production reliability / latency optimization under p99 SLO
+
+For each:
+
+* Situation
+* Task
+* Action
+* Result
+* 45-second version
+* 2-minute version
+* follow-up questions
+* metrics to mention carefully as hypothetical if needed
+
+13. System Design Questions and Model Answers
+    Prepare detailed answers for:
+
+* Design a real-time identity verification/risk system.
+* How would you detect synthetic identity fraud?
+* How do graph features help fraud detection?
+* How would you use FAISS for identity risk?
+* Why use XGBoost with Transformer instead of only deep learning?
+* How do you keep recent behavior fresh without hot-path REST calls?
+* How do you handle cache miss?
+* How do you evaluate fraud model performance with rare positives?
+* How do you explain decisions to compliance/customers?
+* How do you detect model/data drift?
+
+14. Final Rapid Cram Sheet
+    Create a 1-page summary:
+
+* architecture diagram
+* top 20 concepts
+* 15 interview-ready phrases
+* 10 risks/failure modes
+* 10 questions to ask interviewer
+
+Important style:
+
+* Write in my voice: senior AI systems engineer, practical, production-grade, low-latency, metrics-driven.
+* Use concrete examples.
+* Use tables and diagrams.
+* Mark assumptions clearly.
+* Do not overclaim exact company internal numbers.
+* Make it useful for a 2-day interview preparation sprint.
