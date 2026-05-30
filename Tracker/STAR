@@ -1,16 +1,17 @@
 
-Target 05/28 - 5 days 
-	STAR			:- 70 %	:- 2 Hr
-	Search			:- 70 % :- 2 Hr
-	Inferencing		:- 80 %	:- 1 Hr
-	System	(K8)	:- 80 %	:- 1 Hr
-	CUDA & GPU		:- 60 %	:- 2 Hr
-	Data Science/NLP:- 70 %	:- 1 Hr
-	Training		:- 60 % :- 1 Hr
-	C++ & RUST		:- 60 %	:- 2 Hr
+Target 06/17 - 21 days 
+	STAR			:- 80 %	:- 0.5 day
+	Search			:- 70 % :- 1 day
+	Inferencing		:- 70 %	:- 0.5 day
+	System	(K8)	:- 60 %	:- 1 day
+	CUDA & GPU		:- 60 %	:- 1 day
+	Data Science/NLP:- 70 %	:- 0.5 day
+	Training		:- 60 % :- 0.5 day
+	C++ & RUST		:- 40 %	:- 2 day
+	DSA 			:- 30 %	:- 7 day				
 
 	======================================
-	DSA 			:- 30 %	:- 0 day
+	
 	======================================
 
 	* Daily one STAR story must be complete - 1 Hr
