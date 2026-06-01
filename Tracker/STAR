@@ -526,4 +526,44 @@ Videos to Watch
 	Benchmarking
 	eBPF
 Must Do
-	TigerGraph - GSQL
+	TigerGraph - GSQLc]
+ 
+Principal AI Infrastructure Solutions Engineer
+THE ROLE:
+As a Principal AI Infrastructure Solution Engineer, you will partner with AMD’s AI software teams and customers to enable largescale LLM training and inference on AMD Instinct GPUs. You will design and validate productionready Kubernetes architectures and translate inference frameworks such as vLLM and SGLang into deployable customer solutions. Your work will accelerate customer timetoproduction and strengthen AMD’s leadership in AI infrastructure.
+ 
+THE PERSON:
+You are a solutionoriented AI infrastructure engineer with strong expertise in GPUaccelerated computing and largescale AI deployments. You excel at translating complex technologies into customerready solutions and delivering productiongrade Kubernetesbased inference and training systems. You bring handson experience with Kubernetesnative distributed training, including scheduling, topologyaware GPU placement, and operating resilient, highperformance AI workloads at scale.
+ 
+KEY RESPONSBILITIES:
+• Design and deliver reference architectures for LLM training and inference on AMD GPUs, from singlenode to multidatacenter deployments using Kubernetes and SLURM.
+• Architect and validate Kubernetesbased distributed training stacks for largescale LLM workloads on AMD GPUs.
+• Define and implement gang scheduling and topologyaware GPU placement for multinode training workloads.
+• Enable Kubernetesnative training controllers including Kubeflow Training Operator, MPI Operator, Volcano, and Kueue.
+• Partner with enterprise customers and cloud providers to deploy and optimize production AMD GPU clusters for distributed inference and multitenant workloads.
+• Implement and validate GPU orchestration using Kubernetes GPU Operator, device plugins, metrics exporters, and SLURM controllers.
+• Benchmark and optimize LLM inference frameworks (vLLM, SGLang) on AMD hardware, producing customerready performance playbooks.
+• Develop repeatable benchmarks for Kubernetesbased distributed training, covering scaling efficiency, step time, communication, and checkpointing.
+• Create tuning guides for RCCL/NCCLequivalent communication, CPU/GPU affinity, interconnect utilization, and workloadspecific optimizations.
+• Serve as the feedback loop between customers and AMD engineering, translating requirements into validated performance improvements.
+PREFERRED EXPERIENCE:
+• Deployed and operated largescale GPU clusters for production AI training and inference
+• Deep expertise in Kubernetes GPU orchestration (operators, device plugins, scheduling, multitenancy, observability)
+• Handson experience with distributed training on Kubernetes (Kubeflow, MPI Operator, Volcano, Kueue, Ray)
+• Strong knowledge of gang scheduling, elastic jobs, quotas, priority, and shared GPU environments
+• Tuned Kubernetes networking and storage for AI workloads (highperformance CNI, RDMA where applicable, scalable checkpointing)
+• Implemented ML observability for training (GPU/comms metrics, steptime analysis, SLOdriven ops)
+• Experience in AI/ML infrastructure, solution architecture, and production GPU deployments
+• Proven success enabling customers through complex AI platform deployments and migrations
+• Strong background working across engineering and customerfacing roles
+• Understanding of AI accelerator architectures and inference optimization techniques
+• Experience operationalizing Kubernetesbased distributed training at scale
+• Opensource contributions or AI infrastructure community engagement (plus)
+ 
+LOCATION:
+
+
+
+
+
+
