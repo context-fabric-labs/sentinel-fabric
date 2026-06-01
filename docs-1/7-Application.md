@@ -687,3 +687,892 @@ accurate model that improved fraud detection by 13 points" is GREAT.
   hybrid retrieval (BM25 + FAISS) parallels your unified retrieval
   pipeline. The principles are the same: eliminate redundant computation,
   move parallelizable work to GPU, and share invariant state."
+
+---
+---
+
+# SECTION 7: CAPACITY PLANNING & LOAD TESTING
+
+---
+
+## 7.1 Capacity Planning Framework
+
+```
+Step 1: Determine traffic shape
+  Peak QPS (queries per second)
+  Diurnal pattern (peak:trough ratio — typically 3-5×)
+  Growth rate (month-over-month)
+  Burst factor (flash sales, breaking news — up to 10×)
+
+Step 2: Single-instance capacity
+  Load test single replica to saturation
+  Find: max QPS at target p99
+  Record: CPU, GPU, memory at that QPS
+
+Step 3: Calculate replicas
+  Replicas = Peak_QPS / Single_Instance_QPS × Safety_Factor
+  Safety factor: 1.3-1.5 (accounts for imbalance, rolling updates)
+  
+  Example (fraud scoring):
+    Peak QPS: 15,000 transactions/sec
+    Single instance: 2,000 transactions/sec at p99 < 10 ms
+    Replicas: 15,000 / 2,000 × 1.4 = 11 replicas
+    Plus 1 for rolling update: 12 replicas
+    
+Step 4: Account for failure scenarios
+  Node failure: lose 1 node worth of replicas
+  AZ failure: lose 33% of replicas (3 AZ setup)
+  Design for: full capacity with one AZ down
+  
+  Final: 12 / 0.67 = 18 replicas (across 3 AZs)
+
+Step 5: Plan for growth
+  Current: 18 replicas
+  6-month projection (20% growth/month): 18 × 1.2^6 = 54 replicas
+  Infrastructure lead time: 3-6 months for GPU procurement
+  → Order capacity NOW for 6-month projected need
+```
+
+## 7.2 Load Testing Methodology
+
+```
+Tool selection:
+  HTTP/gRPC: ghz, vegeta, k6, locust
+  Custom protocol: custom load generator (your C++ service)
+  
+Load test types:
+
+1. BASELINE (establish normal performance)
+   Constant load at expected peak for 30 minutes
+   Record: p50, p99, p99.9, error rate, resource usage
+   This is your reference for regression detection
+
+2. RAMP (find saturation point)
+   Start at 50% expected load, increase 10% every 2 minutes
+   Find: QPS where p99 exceeds SLA
+   This is your single-instance capacity number
+
+3. SPIKE (test burst handling)
+   Normal load → 5× spike for 30 seconds → back to normal
+   Verify: service recovers, no crash, acceptable degradation
+   Test: auto-scaling trigger time, load shedding activation
+
+4. SOAK (find memory leaks, degradation)
+   Constant high load for 24-72 hours
+   Monitor: memory growth, latency drift, error rate growth
+   Catches: memory leaks, connection leaks, cache staleness
+
+5. CHAOS (test resilience)
+   Normal load + random failures:
+   - Kill random pods
+   - Inject network latency
+   - Simulate GPU OOM
+   - Redis failover during load
+   Verify: fallbacks activate, service degrades gracefully
+
+Load test checklist:
+  □ Use realistic request distribution (not uniform!)
+  □ Include think time between requests (not back-to-back)
+  □ Test with production-like feature data
+  □ Run against staging environment (same hardware)
+  □ Capture metrics at BOTH client and server side
+  □ Test cold start: restart during load
+```
+
+## 7.3 Little's Law (The Fundamental Queuing Formula)
+
+```
+L = λ × W
+
+L = average number of requests in system (in-flight)
+λ = arrival rate (requests/second)
+W = average time each request spends in system (seconds)
+
+Example:
+  λ = 1,000 req/s, W = 10 ms = 0.01 s
+  L = 1,000 × 0.01 = 10 requests in-flight at any time
+  
+  If each request uses 1 CPU core:
+  Need: 10 cores minimum (at 100% utilization)
+  Practical: 10 / 0.7 = 15 cores (at 70% target utilization)
+
+GPU version:
+  λ = 1,000 req/s, W = 5 ms GPU time per request
+  L = 1,000 × 0.005 = 5 concurrent GPU requests
+  With batch=5: need 1 GPU
+  With batch=16 (more efficient): need 1 GPU at lower utilization
+
+Thread count:
+  Optimal threads = λ × W = in-flight requests
+  More threads than this: CFS cliff
+  Fewer threads: underutilization (requests queue)
+```
+
+---
+
+# SECTION 8: RATE LIMITING & BACKPRESSURE
+
+---
+
+## 8.1 Rate Limiting Algorithms
+
+```
+TOKEN BUCKET (most common):
+  Bucket holds B tokens, refills at rate R tokens/sec
+  Each request consumes 1 token
+  If bucket empty → reject (429)
+  
+  Properties:
+  - Allows burst up to B
+  - Sustained rate limited to R
+  - Simple, O(1) per request
+  
+  Parameters for fraud scoring:
+    Per-merchant: R=100 req/s, B=200 (allow 2-sec burst)
+    Per-card: R=5 req/s, B=10
+    Global: R=20,000 req/s, B=30,000
+
+SLIDING WINDOW (more precise):
+  Count requests in sliding window of W seconds
+  If count > limit → reject
+  
+  Implementation: Redis ZADD with timestamp scores
+    ZADD key timestamp member
+    ZRANGEBYSCORE key (now - window) now
+    If count > limit: reject
+    
+  More memory than token bucket, but exact count guarantee
+
+LEAKY BUCKET (constant output rate):
+  Queue with fixed drain rate
+  If queue full → reject
+  Smooths burst into constant output
+  
+  Good for: database writes, external API calls (need constant rate)
+```
+
+## 8.2 Backpressure Propagation
+
+```
+The problem without backpressure:
+  Upstream (fast) → Queue → Downstream (slow)
+  Queue grows unboundedly → OOM → crash
+
+With backpressure:
+  Upstream (fast) → Bounded Queue → Downstream (slow)
+  Queue full → upstream blocks or sheds → system stable
+
+Backpressure patterns:
+
+1. BOUNDED QUEUE (simplest):
+   if (queue.size() >= max) {
+       return Status::ResourceExhausted;  // 429
+   }
+   queue.push(request);
+
+2. SEMAPHORE (limit concurrency):
+   sem_t inflight;  // initialized to max_concurrent
+   sem_wait(&inflight);  // blocks if at limit
+   process(request);
+   sem_post(&inflight);
+
+3. REACTIVE (measure and react):
+   Monitor downstream latency
+   If latency > threshold → reduce incoming rate
+   Auto-adjust sending rate based on downstream health
+
+4. CREDIT-BASED (like TCP flow control):
+   Downstream grants credits (N more requests OK)
+   Upstream sends only if credits available
+   Downstream replenishes credits as it drains
+   
+   Used in: InfiniBand, NCCL (hardware-level flow control)
+
+Your fraud scoring system:
+  Per-stage bounded queues (SPSC ring buffers)
+  Ring buffer full → upstream worker spins or logs metrics
+  Each stage processes at its own rate
+  No unbounded queuing → predictable memory usage
+```
+
+## 8.3 Circuit Breaker Pattern
+
+```
+Protect your service from cascading failure when a dependency is down.
+
+States:
+  CLOSED (normal): requests flow through, failures counted
+  OPEN (tripped): ALL requests immediately rejected (fast-fail)
+  HALF-OPEN (testing): allow ONE request through to test recovery
+
+State transitions:
+  CLOSED → OPEN: when failure_count > threshold in window
+  OPEN → HALF-OPEN: after cooldown period (e.g., 30 sec)
+  HALF-OPEN → CLOSED: if test request succeeds
+  HALF-OPEN → OPEN: if test request fails
+
+Example: feature store circuit breaker
+  Normal: fetch features from Redis (3 ms)
+  Redis slow: failures accumulate → circuit OPENS
+  Open: immediately return cached/default features (0.1 ms)
+  After 30 sec: try ONE request to Redis (HALF-OPEN)
+  If Redis recovered: close circuit, resume normal
+  If still down: stay open, retry in 30 sec
+
+Code pattern:
+  class CircuitBreaker {
+      enum State { CLOSED, OPEN, HALF_OPEN };
+      State state = CLOSED;
+      int failures = 0;
+      time_point last_failure;
+      
+      Result call(Function f) {
+          if (state == OPEN) {
+              if (now() - last_failure > cooldown) state = HALF_OPEN;
+              else return fallback();
+          }
+          try {
+              auto result = f();
+              if (state == HALF_OPEN) state = CLOSED;
+              failures = 0;
+              return result;
+          } catch (...) {
+              failures++;
+              last_failure = now();
+              if (failures > threshold) state = OPEN;
+              return fallback();
+          }
+      }
+  };
+```
+
+---
+
+# SECTION 9: CONSISTENCY AND DATA FRESHNESS
+
+---
+
+## 9.1 Feature Freshness Requirements by Use Case
+
+```
+| Feature Type | Freshness | Source | Impact if Stale |
+|---|---|---|---|
+| Transaction velocity | < 1 sec | Streaming (Flink/Kafka) | Miss burst fraud |
+| Account status (blocked) | < 5 sec | CDC from DB | Approve on blocked card |
+| Device fingerprint | < 1 min | Event-driven | Miss device takeover |
+| Merchant risk score | < 1 hour | Batch pipeline | Slightly worse accuracy |
+| Customer embeddings | < 4 hours | Batch pipeline | Slightly worse matching |
+| Model features (30-day agg) | < 24 hours | Batch pipeline | Minimal impact |
+
+The rule: freshness requirement = inverse of attack speed
+  Burst fraud (seconds): need real-time velocity
+  Account takeover (minutes): need near-real-time status
+  Subtle pattern shifts (days): batch features sufficient
+```
+
+## 9.2 Consistency Models for Distributed Features
+
+```
+STRONG CONSISTENCY (linearizable):
+  All readers see the latest write IMMEDIATELY
+  Implementation: synchronous replication, consensus (Raft/Paxos)
+  Cost: higher latency (must wait for quorum)
+  Use for: account blocks (MUST stop fraud immediately)
+
+EVENTUAL CONSISTENCY:
+  Readers may see stale data for a window
+  Implementation: async replication, last-writer-wins
+  Cost: lower latency, higher throughput
+  Use for: merchant risk scores (minutes stale is OK)
+
+READ-YOUR-OWN-WRITES:
+  The writer always sees its own latest write
+  Others may see stale data
+  Implementation: sticky sessions, version vectors
+  Use for: customer profile updates (customer sees their changes)
+
+CAUSAL CONSISTENCY:
+  If A caused B, anyone who sees B also sees A
+  Implementation: vector clocks, dependency tracking
+  Use for: fraud investigation (see events in causal order)
+
+For your fraud scoring:
+  Hot path → eventual consistency (features cached locally, async refresh)
+  WHY: 3-5 ms for Redis lookup is acceptable freshness
+  RISK: stale data for ~1 sec max (Redis replication lag)
+  MITIGATION: critical signals (account block) use pub/sub with < 100 ms delivery
+```
+
+## 9.3 Cache Stampede Prevention
+
+```
+Problem: cache miss + high traffic = thundering herd to backing store
+
+Scenario:
+  Popular key expires → 1,000 concurrent requests all miss →
+  1,000 requests all query database → database overloaded → cascade
+
+Solutions:
+
+1. LOCK-BASED (only one fetcher):
+   if cache_miss(key):
+       if acquire_lock(key, timeout=100ms):
+           value = fetch_from_source(key)
+           cache_set(key, value, ttl)
+           release_lock(key)
+       else:
+           wait_for_value(key, timeout=200ms)  # someone else is fetching
+   
+2. PROBABILISTIC EARLY REFRESH:
+   if (now > ttl - random(0, early_window)):
+       refresh_in_background(key)
+   # Some requests trigger refresh BEFORE expiry
+   # Reduces probability of mass-expiry
+
+3. STALE-WHILE-REVALIDATE:
+   Always return cached value (even if stale)
+   Trigger async refresh in background
+   Next request gets fresh value
+   
+   Similar to HTTP Cache-Control: stale-while-revalidate
+```
+
+---
+
+# SECTION 10: INCIDENT RESPONSE & PRODUCTION OPERATIONS
+
+---
+
+## 10.1 Incident Severity Levels
+
+```
+SEV-1 (Critical): System-wide outage or data integrity breach
+  - ALL fraud scoring down (approving everything = massive fraud risk)
+  - Customer data exposed
+  - Response time: IMMEDIATE (page on-call within 5 min)
+  - Resolution target: 30 minutes
+
+SEV-2 (High): Major feature degradation
+  - LLM warm path down (false positives not being recovered)
+  - p99 latency 5× normal (some transactions timing out)
+  - Response time: 15 minutes
+  - Resolution target: 2 hours
+
+SEV-3 (Medium): Partial degradation
+  - One model version degraded (fallback active)
+  - One AZ capacity reduced
+  - Response time: 1 hour
+  - Resolution target: 8 hours
+
+SEV-4 (Low): Minor issue
+  - Monitoring gap, non-critical alert
+  - Response time: next business day
+```
+
+## 10.2 Runbook: Hot Path Latency Spike
+
+```
+ALERT: fraud_scoring_p99_latency > 15 ms (SLA: 30 ms, threshold: 15 ms)
+
+Step 1: SCOPE (30 seconds)
+  - Is it all replicas or one? → Grafana dashboard
+  - Is it all traffic or specific merchants? → log filter
+  - When did it start? → correlate with deployments/changes
+
+Step 2: IMMEDIATE MITIGATION (2 minutes)
+  If one replica:
+    → kubectl delete pod (replace unhealthy replica)
+  If all replicas:
+    → Check recent deploy → rollback if < 30 min ago
+    → Check feature store → circuit breaker status
+    → Check GPU → nvidia-smi (throttling? errors?)
+
+Step 3: DIAGNOSE (5-10 minutes)
+  - Tracing: which stage is slow? (feature fetch vs model vs search)
+  - Metrics: GPU util, CPU util, memory pressure, queue depth
+  - eBPF: runqlat (scheduler delay?), tcpretrans (network?)
+  - DCGM: thermal throttle? ECC errors?
+
+Step 4: ROOT CAUSE (varies)
+  Common causes and fixes:
+  | Symptom | Likely Cause | Fix |
+  |---------|-------------|-----|
+  | All stages slow | CPU throttling | Check CFS, frequency gov |
+  | Feature fetch slow | Redis latency | Circuit breaker, cache fallback |
+  | Model inference slow | GPU throttle | Check temp, check clocks |
+  | Network between stages | Retransmits | Check NIC, PFC counters |
+  | Spiky (not steady) | GC pause | (if Java) tune GC |
+
+Step 5: RESOLVE + POSTMORTEM
+  - Verify metrics returned to normal
+  - Write postmortem within 48 hours
+  - Action items to prevent recurrence
+```
+
+## 10.3 Deployment Safety
+
+```
+Pre-deployment checklist:
+  □ Load test passed (no regression in p99)
+  □ Model accuracy validated (offline evaluation)
+  □ Feature compatibility verified (schema match)
+  □ Canary config ready (1% → 5% → 25% → 100%)
+  □ Rollback plan documented
+  □ On-call aware of deployment
+
+Deployment sequence:
+  1. Deploy to staging → run integration tests (10 min)
+  2. Deploy canary (1% traffic) → monitor 15 min
+     - Guardrails: p99 < 2× baseline, error rate < 0.1%
+  3. If guardrails pass: expand to 25% → monitor 30 min
+  4. Expand to 100% → monitor 2 hours
+  5. Previous version kept warm for 24 hours (instant rollback)
+
+Automatic rollback triggers:
+  - p99 latency > 2× baseline for 5 minutes
+  - Error rate > 1% for 2 minutes
+  - GPU OOM events > 3 in 5 minutes
+  - Model accuracy metric drops > 5% (requires delayed outcome join)
+```
+
+---
+
+# SECTION 11: ML-SPECIFIC SYSTEM DESIGN PATTERNS
+
+---
+
+## 11.1 Feature Store Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      FEATURE STORE                            │
+├─────────────────────────────────────────────────────────────┤
+│ OFFLINE STORE (batch features, historical data)              │
+│  - Parquet/Delta Lake on S3/GCS                             │
+│  - Used for: training data, backfill, point-in-time joins   │
+│  - Freshness: hours to days                                 │
+├─────────────────────────────────────────────────────────────┤
+│ ONLINE STORE (real-time serving)                             │
+│  - Redis/DynamoDB/Bigtable                                  │
+│  - Used for: inference-time feature lookup                  │
+│  - Freshness: seconds to minutes                            │
+│  - Latency: < 5 ms p99                                     │
+├─────────────────────────────────────────────────────────────┤
+│ STREAMING ENGINE (real-time features)                        │
+│  - Flink/Kafka Streams                                      │
+│  - Computes: velocity, session features, running aggregates │
+│  - Freshness: < 1 second                                   │
+│  - Writes to online store                                   │
+├─────────────────────────────────────────────────────────────┤
+│ FEATURE REGISTRY (metadata + lineage)                        │
+│  - Feature definitions (schema, owner, SLA)                 │
+│  - Lineage (which models use which features)                │
+│  - Monitoring (drift detection, freshness alerts)           │
+└─────────────────────────────────────────────────────────────┘
+
+Your fraud scoring feature sources:
+  Real-time: transaction velocity (Flink → Redis, < 1 sec)
+  Near-real-time: device fingerprint (event → Redis, < 1 min)
+  Batch: customer embeddings (Spark → Redis, every 4 hours)
+  Static: merchant category codes (config file, updated monthly)
+```
+
+## 11.2 Training → Serving Consistency
+
+```
+The training-serving skew problem:
+  Training computes features one way (batch, historical)
+  Serving computes features another way (real-time, slightly different logic)
+  → Model sees DIFFERENT feature distributions at inference time
+  → Silent accuracy degradation!
+
+Solutions:
+  1. Shared feature computation code:
+     Same code computes features for training AND serving
+     Feature store handles: batch access (training) and online access (serving)
+     
+  2. Feature logging at serving time:
+     Log actual features used at inference (not just predictions)
+     Use logged features for next training cycle
+     Guarantees: model trains on exactly what it will see in production
+
+  3. Point-in-time correct training:
+     When creating training data: use features AS THEY EXISTED at prediction time
+     Not current features (that would leak future information)
+     
+     Example: training on fraud decision from Jan 15
+       Use features that EXISTED on Jan 15 (not today's aggregates)
+       Feature store provides temporal snapshots
+
+  4. Feature validation at serving:
+     Compare incoming feature distribution to training distribution
+     Alert if KL-divergence > threshold (feature drift detected)
+```
+
+## 11.3 Online Learning / Continuous Training
+
+```
+For fraud detection: threat landscape changes DAILY
+
+Static model (retrained monthly):
+  - Good for first week
+  - Starts missing new fraud patterns by week 2
+  - By week 4: 10-15% accuracy degradation
+
+Continuous training loop:
+  1. Serve predictions (hot path)
+  2. Log predictions + features
+  3. Wait for labels (chargebacks arrive in 2-14 days)
+  4. Join predictions with labels
+  5. Retrain on recent data (sliding window: last 90 days)
+  6. Validate: offline metrics + shadow mode
+  7. Deploy new model (canary)
+  8. Repeat (daily or weekly cadence)
+
+Champion-Challenger pattern:
+  Champion: current production model (serving 100% traffic)
+  Challenger: newly trained model (shadow mode, 0% traffic, evaluated offline)
+  
+  When challenger beats champion on holdout set:
+    Promote challenger to canary (1% traffic)
+    If canary passes guardrails → promote to champion
+    Old champion → retire
+```
+
+---
+
+# SECTION 12: DISTRIBUTED SYSTEM PATTERNS FOR HPC
+
+---
+
+## 12.1 Leader Election for Singleton Tasks
+
+```
+Some tasks must run as exactly ONE instance:
+  - Feature pipeline coordinator
+  - Model training job scheduler
+  - Cache invalidation broadcaster
+  
+Using K8s Lease (built-in):
+  apiVersion: coordination.k8s.io/v1
+  kind: Lease
+  metadata:
+    name: fraud-feature-coordinator
+  spec:
+    holderIdentity: "pod-abc123"
+    leaseDurationSeconds: 15
+    acquireTime: "2026-06-01T10:00:00Z"
+    renewTime: "2026-06-01T10:00:10Z"
+
+  Pod acquires lease → becomes leader
+  Leader renews every 10 sec (< 15 sec duration)
+  If leader dies → lease expires → new pod acquires
+  
+  Failover time: leaseDurationSeconds (15 sec)
+```
+
+## 12.2 Idempotency for Exactly-Once Processing
+
+```
+Problem: network failures cause retries → duplicate processing
+
+Example: fraud decision sent to card network
+  First attempt: timeout (but actually succeeded!)
+  Retry: sends SAME decision again → duplicate block!
+
+Solution: idempotency keys
+
+  // Request includes idempotency_key (e.g., transaction_id)
+  if (cache.contains(idempotency_key)) {
+      return cache.get(idempotency_key);  // return cached result
+  }
+  auto result = process(request);
+  cache.set(idempotency_key, result, ttl=24h);
+  return result;
+
+Properties:
+  - First call: process and cache
+  - Subsequent calls with same key: return cached result
+  - Safe to retry without side effects
+  - TTL prevents unbounded growth
+```
+
+## 12.3 Event Sourcing for Audit Trail
+
+```
+Fraud detection requires COMPLETE audit trail:
+  - Every decision must be explainable
+  - Regulators can ask "why was this approved?" years later
+  - Model version, features used, scores — all logged
+
+Event sourcing:
+  Every state change is an IMMUTABLE EVENT in an append-only log:
+  
+  events:
+    - {type: "transaction_received", ts: T1, data: {...}}
+    - {type: "features_computed", ts: T2, data: {features: [...]}}
+    - {type: "model_scored", ts: T3, data: {model: "v2.1", score: 0.73}}
+    - {type: "decision_made", ts: T4, data: {action: "3DS", reason: "..."}}
+    - {type: "3ds_completed", ts: T5, data: {result: "success"}}
+    - {type: "warm_path_review", ts: T6, data: {overturn: true, explanation: "..."}}
+  
+  Benefits:
+  - Complete audit trail (regulatory compliance)
+  - Can replay events to debug decisions
+  - Can retrain models on exact feature snapshots
+  - Immutable (can't be tampered with post-hoc)
+  
+  Storage: Kafka (real-time) → S3/GCS (long-term archival, Parquet)
+  Retention: 7 years (BSA/AML requirement)
+```
+
+---
+
+# SECTION 13: SYSTEM DESIGN INTERVIEW DEEP PATTERNS
+
+---
+
+## 13.1 "Design a real-time fraud detection system"
+
+```
+Requirements gathering:
+  - QPS: 10,000 transactions/second
+  - Latency: < 30 ms p99
+  - Accuracy: < 0.1% false negative (miss rate), < 5% false positive
+  - Availability: 99.99% (< 52 min downtime/year)
+  - Regulatory: full audit trail, explainable decisions
+
+High-level design:
+  [Visa/Mastercard] → [API Gateway] → [Fraud Scoring Service]
+                                              ↓
+                                     [Decision Engine]
+                                              ↓
+                                     [Response to Network]
+
+Deep dive areas (pick based on interviewer interest):
+  
+  A) Data path (how features arrive):
+     - Real-time: Kafka → Flink → Redis (velocity, session features)
+     - Batch: Spark → Redis (aggregates, embeddings)
+     - Request: parsed from transaction message
+  
+  B) Scoring architecture:
+     - Multi-model ensemble (XGBoost + BERT + rules)
+     - In-process, zero-copy, parallel CPU/GPU
+     - CUDA Graphs for GPU kernel launch optimization
+     - Pre-allocated buffers (arena allocator)
+  
+  C) Infrastructure:
+     - K8s with GPU nodes, CPU Manager static, topology manager
+     - Cilium for low-latency pod networking
+     - Redis cluster for feature store (3-5 ms lookup)
+     - Kafka for event streaming and audit log
+  
+  D) Reliability:
+     - Multi-AZ deployment (survive AZ failure)
+     - Circuit breakers for dependencies
+     - Fallback models (XGBoost-only if GPU fails)
+     - PDB + high priority class (survive eviction)
+  
+  E) Monitoring:
+     - p50/p99 latency per stage
+     - Model accuracy (joined with delayed labels)
+     - Feature freshness and drift
+     - GPU health (DCGM)
+```
+
+## 13.2 "Design a search ranking system for 1B documents"
+
+```
+Requirements:
+  - Corpus: 1 billion documents
+  - QPS: 50,000 queries/second
+  - Latency: < 100 ms p99
+  - Ranking quality: optimize for engagement (clicks, time spent)
+
+Architecture:
+  [Query] → [Query Understanding] → [Retrieval] → [Ranking] → [Results]
+
+Retrieval (recall-focused, < 30 ms):
+  L0: Keyword match (BM25 inverted index, Elasticsearch)
+      Retrieve: top 1,000 by keyword relevance
+  
+  L1: Semantic match (embedding ANN, FAISS/ScaNN)
+      Retrieve: top 1,000 by embedding similarity
+  
+  Fusion: RRF or learned combination → top 200 candidates
+
+Ranking (precision-focused, < 50 ms):
+  L2: Light ranker (MLP, features: BM25 score, embed score, freshness)
+      Score all 200 candidates → top 50
+  
+  L3: Heavy ranker (transformer, cross-encoder or sequential model)
+      Score top 50 with full features → top 10
+  
+  Final: diversity, deduplication, policy filters → show 10
+
+Scale considerations:
+  - Inverted index: sharded across 100+ nodes (partition by doc_id hash)
+  - Embedding index: replicated on GPU nodes (entire index in GPU HBM)
+  - Ranking model: on GPU, batched forward pass for 50-200 candidates
+  - Embedding model: pre-computed offline, stored in index
+  
+  QPS distribution:
+    50,000 QPS ÷ 100 retrieval shards = 500 QPS per shard (manageable)
+    50,000 QPS ÷ 20 ranking GPUs = 2,500 QPS per GPU
+    Per GPU: 2,500 QPS × 50 candidates = 125,000 candidates/sec scored
+    At batch=64, 5 ms/batch: 12,800 candidates/sec → need ~10 GPUs
+```
+
+## 13.3 "Design an LLM serving platform for 1,000 concurrent users"
+
+```
+Requirements:
+  - Model: 70B parameter LLM
+  - Concurrent users: 1,000
+  - TTFT (time to first token): < 500 ms p99
+  - TPOT (time per output token): < 50 ms p99
+  - Average response: 200 tokens
+
+Capacity math:
+  1,000 users × 200 tokens / 50 ms per token = 1,000 users need
+  Time per user: 200 × 50 ms = 10 sec per response
+  Throughput: 1,000 users / 10 sec = 100 new requests/sec
+  Total tokens/sec: 100 × 200 = 20,000 tokens/sec needed
+
+  70B model on H100 (TP=4, FP8):
+    Throughput: ~3,000-5,000 tokens/sec per 4-GPU group
+  
+  Groups needed: 20,000 / 4,000 = 5 groups = 20 GPUs
+  With headroom: 7 groups = 28 GPUs
+
+Architecture:
+  [Load Balancer (KV-aware routing)]
+       ↓
+  [vLLM/TRT-LLM workers × 7] (each with 4×H100, TP=4)
+       ↓
+  [KV cache: paged, FP8 quantized]
+  [Prefix cache: shared system prompt]
+
+Key optimizations:
+  - KV-aware routing: route follow-ups to same worker (reuse KV cache)
+  - Prefix caching: system prompt (500 tokens) computed once, shared
+  - FP8 KV: 2× more concurrent sequences in same memory
+  - Chunked prefill: don't block decode while prefilling new requests
+  - Speculative decoding: 1.5-2× decode throughput
+  
+Cost:
+  28 × H100 at $8/hr = $224/hour = $5,376/day
+  Cost per user per month: $5,376 × 30 / 1,000 = $161/user/month
+  
+  vs OpenAI API:
+  200 tokens × 100 req/user/day × 30 days = 600,000 tokens/user/month
+  At $5/M tokens = $3/user/month (much cheaper for low usage)
+  
+  Self-hosted wins when: high per-user volume, data privacy, customization
+```
+
+---
+
+# SECTION 14: ADVANCED APPLICATION INTERVIEW QUESTIONS (Grind-Proof)
+
+## "How do you handle a dependency (Redis) going down during peak traffic?"
+
+→ Layered defense:
+1. **Circuit breaker** opens after 5 failures in 10 sec → stop calling Redis
+2. **Local cache** (in-process, 60-sec TTL) serves stale features
+3. **Fallback model** (XGBoost with basic features only, no Redis features)
+4. **Load shedding** if even fallback is overwhelmed → 429 for excess
+5. **Alert** fires → on-call investigates Redis failure
+6. **Auto-recovery**: circuit breaker half-opens every 30 sec, tests Redis
+7. When Redis recovers: cache warms up, full model resumes
+
+Impact during outage:
+  - Accuracy: drops ~10% (missing some features, using stale cache)
+  - Latency: actually DECREASES (no Redis call, cached response faster)
+  - Availability: maintained (degraded quality, but still serving)
+  - This is CORRECT behavior: worse answer > no answer
+
+## "How do you ensure model changes don't cause production incidents?"
+
+→ Multi-gate validation:
+1. **Offline evaluation**: holdout set accuracy, calibration, fairness metrics
+2. **Shadow mode**: run new model on production traffic, compare outputs, no serving
+3. **Canary deployment**: 1% traffic, 15-min bake, guardrail metrics monitored
+4. **Progressive rollout**: 1% → 5% → 25% → 100% over 24 hours
+5. **Automatic rollback**: any guardrail breach → instant revert
+6. **Feature compatibility check**: verify feature schema matches model expectation
+7. **A/B test**: for accuracy improvements, measure business metric lift
+
+Timeline: model trained → 2 days validation → 1 day shadow → 1 day canary → full rollout
+Fastest (emergency fix): 2 hours (skip shadow, aggressive canary)
+
+## "What's the most complex production incident you've debugged?"
+
+→ Structure for answer:
+```
+SITUATION: what was failing (p99 spikes, intermittent)
+DETECTION: how we found it (alert, dashboard correlation)
+DIAGNOSIS: systematic narrowing
+  Layer 7: is it traffic pattern? → no (constant QPS)
+  Layer 6: is it model? → no (same model, same accuracy)
+  Layer 5: is it data path? → no (shared memory working)
+  Layer 4: is it GPU? → yes! (SM utilization dropping periodically)
+  Layer 3: is it scheduling? → yes! (kernel compaction on GPU-feeding CPU)
+  Layer 1: root cause: THP compaction on NUMA node with GPU
+ROOT CAUSE: khugepaged scanning memory on CPUs 4-11, causing
+  GPU-feeding thread to be delayed by 5-10 ms periodically
+FIX: disabled THP, switched to explicit hugepages
+VERIFICATION: p99 spikes eliminated, perf stat confirmed no more compaction
+PREVENTION: added to boot config for all GPU nodes, added monitoring
+```
+
+## "How do you reason about the cost vs accuracy tradeoff for models?"
+
+→ Framework:
+```
+For each accuracy improvement ΔA:
+  Cost of improvement: ΔC (more compute, larger model, more features)
+  Business value of improvement: ΔV (less fraud, more revenue, better UX)
+  
+  If ΔV > ΔC: invest
+  If ΔV < ΔC: don't (or find cheaper path to same accuracy)
+
+Example:
+  FP16 → FP8: -2% accuracy, -50% cost
+  Is 2% accuracy worth 2× the GPU cost? Usually NO.
+  
+  XGBoost → Transformer: +13% accuracy, +5× GPU cost
+  Is 13% accuracy worth 5× GPU cost?
+  For fraud detection: each 1% accuracy = ~$100M/year in prevented fraud
+  13% × $100M = $1.3B value vs 5× GPU cost ($5M/year → $25M/year)
+  ROI: $1.3B / $25M = 52× return. ABSOLUTELY YES.
+  
+  This is how you justify EVERY technical investment.
+```
+
+## "How do you make your system observable without adding latency?"
+
+→ Zero-overhead observability architecture:
+1. **eBPF (kernel-level)**: no application code changes, < 0.1% overhead
+   - Trace latency: auto-instrumented HTTP/gRPC spans
+   - Network: TCP retransmits, DNS failures, connection pools
+   - System: scheduler delays, disk I/O, memory pressure
+
+2. **NVTX markers (GPU)**: < 1 µs per marker, compiled out in release
+   - Annotate CUDA stream operations with names
+   - Visible in Nsight and exported as OTel spans
+   
+3. **Lock-free metrics**: atomics, per-core counters, merged on scrape
+   - No lock contention on hot path
+   - Prometheus scrapes every 15 sec (not on request path)
+   
+4. **Async event publishing**: SPSC ring → background flush thread
+   - Request path writes event to ring (< 100 ns)
+   - Background thread flushes to Kafka (off critical path)
+   - If ring full: drop event, increment counter (acceptable)
+   
+5. **Sampling for expensive traces**: 1% of requests get full trace
+   - 100% of requests get basic metrics (latency, status)
+   - 1% get: feature values, model inputs, full span tree
+   - Always trace: errors, high-latency requests (tail sampling)

@@ -1,12 +1,12 @@
 
-Target 06/17 - 21 days 
+Target 06/18 - 18 days 
 	STAR			:- 80 %	:- 0.5 day
 	Search			:- 70 % :- 1 day
-	Inferencing		:- 70 %	:- 0.5 day
+	Inferencing		:- 70 %	:- 2 day
 	System	(K8)	:- 60 %	:- 1 day
-	CUDA & GPU		:- 60 %	:- 1 day
+	CUDA & GPU		:- 60 %	:- 2 day
 	Data Science/NLP:- 70 %	:- 0.5 day
-	Training		:- 60 % :- 0.5 day
+	Training		:- 60 % :- 2 day
 	C++ & RUST		:- 40 %	:- 2 day
 	DSA 			:- 30 %	:- 7 day				
 

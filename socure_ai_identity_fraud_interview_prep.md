@@ -247,15 +247,14 @@ This is the heart of the system and my primary interview talking point.
         AUTO-APPROVE         STEP-UP PATH              AUTO-DECLINE
               │                    │                         │
               │                    ▼                         │
-              │    ┌── WARM PATH (2-5 seconds) ────────┐    │
+              │    ┌── WARM PATH (2-3 seconds) ────────┐    │
               │    │  Applicant uploads ID + selfie      │    │
-              │    │  13B Vision-Language Model:          │    │
-              │    │   • OCR: extract DL/passport fields  │    │
-              │    │   • Face match: selfie vs ID photo   │    │
-              │    │   • Tampering: font/edge artifacts   │    │
-              │    │   • Cross-reference vs application   │    │
-              │    │  Re-score with document features     │    │
-              │    │  Updated decision: approve/escalate  │    │
+              │    │  Donut (OCR-free doc extraction)    │    │
+              │    │  LLaVA (image verification, cond.)  │    │
+              │    │  ArcFace (face matching)            │    │
+              │    │  Tampering CNN (forgery detection)  │    │
+              │    │  → XGBoost re-score with doc feats  │    │
+              │    │  Updated decision: approve/escalate │    │
               │    └────────────────┬───────────────────┘    │
               │                     │                        │
               │              ┌──────┴──────┐                 │
@@ -264,7 +263,7 @@ This is the heart of the system and my primary interview talking point.
               │                           │                  │
               │                           ▼                  │
               │    ┌── COLD PATH (minutes-hours) ───────┐    │
-              │    │  70B Reasoning Agent with tools:     │    │
+              │    │  Llama 4 Maverick Agent (self-hosted)│    │
               │    │   • Pull full credit bureau report   │    │
               │    │   • Search internal fraud database   │    │
               │    │   • Deep graph traversal (5-hop)     │    │
@@ -317,33 +316,173 @@ All parallel, all deadlined. Exactly like Broadcom's 6-model fan-out with shared
 
 At Broadcom Cloud SWG, I ran 6 models in parallel for web security: URL classifier, content analyzer, behavioral model, reputation lookup, DGA detector, and encrypted traffic analyzer. Same pattern: shared RequestContext, independent deadlines, graceful degradation per branch, final meta-scorer combines all outputs. The identity fraud system uses 4 branches instead of 6, but the orchestration is identical.
 
-### Warm Path — Document Verification with Vision-Language Model (2-5 seconds)
+### Warm Path — Document Verification Pipeline (2-5 seconds)
 
 Triggered when hot-path score falls in the "gray zone" (300-700). Applicant is asked to upload ID document + selfie.
 
-**13B Vision-Language Model (TensorRT-LLM optimized):**
-- **OCR Extraction:** Name, DOB, address, document number, expiration from driver's license or passport
-- **Face Matching:** Embedding similarity between selfie and ID photo (threshold: cosine > 0.85)
-- **Tampering Detection:** Font inconsistency, edge artifacts, metadata anomalies, Photoshop indicators
-- **Cross-Reference:** Extracted fields vs. stated application fields (name match, DOB match, address match)
+**Architecture: Specialized Models > Single Monolithic VLM**
 
-**Output:** Document confidence score + extracted fields → injected into FeatureBlock as additional features → XGBoost re-scored with augmented feature set.
+Rather than a single large VLM trying to do everything, the warm path uses purpose-built models for each task:
+
+```
+ID Document Image              Selfie Image
+       │                              │
+       ▼                              ▼
+┌──────────────────┐          ┌───────────────────┐
+│ Donut            │          │ ArcFace           │
+│ (OCR-free Doc    │          │ (Face Embedding   │
+│  Parsing)        │          │  Model)           │
+│                  │          │                   │
+│ Extracts:        │          │ Produces:         │
+│ • Name           │          │ • 512-d face      │
+│ • DOB            │          │   embedding       │
+│ • Address        │          │                   │
+│ • Doc number     │          └─────────┬─────────┘
+│ • Expiration     │                    │
+│ • Doc type       │                    │
+│ • Field conf.    │                    │
+└────────┬─────────┘                    │
+         │                              │
+         │  ┌─────────────────────────┐ │
+         │  │ LLaVA (conditional)     │ │
+         │  │ Only if Donut conf <0.8 │ │
+         │  │ Image understanding +   │ │
+         │  │ anomaly detection       │ │
+         │  └───────────┬─────────────┘ │
+         │              │               │
+         │  ┌───────────┴─────────────┐ │
+         │  │ Tampering Detector      │ │
+         │  │ (CNN classifier)        │ │
+         │  │ Font/edge/metadata      │ │
+         │  └───────────┬─────────────┘ │
+         │              │               │
+         ▼              ▼               ▼
+┌────────────────────────────────────────────────┐
+│           Feature Assembly (Warm)               │
+│                                                 │
+│  • Extracted name vs application name (Jaro-W.) │
+│  • Extracted DOB vs stated DOB (exact match)    │
+│  • Extracted address vs stated address (geo)    │
+│  • Face similarity: selfie vs ID (cosine)       │
+│  • Document tampering score                     │
+│  • Layout confidence score                      │
+│  • Document type match                          │
+│  • Original hot-path features                   │
+└───────────────────────┬────────────────────────┘
+                        │
+                        ▼
+┌────────────────────────────────────────────────┐
+│    XGBoost Re-Scoring (with document features)  │
+│    Calibrated → Approve / Escalate to Cold Path │
+└────────────────────────────────────────────────┘
+```
+
+**Model 1: Donut (Document Understanding Transformer) — Document Parsing**
+- **What:** End-to-end document understanding model (Naver/Clova) that reads document images directly without needing a separate OCR step
+- **Why Donut over OCR-based approaches:** OCR-free architecture — reads directly from pixel to structured output. No Tesseract dependency, no layout heuristics, no template maintenance. Handles varied ID layouts (50 US states, passports, military IDs) from a single model.
+- **HuggingFace:** `naver-clova-ix/donut-base-finetuned-docvqa` (fine-tuned on our internal ID document dataset)
+- **Input:** ID document image (driver's license, passport, state ID)
+- **Output:** Structured JSON: {name, DOB, address, document_number, expiration, doc_type} with per-field confidence
+- **Inference:** ~300-600ms on GPU (~200M parameters, no external OCR dependency)
+- **Advantage:** Single model replaces OCR + layout parsing + field extraction. Simpler pipeline, fewer failure modes.
+
+**Model 2: LLaVA (Large Language and Vision Assistant) — Image Understanding & Verification**
+- **What:** Open-source vision-language model that can reason about images
+- **HuggingFace:** `llava-hf/llava-v1.6-mistral-7b-hf` (or `llava-hf/llava-1.5-7b-hf` for faster inference)
+- **Role in pipeline:** Secondary verification — validates Donut's extraction, detects visual anomalies, reasons about document authenticity
+- **Input:** ID document image + prompt ("Verify: does this document show signs of tampering? Are all fields legible and consistent?")
+- **Output:** Structured assessment of document quality, flagging edge cases Donut might miss
+- **Inference:** ~500ms-1s on GPU (7B params)
+- **When triggered:** Only for uncertain cases (Donut confidence < 0.8) — not every warm-path request. Acts as an escalation within the warm path before going to cold.
+
+**Model 3: ArcFace — Face Matching**
+- **What:** State-of-the-art face recognition model producing 512-dimensional embeddings with angular margin loss
+- **Why ArcFace:** Best-in-class for face verification (LFW 99.83%), specifically designed for identity verification
+- **HuggingFace/Source:** InsightFace `buffalo_l` model (Apache 2.0)
+- **Input:** Selfie image + cropped face from ID document
+- **Output:** Cosine similarity score (threshold: > 0.85 = match, 0.6-0.85 = uncertain, < 0.6 = mismatch)
+- **Inference:** ~50ms on GPU (lightweight ResNet-100 backbone)
+- **Liveness check:** Paired with a liveness detection model (anti-spoofing) to prevent printed photo or screen replay attacks
+
+**Model 4: Tampering Detector — CNN Classifier**
+- **What:** Custom CNN trained on known forged vs. authentic documents
+- **Detects:** Font inconsistencies, edge artifacts around text/photo, EXIF metadata anomalies, resolution mismatches between regions, digital manipulation artifacts
+- **Inference:** ~100ms on GPU
+
+**Re-Scoring: XGBoost with Document Features**
+
+After extraction, new features are computed and merged with original hot-path features:
+
+| Document Feature | Computation | Signal |
+|---|---|---|
+| `doc_name_match_score` | Jaro-Winkler(extracted_name, stated_name) | Identity consistency |
+| `doc_dob_exact_match` | extracted_DOB == stated_DOB | Hard match |
+| `doc_address_geo_match` | Geocode distance between extracted and stated address | Address consistency |
+| `face_similarity_score` | Cosine(selfie_embedding, id_photo_embedding) | Identity verification |
+| `doc_tampering_score` | CNN classifier output | Document authenticity |
+| `layout_confidence_avg` | Mean confidence across extracted fields | Extraction quality |
+| `doc_expired_flag` | Expiration date vs current date | Document validity |
+| `doc_type_mismatch` | Expected vs detected document type | Compliance |
+
+XGBoost re-scores with original 200+ features + 8 document features → new calibrated decision:
+- Score > 700 → Approve (document verified)
+- Score < 400 → Decline (document didn't help or made it worse)
+- 400-700 → Escalate to cold path (agent investigation)
+
+**All Models Are Open-Source, Self-Hosted (No Vendor API Dependencies)**
+
+Design principle: PII-sensitive document images and selfies NEVER leave our infrastructure. All model inference is self-hosted on our GPU fleet, loaded from HuggingFace model hub. Entire pipeline — vision, extraction, face matching, and re-scoring — runs on our own infrastructure.
+
+| Model | Role | Source | HuggingFace | License | Size |
+|---|---|---|---|---|---|
+| Donut | Document field extraction (OCR-free) | Naver/Clova AI | `naver-clova-ix/donut-base` (fine-tuned internally) | MIT | ~200M params |
+| LLaVA | Image understanding + verification (conditional) | UW-Madison/Microsoft | `llava-hf/llava-v1.6-mistral-7b-hf` | Apache 2.0 | ~7B params |
+| ArcFace | Face embedding + matching | InsightFace | `buffalo_l` (insightface) | Apache 2.0 | ~100M params |
+| Tampering CNN | Forgery detection | Custom-trained | Internal fine-tuned on doc fraud dataset | Internal | ~25M params |
+| XGBoost | Re-scoring with document features | XGBoost | Open source | Apache 2.0 | CPU-only |
+
+**Alternatives Considered:**
+| Option | Pros | Cons | Our Decision |
+|---|---|---|---|
+| **Donut + LLaVA + ArcFace** (chosen) | Fully open source, self-hosted, OCR-free, end-to-end, PII stays in-house | Multiple models to maintain, LLaVA adds GPU cost | Best for production: clean pipeline, no external dependencies, auditable |
+| **LayoutLMv3** (`microsoft/layoutlmv3-base`) | Strong layout understanding, 350M params, fast | Requires separate OCR (Tesseract), more pipeline stages | Good alternative if you want layout-specific structure |
+| **Florence-2** (`microsoft/Florence-2-large`) | Unified vision-language, 0.7B params | Less field-level structure, needs fine-tuning for ID docs | Consider if Donut struggles with diverse doc types |
+| **Qwen2.5-VL-7B** (`Qwen/Qwen2.5-VL-7B-Instruct`) | Strong multimodal reasoning | 7B params = more GPU, slower | Replace LLaVA if better reasoning needed |
+| **Tesseract OCR + custom face embedding** | Fully open, minimal GPU | Lower accuracy on complex layouts, needs per-doc-type templates | Legacy fallback if GPU unavailable |
+| **Google Document AI / AWS Textract** | Managed, low ops | PII leaves infra, vendor lock-in, compliance risk | Rejected: unacceptable for PII-sensitive identity documents |
 
 **Sentinel Gateway mediates this path:**
-- Token budget on VLM inference call
-- Circuit breaker if VLM latency exceeds 5s
-- Fallback: route to manual review if VLM unavailable
-- All VLM outputs logged for audit trail
+- Per-model timeout: Donut (1s), LLaVA (1.5s, conditional), ArcFace (500ms), Tampering (500ms)
+- Circuit breaker per model — if any fails, route to manual review
+- LLaVA only triggered when Donut confidence < 0.8 (saves GPU for ~80% of cases)
+- Total warm-path deadline: 5 seconds
+- All model outputs + extracted fields logged for audit trail
+- Fallback: manual review if pipeline unavailable
 
 **Supplement: CapitalOne Transaction System Parallel**
 
-Same architecture as my Tier 2 transaction fraud system: 13B TensorRT-LLM model with Sentinel gateway governance. The difference: transaction Tier 2 reasons about transaction patterns; identity warm path reasons about document images. Same serving infrastructure, same circuit breaker pattern, different domain.
+Same multi-model orchestration pattern as my Tier 2 transaction fraud system — multiple specialized models governed by Sentinel gateway rather than one monolithic model trying to do everything. Same circuit breaker pattern, same deadline-based governance, different domain (document images vs. transaction patterns).
 
 ### Cold Path — Agentic AI Investigation (Minutes to Hours)
 
 For escalated cases, disputed declines, or cases where warm path is inconclusive.
 
-**70B Reasoning Agent with Tool Access:**
+**Self-Hosted Open-Source LLM Agent:**
+
+| Component | Model | Source | Deployment |
+|---|---|---|---|
+| Reasoning Agent | **Llama 4 Maverick** (or Llama 3.3 70B) | Meta, HuggingFace `meta-llama/Llama-4-Maverick-17B-128E-Instruct` | Self-hosted on 2× A100 80GB (tensor parallel) via vLLM |
+| Serving Framework | vLLM | Open source | PagedAttention, continuous batching, tool-calling support |
+| Orchestration | LangGraph / custom agent loop | Open source | Tool routing, retry, context management |
+
+**Why Llama 4 / Open Source (not GPT-4 or Claude):**
+- PII data stays on-premises (credit reports, SSNs, fraud labels) — cannot send to external APIs
+- No per-token cost — fixed GPU infrastructure cost regardless of query volume
+- Full control over prompts, fine-tuning, and behavior guardrails
+- Auditable: exact model weights, exact prompt, reproducible outputs
+- Llama 4 Maverick (Mixture-of-Experts, 17B active params, 128 experts) provides strong reasoning at lower compute than dense 70B
+
+**Agent Tool Access:**
 
 | Tool | What It Does | Why |
 |---|---|---|
@@ -380,9 +519,93 @@ Evidence trail: [linked documents, graph paths, bureau excerpts]
 - Agent is ADVISORY — never autonomously declines (regulatory requirement)
 - Human analyst makes final decision
 
+**Modular Tool Registry — Adaptable and Extensible:**
+
+The tool set is designed as a **pluggable registry**, not hardcoded into the agent prompt. This matters because fraud evolves and new data sources become available over time.
+
+```
+┌─────────────────── TOOL REGISTRY ──────────────────────┐
+│                                                         │
+│  tools/                                                 │
+│  ├── credit_bureau.yaml      (schema, auth, timeout)   │
+│  ├── fraud_database.yaml     (schema, auth, timeout)   │
+│  ├── graph_traversal.yaml    (schema, max_hops, cap)   │
+│  ├── consortium_query.yaml   (schema, auth, timeout)   │
+│  ├── document_forensics.yaml (schema, model endpoint)  │
+│  ├── summary_generator.yaml  (template, format)        │
+│  └── [NEW_TOOL].yaml         ← add new source here     │
+│                                                         │
+│  Each tool definition includes:                         │
+│  • Input/output JSON schema (validated at call time)    │
+│  • Authentication method (API key, mTLS, IAM role)     │
+│  • Timeout + retry policy                              │
+│  • Rate limits and circuit breaker config              │
+│  • PII classification (what data flows through it)     │
+│  • Audit level (full payload vs. summary only)         │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+To add a new data source (e.g., a new fraud consortium, a dark web monitoring feed, a social media signal): drop a YAML tool definition → register in tool registry → agent can immediately discover and use it. No code changes to the agent itself.
+
+**Per-Action Audit Trail — Every Agent Step is Traceable:**
+
+Every single agent action produces an immutable audit record:
+
+```json
+{
+  "investigation_id": "INV-2026-0529-A7829341",
+  "step_number": 3,
+  "timestamp": "2026-05-29T14:23:17.482Z",
+  "tool_called": "deep_graph_traversal",
+  "input": {
+    "entity_id": "E-4521",
+    "max_hops": 5,
+    "edge_types": ["USES_DEVICE", "USES_PHONE", "SHARES_ADDRESS"],
+    "as_of_ts": "2026-05-29T14:23:17Z"
+  },
+  "output_summary": {
+    "neighbors_found": 12,
+    "fraud_neighbors": 4,
+    "fraud_ratio": 0.33,
+    "closest_fraud_distance": 1
+  },
+  "latency_ms": 847,
+  "model_reasoning": "Entity shares device with 4 confirmed fraud cases. Expanding through address edge...",
+  "tokens_consumed": 342,
+  "pii_accessed": ["ssn_hash", "device_fingerprint", "address"],
+  "audit_hash": "sha256:a8f3b2..."
+}
+```
+
+**Why this level of audit matters:**
+1. **Analyst trust:** Analyst can trace exactly how the agent reached its conclusion
+2. **Regulatory:** FCRA/ECOA requires that adverse action decisions be reproducible
+3. **Debugging:** When agent gives a wrong recommendation, pinpoint which tool returned bad data
+4. **Security:** Detect if agent is being manipulated (prompt injection via tool outputs)
+5. **Cost tracking:** Token-level usage per investigation for capacity planning
+
+**LLM Model Selection Criteria — When to Upgrade:**
+
+| Criterion | Llama 4 Maverick (current) | When to Consider Upgrading |
+|---|---|---|
+| Multi-step tool orchestration | Strong — MoE architecture handles tool-calling well | If agent frequently fails to chain 4+ tools correctly |
+| Reasoning depth | Good for structured investigation | If analysts report shallow or incorrect reasoning |
+| Context window | 128K tokens | If credit reports + graph results exceed context |
+| Latency per turn | ~2-5s per reasoning step | Acceptable for cold path (minutes budget) |
+| Fine-tuning | Supports LoRA/QLoRA | Fine-tune on historical investigation → decision pairs for domain accuracy |
+
+**Model upgrade path (if needed):**
+- **First:** Fine-tune Llama 4 Maverick with LoRA on historical analyst investigations (cheapest improvement)
+- **Second:** If still insufficient, consider `Qwen2.5-72B-Instruct` or `DeepSeek-V3` (stronger reasoning, same self-hosted constraint)
+- **Third:** Dense 70B (`meta-llama/Llama-3.3-70B-Instruct`) if MoE routing causes inconsistency
+- **Never:** External API (GPT-4, Claude) — PII constraint is non-negotiable
+
+**Current assessment:** Llama 4 Maverick handles the investigation workload well. The tools do the heavy lifting (graph traversal, bureau lookup); the LLM primarily reasons about tool outputs and structures the summary. This is a tool-heavy, reasoning-light pattern — the model doesn't need to be brilliant, it needs to reliably orchestrate and summarize.
+
 **Supplement: CapitalOne Transaction Tier 3 Parallel**
 
-Same architecture as my Tier 3 transaction system: 70B agent with tool access, governed by Sentinel gateway's tool broker. The transaction Tier 3 investigates suspicious transaction patterns; the identity cold path investigates suspicious applicant identities. Same tool mediation, same audit trail, same human-in-the-loop requirement.
+Same architecture as my Tier 3 transaction system: Llama 4 agent with tool access, governed by Sentinel gateway's tool broker. The transaction Tier 3 investigates suspicious transaction patterns; the identity cold path investigates suspicious applicant identities. Same tool mediation, same audit trail, same human-in-the-loop requirement. Same modular tool registry — we added 3 new data sources in production without changing the agent code.
 
 ---
 
@@ -687,7 +910,7 @@ Decision → Outcome (60-day window for bust-out labels)
 
 ### "How did you use LLMs in fraud detection?"
 
-> "We had a three-tier architecture. The hot path was classical ML — XGBoost with Transformer features — scoring in 200ms. The warm path used a 13B Vision-Language Model for document verification when applicants uploaded ID documents — it extracted fields, matched faces, and detected tampering in 2-5 seconds. The cold path deployed a 70B reasoning agent with tool access for fraud analyst investigations — it could pull credit reports, run deep graph traversals, query consortium databases, and generate structured investigation summaries. The agent was advisory only; human analysts made final decisions."
+> "We had a three-tier architecture. The hot path was classical ML — XGBoost with Transformer features — scoring in 200ms. The warm path used LayoutLMv3 for document field extraction paired with ArcFace for face matching — extracting structured fields from ID documents, comparing the selfie against the ID photo, and feeding those document features back into XGBoost for re-scoring. Total warm-path latency was 2-3 seconds. The cold path deployed a 70B reasoning agent with tool access for fraud analyst investigations — it could pull credit reports, run deep graph traversals, query consortium databases, and generate structured investigation summaries. The agent was advisory only; human analysts made final decisions."
 
 ### "Why are you interested in Socure?"
 
@@ -704,7 +927,7 @@ Decision → Outcome (60-day window for bust-out labels)
 **Task:** Build a real-time ML scoring system that could detect synthetic identities, fraud rings, and first-party fraud at the point of application — within 200ms — while reducing false positives and maintaining FCRA compliance.
 
 **Action:**
-- Designed the 3-tier architecture: hot path (XGBoost + Transformer + FAISS + TigerGraph, 200ms), warm path (13B VLM for document verification, 2-5s), cold path (70B agent for analyst assistance)
+- Designed the 3-tier architecture: hot path (XGBoost + Transformer + FAISS + TigerGraph, 200ms), warm path (LayoutLMv3 + ArcFace + XGBoost re-scoring for document verification, 2-3s), cold path (70B agent for analyst assistance)
 - Built entity resolution pipeline (deterministic keys + probabilistic matching) to link applications to historical entities
 - Engineered 200+ features across 5 families (freshness, consistency, velocity, graph, behavioral)
 - Deployed TigerGraph for 2-hop fraud ring detection with bounded traversals
@@ -785,7 +1008,329 @@ Decision → Outcome (60-day window for bust-out labels)
 
 ---
 
-## 16. Technical Deep-Dive References (in docs-1/)
+## 16. Capacity Planning and Infrastructure
+
+### CapitalOne Scale Estimate — Identity Fraud (New Account Decisioning)
+
+**Traffic Profile:**
+
+| Metric | Estimate | Rationale |
+|---|---|---|
+| Annual card applications | ~30-40M | CapitalOne is #3 US card issuer. Industry applies 100M+/year across all issuers |
+| Average TPS (steady state) | ~80-130 requests/sec | 35M applications / 365 days / 86,400 seconds ≈ ~1.1 RPS average, but 95% traffic happens during business hours (16h) and online peaks → realistic steady-state ~100 TPS |
+| Peak TPS (flash sales, partner launches, holidays) | 500-1,000 requests/sec | 5-10x average during Black Friday, partner card launches, pre-approval campaigns |
+| Burst TPS (retry storms, bot attacks) | 2,000-3,000 requests/sec | Must handle without degradation — rate limiting absorbs beyond this |
+| Application payload size | ~2-5 KB | JSON: name, DOB, SSN, address, email, phone, device, session telemetry |
+| Decision latency SLA | p99 < 200ms | Applicant sees "Approved!" before form confirmation page loads |
+
+**Compare to Transaction Fraud (my Year 2 system):**
+
+| | Identity Fraud (Account Opening) | Transaction Fraud (Card Swipes) |
+|---|---|---|
+| TPS | 100-1,000 (bursty) | 15,000-25,000 (sustained) |
+| Latency SLA | p99 < 200ms | p99 < 5ms |
+| Compute per request | Heavy (graph, FAISS, enrichment, Transformer) | Light (XGBoost + velocity lookup) |
+| GPU requirement | Yes (Transformer + FAISS + warm path VLM) | Minimal (Tier 1 is CPU-only) |
+| Feature assembly | 50ms (parallel enrichment calls) | <1ms (pre-materialized cache only) |
+
+Identity fraud is **lower TPS but higher compute per request**. Transaction fraud is **extreme TPS but minimal compute per request**.
+
+### Infrastructure Provisioning — Hot Path
+
+| Component | Provisioning | Sizing Rationale |
+|---|---|---|
+| **Rust API Gateway** | 4 instances × 16 vCPU, 32GB RAM | Each handles ~500 RPS easily (Rust async). 4 for HA + headroom for 2,000 TPS bursts |
+| **Redis (Entity Resolution + Feature Cache)** | 6-node cluster, 64GB RAM each | ~100M entity keys, 200+ features per entity at ~2KB = ~200GB working set. Replication for HA |
+| **TigerGraph** | 3-node cluster, 64 vCPU, 256GB RAM each | ~500M vertices (identities + attributes), ~2B edges. Bounded 2-hop queries in 10-30ms require in-memory graph |
+| **GPU Nodes (Transformer + FAISS)** | 4 × A100 40GB (or 8 × A10G) | Transformer microbatch: 32 requests × 128 hidden dim. FAISS GPU: ~50M vectors × 128d ≈ 25GB. 4 GPUs for throughput + HA |
+| **XGBoost Scoring** | Co-located on gateway instances (CPU) | XGBoost inference <1ms on CPU. No dedicated instances needed |
+| **Third-Party Enrichment Proxy** | 2 instances with connection pooling | Manages circuit breakers, retries, and caching for 5+ external APIs |
+| **Kafka (Event Stream)** | 3-broker cluster, 12 partitions | Application events, feature updates, audit events. ~1,000 events/sec peak |
+| **Audit/Logging** | Elasticsearch or S3 + Athena | Every decision logged: ~50KB per decision × 35M/year ≈ 1.7TB/year |
+
+### Infrastructure Provisioning — Warm Path (Document Verification)
+
+| Component | Provisioning | Sizing Rationale |
+|---|---|---|
+| **Donut Serving** | 2 × A10G 24GB | ~200M params ≈ ~800MB FP16. OCR-free, fast inference. ~20% of apps → ~7M reviews/year → ~0.2 RPS avg, bursty to 10 RPS |
+| **LLaVA Serving** | 1 × A100 40GB (shared with hot-path Transformer) | ~7B params ≈ ~14GB FP16. Only triggered for uncertain cases (Donut confidence < 0.8, ~20% of warm-path requests). Low utilization — can share GPU |
+| **ArcFace Serving** | Co-located on Donut GPU instances | ResNet-100 backbone ≈ ~250MB. 50ms inference. Negligible additional GPU memory |
+| **Tampering CNN** | Co-located on Donut GPU instances | Custom CNN ≈ ~100MB. Can share GPU with Donut |
+| **Document Storage** | S3 with lifecycle | ID images, selfies — ~500KB each, ~14M images/year = ~7TB/year. Retain for audit (7 years) |
+| **XGBoost Re-Scoring** | CPU (co-located with gateway) | Same XGBoost framework as hot path, just with additional document features. <1ms |
+
+**Note:** Entire warm-path vision pipeline is self-hosted open source. Donut (200M) + ArcFace (100M) + CNN (25M) fit on 2× A10G for the common path. LLaVA (7B) is conditional — only invoked for uncertain extractions, keeping average GPU cost low.
+
+### Infrastructure Provisioning — Cold Path (Agentic Investigation)
+
+| Component | Provisioning | Sizing Rationale |
+|---|---|---|
+| **Llama 4 Maverick (via vLLM)** | 2 × A100 80GB (tensor parallel) | Llama 4 Maverick: 17B active params (MoE, 128 experts). FP16 weights ~35GB + KV cache. vLLM with PagedAttention. ~0.03 RPS (low throughput). Shared with other internal LLM workloads |
+| **Tool Services** | Existing internal services | Credit bureau API, fraud DB, deep graph queries — already provisioned for other use cases |
+| **Analyst UI** | Standard web infra | Dashboard for fraud analysts to review agent output and make decisions |
+| **Model Source** | HuggingFace: `meta-llama/Llama-4-Maverick-17B-128E-Instruct` | Open source (Llama license), self-hosted, PII never leaves infra |
+
+### Shared vs. Separate Infrastructure Decision
+
+**Our Architecture Choice: Shared Platform, Separate Scoring Services**
+
+```
+┌────────────────── SHARED PLATFORM LAYER ──────────────────────────────┐
+│                                                                        │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  ┌────────────┐ │
+│  │ Feature     │  │ Model        │  │ Audit/Event │  │ Monitoring │ │
+│  │ Store       │  │ Registry     │  │ Bus (Kafka) │  │ Platform   │ │
+│  │ (Redis +    │  │ (MLflow +    │  │             │  │ (Grafana + │ │
+│  │  S3 + DDB) │  │  Artifact)   │  │             │  │  PagerDuty)│ │
+│  └──────┬──────┘  └──────┬───────┘  └──────┬──────┘  └──────┬─────┘ │
+│         │                 │                  │                 │       │
+└─────────┼─────────────────┼──────────────────┼─────────────────┼───────┘
+          │                 │                  │                 │
+    ┌─────┼─────────────────┼──────────────────┼─────────────────┼─────┐
+    │     ▼                 ▼                  ▼                 ▼     │
+    │  ┌────────────────────────────────────────────────────────────┐  │
+    │  │            IDENTITY FRAUD SCORING SERVICE                   │  │
+    │  │  Own: Gateway, Entity Resolution, Graph Queries,           │  │
+    │  │       Transformer, FAISS, VLM (warm), Agent (cold)         │  │
+    │  │  SLA: p99 < 200ms (hot), 5s (warm), async (cold)          │  │
+    │  │  GPU: 4× A100 (dedicated, not shared with Txn)             │  │
+    │  │  Scale: 100-1,000 TPS                                      │  │
+    │  └────────────────────────────────────────────────────────────┘  │
+    │                                                                   │
+    │  ┌────────────────────────────────────────────────────────────┐  │
+    │  │            TRANSACTION FRAUD SCORING SERVICE                 │  │
+    │  │  Own: Gateway, Velocity Engine, XGBoost Hot Path,          │  │
+    │  │       13B Reasoning (warm), 70B Agent (cold)               │  │
+    │  │  SLA: p99 < 5ms (hot), 500ms (warm), async (cold)         │  │
+    │  │  GPU: 8× A100 (dedicated, higher throughput needed)         │  │
+    │  │  Scale: 15,000-25,000 TPS                                   │  │
+    │  └────────────────────────────────────────────────────────────┘  │
+    │                                                                   │
+    │  ┌────────────────────────────────────────────────────────────┐  │
+    │  │            ACCOUNT TAKEOVER SCORING SERVICE                  │  │
+    │  │  Own: Login/session scoring, behavioral biometrics          │  │
+    │  │  SLA: p99 < 50ms                                            │  │
+    │  │  Scale: 5,000-10,000 TPS                                    │  │
+    │  └────────────────────────────────────────────────────────────┘  │
+    └───────────────────────────────────────────────────────────────────┘
+                         FRAUD DETECTION UNIT
+```
+
+### Why Shared Platform but Separate Scoring
+
+| What's SHARED | What's SEPARATE | Why |
+|---|---|---|
+| Feature Store (Redis + S3) | Feature schemas and keys | Same infra, different feature sets per service |
+| Model Registry (MLflow) | Models, versions, rollback | Same tooling, independent deployment lifecycle |
+| Kafka event bus | Topics and schemas | Same cluster, different topics per service |
+| Monitoring/alerting | SLOs, dashboards, runbooks | Same Grafana, different alert thresholds |
+| TigerGraph cluster | Query patterns and SLAs | Same graph data, but identity queries are heavier than txn queries — separate query pools |
+| GPU fleet management | GPU allocation | Identity: fewer GPUs, higher compute per request. Transaction: more GPUs (for warm/cold), lower compute per hot request |
+| Training infrastructure | Training pipelines, schedules | Same Kubernetes cluster, different jobs |
+
+### Why NOT Merge Into One Service
+
+1. **Latency contamination** — Identity scoring does 50ms enrichment + 30ms graph traversal. If this leaks into the 5ms transaction path, card authorizations fail.
+2. **Blast radius** — Identity graph query having a hot-node issue shouldn't affect 25K TPS card authorizations.
+3. **Deployment independence** — Identity model retrained monthly (label delay). Transaction model retrained weekly. Different cadence, different risk.
+4. **Team ownership** — Different on-call rotations, different domain expertise, different compliance obligations (FCRA for identity vs. PCI-DSS for transactions).
+5. **Scaling axes differ** — Identity scales with application volume (bursty, lower TPS). Transaction scales with swipe volume (sustained, very high TPS). Different autoscaling policies.
+
+### Why NOT Fully Separate Infrastructure
+
+1. **Cost** — TigerGraph, Redis, Kafka are expensive. Sharing reduces total cost by ~40%.
+2. **Feature reuse** — Entity velocity features (device reuse, phone reuse) serve BOTH identity and transaction scoring. Compute once, read from both.
+3. **Cross-service signals** — An entity flagged by identity scoring feeds into transaction scoring as a "high-risk account" signal. Shared feature store enables this.
+4. **Operational excellence** — One monitoring platform, one CI/CD pipeline, one model registry. Team can move between services without retooling.
+5. **Graph consistency** — One TigerGraph instance means one truth about entity relationships. Separate graphs would diverge and require reconciliation.
+
+### How Services Don't Step On Each Other (Resource Isolation Mechanics)
+
+The key question: if Redis, TigerGraph, Kafka, and some GPUs are shared — how do we guarantee that identity fraud's heavy graph queries don't starve transaction fraud's 5ms hot path?
+
+**Layer 1: Namespace and Logical Isolation**
+
+```
+Redis:
+  identity:entity:{id}:features     ← Identity service reads/writes
+  identity:velocity:{key}:counters  ← Identity service reads/writes
+  txn:card:{id}:features            ← Transaction service reads/writes
+  txn:velocity:{key}:counters       ← Transaction service reads/writes
+  shared:device:{fp}:reuse_count    ← Both services READ (streaming pipeline WRITES)
+
+Kafka:
+  identity.application.events       ← Identity service produces
+  identity.decisions                 ← Identity service produces
+  txn.authorization.events          ← Transaction service produces
+  txn.decisions                     ← Transaction service produces
+  shared.entity.updates             ← Both consume (feature store updates)
+
+TigerGraph:
+  Query pool "identity_queries"     ← Identity service (heavier, 30ms budget)
+  Query pool "txn_queries"          ← Transaction service (lighter, 2ms budget)
+  Shared graph data                 ← One truth, two access patterns
+```
+
+**Layer 2: Resource Quotas and Priority**
+
+| Shared Resource | Identity Fraud Quota | Transaction Fraud Quota | Enforcement |
+|---|---|---|---|
+| **Redis ops/sec** | 30% of cluster capacity | 60% of cluster capacity | Per-client rate limiting in Redis proxy |
+| **TigerGraph query pool** | Dedicated pool: 16 threads, 50ms timeout | Dedicated pool: 32 threads, 5ms timeout | TigerGraph workload groups with separate thread pools and query timeouts |
+| **Kafka throughput** | 30% partition bandwidth | 60% partition bandwidth | Consumer group quotas |
+| **Network bandwidth** | Standard priority | High priority (QoS marking) | TC (traffic control) qdisc on host |
+
+**Layer 3: GPU Isolation (Physical Separation)**
+
+GPUs are NOT shared between services. This is the one component with **hard physical isolation**:
+
+```
+GPU Node Pool 1 (Identity Fraud — 4× A100 40GB):
+  ├── GPU 0-1: Transformer microbatching (hot path)
+  ├── GPU 2:   FAISS search (hot path)
+  └── GPU 3:   Warm path models (Donut + ArcFace + LLaVA conditional)
+
+GPU Node Pool 2 (Transaction Fraud — 8× A100):
+  ├── GPU 0-5: Tier 2 (13B TensorRT-LLM reasoning)
+  └── GPU 6-7: Tier 3 (shared LLM agent pool)
+
+GPU Node Pool 3 (Shared Cold Path — 2× A100 80GB):
+  └── GPU 0-1: Llama 4 Maverick (identity + transaction cold investigations)
+               Multiplexed via vLLM with request priority queuing
+```
+
+Why physical GPU isolation: GPU memory contention and CUDA context switching destroy latency predictability. A transaction fraud warm-path burst should never evict identity fraud's FAISS index from GPU memory.
+
+**Exception:** Cold path LLMs ARE shared between services because:
+- Both have very low RPS (~0.03 each)
+- Cold path has no strict latency SLA (minutes budget)
+- vLLM's continuous batching handles multi-tenant requests efficiently
+- Priority queue ensures higher-risk investigations get scheduled first
+
+**Layer 4: Circuit Breakers Protect Cross-Service Contamination**
+
+```
+Identity service calling shared TigerGraph:
+  → Circuit breaker: if p99 > 40ms for 10 consecutive requests → OPEN
+  → Fallback: use pre-cached graph aggregates (stale but fast)
+  → Effect: identity service degrades gracefully without loading graph further
+
+Transaction service calling shared TigerGraph:
+  → Circuit breaker: if p99 > 3ms for 10 consecutive requests → OPEN
+  → Fallback: skip graph features entirely (txn hot path can score without them)
+  → Effect: transaction service protects its 5ms SLA absolutely
+
+Shared Redis:
+  → Per-service connection pools (identity: 50 connections, txn: 200 connections)
+  → Per-service timeout: identity 10ms, txn 2ms
+  → If identity queries slow Redis: txn connections hit timeout first → txn circuit opens → txn falls back to local cache → Redis recovers
+```
+
+**Layer 5: Autoscaling on Different Axes**
+
+| Service | Scaling Trigger | Scale Direction | Speed |
+|---|---|---|---|
+| Identity Fraud | Application volume spike (holiday, partner launch) | Scale gateway + feature cache reads | Horizontal, minutes |
+| Transaction Fraud | Card swipe volume (Black Friday, payday) | Scale gateway + velocity engine | Horizontal, seconds (pre-warmed pool) |
+| Shared Redis | Memory pressure > 80% OR ops/sec > 70% capacity | Add read replicas | Minutes |
+| Shared TigerGraph | Query latency p99 > baseline × 2 | Cannot easily scale (in-memory graph). Instead: shed load via circuit breakers | N/A — capacity planned, not autoscaled |
+| Shared Kafka | Consumer lag > threshold | Add partitions + consumers | Minutes |
+
+**Layer 6: Capacity Planning Prevents Contention at Steady State**
+
+The most important protection: **right-size so contention is rare.**
+
+| Resource | Total Capacity | Identity Usage (steady) | Txn Usage (steady) | Headroom |
+|---|---|---|---|---|
+| Redis ops/sec | 500K ops/sec | ~30K ops/sec (100 TPS × 300 keys) | ~200K ops/sec (20K TPS × 10 keys) | ~54% free |
+| TigerGraph queries/sec | 2,000 queries/sec | ~100 queries/sec | ~500 queries/sec (only 2.5% of txns need graph) | ~70% free |
+| Kafka messages/sec | 100K msg/sec | ~2K msg/sec | ~50K msg/sec | ~48% free |
+
+At steady state, we're at ~50% utilization on shared resources. The headroom absorbs bursts from either service. Contention only happens if BOTH services burst simultaneously — which is rare because their traffic patterns are uncorrelated (identity = business hours, transaction = evenings + weekends).
+
+### Interview Soundbite (Resource Isolation)
+
+> "We shared the expensive stateful infrastructure — Redis, TigerGraph, Kafka — because duplicating them would cost 40% more and create data consistency problems. But we prevented services from stepping on each other through five layers: logical namespace separation, per-service resource quotas with dedicated query pools, physical GPU isolation between services, independent circuit breakers with service-specific fallbacks, and careful capacity planning to maintain 50%+ headroom at steady state. The key insight is that identity fraud and transaction fraud have uncorrelated traffic patterns — identity spikes during business hours, transactions spike on evenings and weekends — so shared resources naturally absorb each other's bursts."
+
+### Total Infrastructure Cost Estimate (Identity Fraud Service Only)
+
+| Component | Monthly Cost (AWS, on-demand) | Notes |
+|---|---|---|
+| 4× A100 GPU instances (p4d.24xlarge equivalent) | ~$50K/month | For Transformer + FAISS + VLM. Could reduce with reserved instances |
+| 2× A100 for cold path (shared with other LLM workloads) | ~$25K/month (pro-rated) | 70B agent, low utilization — shared |
+| Redis cluster (6 nodes × r6g.2xlarge) | ~$8K/month | Entity resolution + feature cache |
+| TigerGraph (3 nodes, pro-rated share) | ~$15K/month | Shared 50/50 with transaction fraud |
+| Gateway + compute (8× c6g.4xlarge) | ~$6K/month | Rust services, XGBoost inference |
+| Kafka (shared cluster, pro-rated) | ~$4K/month | Event streaming |
+| Storage (S3 + DynamoDB) | ~$3K/month | Audit logs, document images, training data |
+| Third-party enrichment APIs | ~$20K/month | Credit bureau, phone intel, email intel, device reputation — volume-based |
+| Monitoring/observability | ~$5K/month | Datadog/Grafana, logging, alerting |
+| **Total (identity fraud service)** | **~$136K/month** | ~$1.6M/year |
+
+**Cost per decision:** $136K / (35M applications/12 months) ≈ **$0.047 per application scored**
+
+(For comparison: Socure charges customers $0.50–$2.00 per identity verification — showing the massive margin opportunity in identity-as-a-service)
+
+### Interview Soundbite
+
+> "We ran the identity fraud and transaction fraud services on a shared platform — same feature store, same TigerGraph, same Kafka, same model registry — but as independent scoring services with separate GPU allocations, separate SLAs, and independent deployment lifecycles. Identity fraud was lower TPS but higher compute per request (graph traversals, FAISS, Transformer, external enrichment). Transaction fraud was extreme TPS but minimal compute per hot-path decision. Shared infrastructure saved ~40% on costs while separate services gave us independent blast radii and scaling axes."
+
+---
+
+## 17. Challenges Encountered
+
+### Business Challenges
+
+| Challenge | Impact | How We Addressed It |
+|---|---|---|
+| **Fraud losses vs. customer friction trade-off** | Business wanted zero fraud losses BUT also wanted 80%+ instant approvals. These conflict directly — tighter thresholds catch more fraud but reject more good customers. | Built the 360° scoring framework so product could tune thresholds per-segment. Premium card products accepted more risk (higher approve rate), secured cards had tighter controls. Weekly threshold governance meetings with Fraud Ops + Product + Compliance. |
+| **Revenue pressure to approve borderline applications** | Marketing spent $200+ acquiring each applicant. Declining 30% meant burning $2M+/month in acquisition cost. Product pushed to lower decline thresholds. | Introduced the step-up path (warm path) as a middle ground — instead of binary approve/decline, borderline applicants got document verification. Converted 60%+ of step-ups to approvals with higher confidence. Reduced hard declines from 30% to 12% while maintaining same fraud loss rate. |
+| **Regulatory examination pressure** | OCC (Office of the Comptroller) and CFPB examinations required us to demonstrate that our model didn't discriminate by race, gender, age, or geography. Any model change triggered a fair lending review. | Built automated fairness monitoring: false-positive and false-negative rates by demographic segment (using proxy variables where direct attributes weren't available). Every model deployment included a disparate impact analysis. Added 2-week fair lending review to the deployment pipeline — slowed iteration but avoided regulatory action. |
+| **Label delay killed fast iteration** | Synthetic identity fraud takes 60-90 days to confirm (account bust-out). We couldn't evaluate a new model for 3 months. | Developed proxy labels: 30-day never-activated, 45-day first-payment-default, combined with consortium confirms. Created "early detection" metrics that correlated 0.85+ with eventual confirmed fraud. Enabled monthly model refresh instead of quarterly. |
+| **Explainability requirement conflicted with model complexity** | FCRA requires specific, consumer-understandable reasons for every decline. But graph features and FAISS similarity are hard to explain in plain English. | Mapped every model feature to a finite set of reason codes (R01-R25). Used SHAP to determine top contributors per decision, then translated via lookup table. Worked with Legal to pre-approve reason code language. Kept XGBoost as final layer specifically because its feature contributions are interpretable. |
+
+### Technical Challenges
+
+| Challenge | Impact | How We Addressed It |
+|---|---|---|
+| **TigerGraph hot-node explosion** | Some entities (apartment buildings, corporate NAT IPs, shared family devices) had 10,000+ edges. Unbounded 2-hop traversal from these nodes would take 500ms+ and blow our latency budget. | Implemented per-hop expansion caps (500 neighbors max). Added degree-based pruning: if a node has >1,000 edges, mark it as "high-degree hub" and use pre-computed aggregate features instead of live traversal. Reduced graph query p99 from 120ms to 28ms. |
+| **Feature store cache stampede during cold starts** | After a Redis failover or cluster restart, all services simultaneously tried to repopulate cache — causing thundering herd on upstream data stores. | Implemented staggered TTLs with jitter (TTL ± 20% random). Added a "cache warming" job that pre-populates hot entities on restart. Used the `cache_miss` feature flag so the model could handle missing features without failing. |
+| **Training-serving skew in graph features** | Graph features computed during training used batch graph snapshots. But at serving time, the graph was live and evolving. Subtle differences in graph state caused model accuracy degradation. | Built a "point-in-time graph replay" capability: training pipeline queries TigerGraph with historical `as_of_ts` parameter so training features match what serving would have seen. Added monitoring for graph-feature distribution drift between training and serving. |
+| **Third-party enrichment API instability** | Phone intelligence provider had 2% error rate and occasional 200ms spikes. Email intel provider went down for 2 hours during a peak period. One vendor changed their response schema without notice. | Per-vendor circuit breakers (open after 3 consecutive failures). Cached last-known-good values with `feature_age_seconds` indicator. Trained model with synthetic `vendor_timeout=1` flags so it learned to score without enrichment. Added schema validation on vendor responses with alert on unexpected changes. |
+| **FAISS index staleness and recall degradation** | Known-fraud patterns evolve daily, but full index rebuild took 45 minutes. New fraud patterns during the rebuild window were invisible to similarity search. | Implemented two-index strategy: cold index (full rebuild nightly, high recall) + hot index (incremental updates every 5 minutes, recent patterns). Query both and merge top-k results. Hot index uses IVF-Flat for fast insertions; cold index uses HNSW for better recall. |
+| **GPU memory fragmentation under mixed workloads** | Running Transformer microbatching + FAISS search on same GPU caused memory fragmentation. Under sustained load, CUDA OOM errors appeared despite sufficient total memory. | Physically separated workloads: GPU 0-1 for Transformer (fixed memory allocation via CUDA Graph), GPU 2 for FAISS (pre-allocated index), GPU 3 for warm-path models. Eliminated mixed allocation patterns entirely. Used CUDA memory pools with pre-allocated blocks. |
+| **Entity resolution false merges** | Probabilistic matching occasionally merged two real different people into one entity (e.g., father and son with same address and similar names). This contaminated features for both. | Added a "split detection" monitor: if a merged entity suddenly shows inconsistent behavior (different device, different geo, simultaneous sessions), flag for potential false merge. Implemented entity split capability — create new entity and reassign recent events. Tightened match threshold from 0.70 to 0.75 after analysis. |
+
+### Operational Challenges
+
+| Challenge | Impact | How We Addressed It |
+|---|---|---|
+| **Model deployment required 2-week compliance review** | Every model change needed fair lending analysis, reason code validation, threshold impact assessment, and sign-off from Compliance + Legal. Sprint velocity suffered. | Separated "model changes" from "threshold changes" from "feature additions." Threshold-only changes had a 2-day fast-track review. Feature additions that didn't change protected-class exposure had a 5-day review. Full model retrains kept the 2-week cycle. This tripled our effective iteration speed. |
+| **Alert fatigue from monitoring** | 200+ features × 6 drift metrics × 3 segments = 3,600 potential alerts. On-call engineers were drowning in noise. | Implemented hierarchical alerting: Level 1 (automated — self-healing like cache refresh), Level 2 (page on-call — score distribution shift > 5%), Level 3 (escalate to ML team — model accuracy degradation confirmed). Reduced actionable alerts from 50/day to 3/day. |
+| **Fraud analyst backlog during peak seasons** | Cold path escalations spiked 3x during holiday season. 5 analysts couldn't keep up. Manual investigation per case took 45 minutes. | Deployed the Llama 4 agent to pre-investigate and generate structured summaries. Reduced analyst time per case from 45 minutes to 12 minutes (analyst reviews agent output instead of raw data). Handled 3x volume with same team size. |
+| **On-call burnout from shared infrastructure** | When TigerGraph had issues at 2am, both identity and transaction on-call engineers got paged. Unclear ownership. | Established "infrastructure on-call" separate from "service on-call." Infra team handles Redis/TigerGraph/Kafka issues. Service on-call only paged if their circuit breakers OPEN (meaning infra issue is impacting their service). Reduced cross-team pages by 70%. |
+| **Canary deployment false positives** | New model deployed to 5% canary traffic showed worse metrics — but it was because the 5% sample happened to include a fraud ring attack (high true-positive rate = low precision signal in small sample). | Changed canary evaluation from "compare raw metrics" to "compare metrics on equivalent traffic." Used propensity-score matching to ensure canary and control saw statistically similar traffic. Extended canary window from 2 hours to 24 hours for statistical power. |
+
+### Customer-Facing Challenges
+
+| Challenge | Impact | How We Addressed It |
+|---|---|---|
+| **Step-up friction caused 30% applicant abandonment** | When asked to upload ID documents, 30% of applicants dropped off — many were legitimate but frustrated. Lost revenue: ~$15M/year in lifetime value. | Optimized step-up UX: clearer instructions, mobile-first camera capture, real-time image quality feedback ("please retake, too blurry"). Added SMS-based OTP as lighter alternative for borderline-low-risk cases. Reduced abandonment from 30% to 18%. |
+| **False declines causing customer complaints and social media damage** | High-profile cases: legitimate customer with unusual name declined, customer with new address after moving declined. PR escalations and CFPB complaints. | Built "high-confidence decline" vs. "soft decline" distinction. Soft declines (score 250-300) route to step-up instead of hard decline. Added "reconsideration path" — declined applicants could call in and get cold-path agent review. Reduced CFPB complaints by 40%. |
+| **Legitimate customers flagged by graph features** | Real family members sharing a device. College students at same address. Immigrant communities with shared phone numbers. Graph features flagged these as "synthetic clusters." | Added "legitimate sharing" indicators: known household relationship, student housing address flag, family plan phone detection. Trained model on labeled false-positive cases so it learned the difference between fraud ring sharing and family sharing. Graph false-positive rate dropped 55%. |
+| **Applicants gaming the step-up process** | Sophisticated fraudsters learned that uploading high-quality forged documents passed the warm path. Some used AI-generated faces for selfie matching. | Added liveness detection (blinking, head movement) for selfie verification. Deployed EXIF metadata checks on uploaded documents. Added "document freshness" detection (looking for JPG compression artifacts from screenshots vs. camera originals). Implemented device integrity checking during upload session. |
+| **Partner channel quality variance** | Different partner channels (car dealerships, retail stores, online affiliates) had wildly different fraud rates. One partner had 15% fraud rate vs. 2% average. Blanket rules were unfair to good partners. | Added `channel_id` and `partner_fraud_rate_30d` as features. Built per-partner threshold adjustments. Implemented partner quality monitoring with automated throttling for high-fraud partners. Created partner feedback reports showing their fraud rate vs. benchmarks. |
+
+### What I'd Do Differently (Hindsight)
+
+1. **Start with graph features earlier** — We added TigerGraph in month 8. Should have been month 1. It delivered the biggest single lift (+35% fraud ring recall).
+2. **Invest in point-in-time infrastructure from day 1** — Our first 3 months of training data had subtle leakage. Had to rebuild the training pipeline when we discovered features that used future labels.
+3. **Build the warm path before hiring more analysts** — We hired 3 additional analysts before building automation. Should have built VLM pipeline first, then right-sized the team.
+4. **Separate entity resolution as its own service earlier** — It was embedded in the scoring path initially. Refactoring it into a standalone service with its own SLA was a 6-week project that should have been the design from the start.
+
+---
+
+## 18. Technical Deep-Dive References (in docs-1/)
 
 These topics are already covered in depth in other documents. Reference them for implementation details:
 
