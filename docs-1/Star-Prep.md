@@ -143,19 +143,19 @@ Search
         1. Q: Walk me through a production search pipeline.
            A: I start with ingestion, parsing, cleaning, normalization, chunking, embedding, indexing, retrieval, fusion, ranking, and observability. In production I usually run sparse retrieval for exact matches, dense retrieval for semantic recall, RRF or learned fusion to merge candidates, and a cross-encoder/LLM reranker on the top candidates. The key interview point is that retrieval optimizes recall while ranking optimizes final relevance.
 
-        2. Q: When would you use BM25 vs dense retrieval?
+    2. Q: When would you use BM25 vs dense retrieval?
            A: BM25 is strong for exact keywords, names, IDs, legal terms, skills, and rare terms. Dense retrieval is strong when the query and document use different words for the same meaning. For most real systems I use hybrid retrieval because BM25 protects precision and dense retrieval improves semantic recall.
 
-        3. Q: Compare HNSW and IVF for vector search.
-           A: HNSW is graph-based, strong on CPU, high recall, and supports incremental adds, but it uses more memory and deletes are usually tombstone/compact. IVF partitions vectors into centroid lists and searches the nearest lists using `nprobe`; it is memory efficient and GPU friendly, but recall depends heavily on centroid quality and rebuild cadence.
+    3. Q: Compare HNSW and IVF for vector search.
+           A: HNSW is graph-based, strong on CPU, high recall, and supports incremental adds, but it uses more memory and deletes are usually tombstone/compact. IVF partitions vectors into centroid lists and searches the nearest lists using`nprobe`; it is memory efficient and GPU friendly, but recall depends heavily on centroid quality and rebuild cadence.
 
-        4. Q: How do you choose chunking strategy for RAG/search?
+    4. Q: How do you choose chunking strategy for RAG/search?
            A: I choose chunking based on the unit of meaning, not just token count. For documentation, semantic or paragraph-based chunks with overlap usually work better than fixed token cuts. I preserve metadata like source, section, timestamp, tenant, and permissions, then evaluate Recall@K and answer groundedness to tune chunk size.
 
-        5. Q: How do you improve low recall?
-           A: First inspect failed queries and labels, then increase candidate depth, relax filters, add hybrid search, tune HNSW `efSearch` or IVF `nprobe`, add query expansion, improve chunking, and fine-tune embeddings with hard negatives. I would validate with HitRate@K, Recall@K, MRR, and NDCG before shipping.
+    5. Q: How do you improve low recall?
+           A: First inspect failed queries and labels, then increase candidate depth, relax filters, add hybrid search, tune HNSW`efSearch` or IVF `nprobe`, add query expansion, improve chunking, and fine-tune embeddings with hard negatives. I would validate with HitRate@K, Recall@K, MRR, and NDCG before shipping.
 
-        6. Q: Where does reranking fit, and what is the tradeoff?
+    6. Q: Where does reranking fit, and what is the tradeoff?
            A: Reranking happens after candidate generation. A cross-encoder or LLM reranker sees the query and candidate text together, so it is more accurate than embedding similarity alone, but it is too expensive for the full corpus. A common design is retrieve top 500-1000, pre-rank to 100-200, then rerank the final set.
 
 Recommendation
@@ -169,19 +169,19 @@ Recommendation
         1. Q: Walk me through a recommendation pipeline.
            A: A production recommender is usually a funnel: candidate generation produces hundreds or thousands of items, pre-ranking reduces the set cheaply, ranking scores the most promising items with richer features, and re-ranking applies diversity, freshness, policy, and business constraints. Candidate generation optimizes recall; final ranking optimizes user and business objectives.
 
-        2. Q: Compare collaborative filtering and content-based recommendation.
+    2. Q: Compare collaborative filtering and content-based recommendation.
            A: Collaborative filtering learns from user-item interactions, so it captures crowd behavior but struggles with cold-start users/items. Content-based recommendation uses item/user attributes such as text, category, skills, and embeddings, so it handles new items better but can over-personalize. Most modern systems are hybrid.
 
-        3. Q: How do you handle cold start?
+    3. Q: How do you handle cold start?
            A: For new items, I use content embeddings, taxonomy/category priors, creator/merchant history, and exploration slots. For new users, I use onboarding signals, geography/device/context, popularity priors, and session behavior. The principle is to start with content and priors, then gradually replace them with behavioral signals.
 
-        4. Q: Why do recommendation systems use multi-stage ranking?
+    4. Q: Why do recommendation systems use multi-stage ranking?
            A: Scoring every item with a heavy model is too expensive. Multi-stage ranking lets cheaper retrieval get broad recall, then expensive models focus on a small candidate set. This makes latency and cost manageable while preserving quality.
 
-        5. Q: How do you optimize for multiple objectives like click, dwell, purchase, and trust?
+    5. Q: How do you optimize for multiple objectives like click, dwell, purchase, and trust?
            A: I train multi-task models or separate heads for each objective, then combine scores using weights or a learned calibration layer. I also use guardrails so one metric does not dominate, for example preventing clickbait from improving CTR while hurting dwell time or retention.
 
-        6. Q: What metrics do you use for recommendations?
+    6. Q: What metrics do you use for recommendations?
            A: Offline I use Recall@K, NDCG@K, MAP, coverage, novelty, and diversity. Online I use CTR, conversion, dwell time, retention, revenue, complaint/hide rate, and long-term engagement. Offline metrics are screening tools; A/B tests decide production impact.
 
 ---
@@ -329,22 +329,22 @@ Recommendation
                 1. Q: Walk me through what happens when a prompt hits an LLM serving system.
                    A: The gateway authenticates and admits the request, the tokenizer converts text to token IDs, the runtime schedules prefill, the model computes logits, the sampler chooses the next token, and decode repeats autoregressively until stop conditions. Production systems also track queue time, TTFT, TPOT, KV-cache usage, tenant quota, and safety/guardrail results.
 
-                2. Q: What is the difference between prefill and decode?
+    2. Q: What is the difference between prefill and decode?
                    A: Prefill processes the whole input prompt and builds the KV cache; it is compute-heavy and benefits from parallelism. Decode generates one token at a time and repeatedly reads KV cache; it is often memory-bandwidth and scheduling limited. Optimizing inference requires treating these two phases differently.
 
-                3. Q: Why are PagedAttention and continuous batching important?
+    3. Q: Why are PagedAttention and continuous batching important?
                    A: PagedAttention reduces KV-cache fragmentation by allocating cache in blocks/pages, which improves concurrency for variable-length requests. Continuous batching keeps the GPU busy by inserting new requests as old ones finish, instead of waiting for an entire static batch to complete.
 
-                4. Q: How would you debug high TTFT?
+    4. Q: How would you debug high TTFT?
                    A: Break TTFT into gateway queue time, scheduler wait, tokenization, model load/cold start, prefill time, and safety overhead. Then bucket by prompt length, model, tenant, batch size, and GPU memory pressure. Long prompts, cold models, KV-cache pressure, or head-of-line blocking are common causes.
 
-                5. Q: When would you choose vLLM, SGLang, TensorRT-LLM, or ONNX Runtime?
+    5. Q: When would you choose vLLM, SGLang, TensorRT-LLM, or ONNX Runtime?
                    A: vLLM is strong for flexible high-throughput LLM serving with PagedAttention. SGLang is strong for structured generation, prefix reuse, and agentic workflows. TensorRT-LLM is best when the model/hardware/shape buckets are stable and maximum NVIDIA performance matters. ONNX Runtime is good for portable traditional ML and smaller neural models.
 
-                6. Q: How do you design multi-tenant LLM inference?
+    6. Q: How do you design multi-tenant LLM inference?
                    A: I separate gateway and GPU workers, enforce tenant quotas, estimate token/KV cost before admission, route by model and cache locality, isolate adapters when needed, tag cost per tenant, and monitor noisy-neighbor behavior. Backpressure and graceful rejection are as important as raw throughput.
 
-        • Transformer and autoregressive basics
+    • Transformer and autoregressive basics
                 1. Walk me through what happens when a user sends a prompt to a decoder-only LLM.
                 Expected points: tokenization, embeddings, transformer layers, self-attention, FFN, logits, sampling, next-token generation, autoregressive loop.
                 2. What is the difference between prefill and decode in LLM inference?
@@ -500,19 +500,19 @@ Recommendation
         1. Q: Explain CUDA's programming model from thread to GPU.
            A: A kernel launches a grid. The grid contains thread blocks. Each block runs on one SM and is split into warps of 32 threads. Threads in a warp execute in SIMT lockstep. Registers are private to a thread, shared memory is visible to a block, and global memory is visible to the whole GPU.
 
-        2. Q: What is coalesced memory access and why does it matter?
+    2. Q: What is coalesced memory access and why does it matter?
            A: Coalescing means neighboring threads in a warp read or write neighboring memory addresses so the GPU can combine requests into efficient memory transactions. Non-coalesced access wastes memory bandwidth, which is often the real bottleneck in GPU kernels.
 
-        3. Q: When would you use shared memory?
+    3. Q: When would you use shared memory?
            A: I use shared memory when multiple threads in a block reuse the same data, such as tiled matrix multiplication, reductions, or staging query vectors. It is much faster than global memory, but I must watch capacity, bank conflicts, and synchronization overhead.
 
-        4. Q: What is occupancy, and can high occupancy still be slow?
+    4. Q: What is occupancy, and can high occupancy still be slow?
            A: Occupancy is how many warps are resident on an SM compared with the hardware maximum. High occupancy helps hide latency, but it does not guarantee speed. A kernel can have high occupancy and still be slow because of memory bandwidth limits, uncoalesced access, bank conflicts, warp divergence, or too many instructions.
 
-        5. Q: How do pinned memory, CUDA streams, and CUDA Graphs help inference?
+    5. Q: How do pinned memory, CUDA streams, and CUDA Graphs help inference?
            A: Pinned memory enables fast async host-device transfers. Streams allow transfers and compute to overlap when dependencies permit. CUDA Graphs reduce CPU launch overhead by replaying a captured sequence of GPU operations, which helps when the same scoring graph runs many times.
 
-        6. Q: How do you debug a slow CUDA kernel?
+    6. Q: How do you debug a slow CUDA kernel?
            A: I first measure with Nsight Systems to see timeline gaps, copies, synchronization, and launch overhead. Then I use Nsight Compute for SM utilization, memory throughput, occupancy, warp stalls, branch divergence, and cache behavior. I compare against a roofline expectation to decide if the kernel is memory-bound or compute-bound.
 
 ---
@@ -611,20 +611,20 @@ Recommendation
         1. Q: How do you tune a Linux host for p99-sensitive inference or fraud scoring?
            A: I isolate hot CPU cores, pin worker threads, align NUMA placement, use hugepages for large hot memory, keep IRQs away from hot cores, use NVMe/local model storage, and monitor queue depth and context switches. The goal is not just throughput; it is reducing jitter.
 
-        2. Q: What is a NUMA cliff?
+    2. Q: What is a NUMA cliff?
            A: A NUMA cliff happens when a thread frequently accesses memory attached to a remote socket or a remote PCIe/GPU path. Average latency may look acceptable, but p99 suffers. I fix it by pinning CPU, memory, NIC queues, and GPU placement to the same topology where possible.
 
-        3. Q: Why do hugepages help?
+    3. Q: Why do hugepages help?
            A: Hugepages reduce TLB pressure because each page table entry covers more memory. For large arenas, model buffers, and shared-memory regions, this reduces page walks and improves latency stability. The tradeoff is operational complexity and less flexible memory allocation.
 
-        4. Q: How do you reduce network overhead for low-latency services?
+    4. Q: How do you reduce network overhead for low-latency services?
            A: Start with kernel tuning, multi-queue NICs, IRQ affinity, keepalive/backlog tuning, and avoiding unnecessary overlays. If the kernel path is still the bottleneck, consider SR-IOV, AF_XDP, DPDK, or RDMA depending on the workload and operational tolerance.
 
-        5. Q: What are USE and RED methods?
+    5. Q: What are USE and RED methods?
            A: USE means Utilization, Saturation, and Errors, and is useful for infrastructure resources like CPU, memory, disk, network, and GPU. RED means Rate, Errors, and Duration, and is useful for services. Together they help separate resource bottlenecks from application-level failures.
 
-        6. Q: How would you troubleshoot a sudden p99 latency spike?
-           A: I split latency by stage, then check deployment changes, queue depth, CPU throttling, context switches, IRQ placement, NUMA misses, memory pressure, network retries, GPU utilization, and downstream timeouts. I use `perf`, `numastat`, `iostat`, `ss`, `nvidia-smi`, DCGM, and application traces.
+    6. Q: How would you troubleshoot a sudden p99 latency spike?
+           A: I split latency by stage, then check deployment changes, queue depth, CPU throttling, context switches, IRQ placement, NUMA misses, memory pressure, network retries, GPU utilization, and downstream timeouts. I use`perf`, `numastat`, `iostat`, `ss`, `nvidia-smi`, DCGM, and application traces.
 
 ---
 
@@ -667,19 +667,19 @@ Recommendation
         1. Q: How would you implement a zero-copy fraud scoring hot path?
            A: I would keep the network body in a stable buffer, parse it into borrowed views, build a cacheline-aligned `FeatureBlock`, pass pointers to CPU/GPU scorers, and publish only descriptors to rings. Downstream consumers read shared memory or Arrow buffers instead of rebuilding objects.
 
-        2. Q: Explain RAII in C++ and ownership in Rust.
-           A: RAII ties C++ resource cleanup to destructors, so objects release files, memory maps, CUDA streams, and model sessions automatically. Rust ownership and `Drop` provide the same deterministic cleanup idea with stronger compile-time checks around aliasing and lifetime.
+    2. Q: Explain RAII in C++ and ownership in Rust.
+           A: RAII ties C++ resource cleanup to destructors, so objects release files, memory maps, CUDA streams, and model sessions automatically. Rust ownership and`Drop` provide the same deterministic cleanup idea with stronger compile-time checks around aliasing and lifetime.
 
-        3. Q: How does an SPSC queue work?
+    3. Q: How does an SPSC queue work?
            A: A single producer writes a descriptor into a fixed-size ring and release-stores the tail. A single consumer acquire-loads the tail, reads the descriptor, and advances the head. Because only one thread writes each index, it avoids locks and heavy CAS loops.
 
-        4. Q: When do you use shared memory with `mmap`?
+    4. Q: When do you use shared memory with`mmap`?
            A: I use it when two processes need to see the same bytes without serialization, such as audit buffers, Arrow event batches, or model/index metadata. The design should store offsets and lengths, not raw pointers, because virtual addresses differ across processes.
 
-        5. Q: What makes a safe Rust-C++ FFI boundary?
-           A: Use `repr(C)` structs, raw pointers plus lengths, explicit ownership rules, version fields, status codes, and no exceptions or panics crossing the boundary. Rust should wrap unsafe calls in a small safe API.
+    5. Q: What makes a safe Rust-C++ FFI boundary?
+           A: Use`repr(C)` structs, raw pointers plus lengths, explicit ownership rules, version fields, status codes, and no exceptions or panics crossing the boundary. Rust should wrap unsafe calls in a small safe API.
 
-        6. Q: How do SIMD, cachelines, and NUMA connect in system programming?
+    6. Q: How do SIMD, cachelines, and NUMA connect in system programming?
            A: SIMD needs contiguous predictable data. Cacheline alignment prevents false sharing and improves locality. NUMA placement keeps memory close to the CPU/GPU doing the work. Together they decide whether the CPU hot path is deterministic or jittery.
 
 ---
@@ -1008,19 +1008,19 @@ Be ready to answer: When would you pick QLoRA vs full FT? How do you stop regres
         1. Q: Explain the tuning ladder from prompting to RLHF.
            A: Start with prompting or in-context examples because they are cheapest. Move to prompt/prefix tuning or LoRA when behavior needs adaptation. Use SFT for instruction following, DPO/ORPO for preference alignment, and RLHF/PPO only when reward-driven optimization is worth the complexity and instability risk.
 
-        2. Q: When would you choose LoRA/QLoRA over full fine-tuning?
+    2. Q: When would you choose LoRA/QLoRA over full fine-tuning?
            A: I choose LoRA/QLoRA when I need domain adaptation with lower GPU memory, faster iteration, and easier rollback. Full fine-tuning is justified when the base model must deeply change behavior or when adapter capacity is insufficient. QLoRA is especially useful when training memory is constrained.
 
-        3. Q: Compare DDP, FSDP/ZeRO, tensor parallelism, and pipeline parallelism.
+    3. Q: Compare DDP, FSDP/ZeRO, tensor parallelism, and pipeline parallelism.
            A: DDP replicates the model and splits data. FSDP/ZeRO shards parameters, gradients, and optimizer states to reduce memory. Tensor parallelism splits individual layers across GPUs. Pipeline parallelism splits layers vertically and uses microbatches to reduce idle bubbles. Large training often combines them.
 
-        4. Q: What makes a good training data pipeline?
+    4. Q: What makes a good training data pipeline?
            A: It should be versioned, deduped, PII-scrubbed, schema-validated, token-balanced, shuffled correctly, and split to mirror production. It must feed GPUs fast enough through locality, caching, prefetching, and sharding; otherwise expensive GPUs wait on data.
 
-        5. Q: How do you make distributed training fault tolerant?
+    5. Q: How do you make distributed training fault tolerant?
            A: Use periodic checkpoints, save model/optimizer/scheduler/RNG state, support resume by global step, write checkpoints atomically, and validate checkpoint integrity. At cluster level, use gang scheduling, retry policies, and clear ownership of preemptible vs non-preemptible workloads.
 
-        6. Q: What do you monitor during training?
+    6. Q: What do you monitor during training?
            A: Monitor loss/perplexity, eval metrics, tokens/sec, step time, GPU utilization, GPU memory, data loader wait, NCCL communication, gradient norms, OOMs, checkpoint time, cost per step, and regressions on safety/factuality/task-specific evals.
 
 ---
@@ -1357,19 +1357,32 @@ Time Series Analysis, ARIMA
         1. Q: How do you handle missing values and outliers?
            A: First understand why the values are missing or extreme. For missing values, I may drop, impute with mean/median/mode, use model-based imputation, or add a missingness indicator. For outliers, I check if they are valid business events, then use IQR, z-score, winsorization, robust scaling, or separate treatment.
 
-        2. Q: Accuracy is high on an imbalanced fraud dataset. Is the model good?
+    2. Q: Accuracy is high on an imbalanced fraud dataset. Is the model good?
            A: Not necessarily. A model can predict the majority class and get high accuracy while missing fraud. For imbalanced fraud data, I focus on precision, recall, F1/F-beta, PR-AUC, false negative rate, false positive cost, and threshold tuning based on business impact.
 
-        3. Q: Explain precision, recall, and F1.
+    3. Q: Explain precision, recall, and F1.
            A: Precision answers: of predicted positives, how many were actually positive. Recall answers: of actual positives, how many did we catch. F1 balances both. In fraud, recall protects against missed fraud, while precision protects against blocking legitimate customers.
 
-        4. Q: How do you prevent data leakage?
+    4. Q: How do you prevent data leakage?
            A: I split data by time or entity before feature engineering where needed, avoid future-derived features, fit scalers/encoders only on training data, dedupe near-identical examples across splits, and ensure validation mirrors production. Leakage often creates impressive offline metrics that collapse online.
 
-        5. Q: How do you choose features or reduce dimensionality?
+    5. Q: How do you choose features or reduce dimensionality?
            A: I start with domain logic and correlation checks, then use filter methods, tree feature importance, regularization like L1, wrapper methods, and PCA/embedding methods when dimensions are high. I validate feature choices with cross-validation and stability over time.
 
-        6. Q: What is data drift vs concept drift?
+    6. Q: What is data drift vs concept drift?
            A: Data drift means input distributions changed, such as transaction amounts, countries, or device types. Concept drift means the relationship between features and target changed, such as fraudsters changing behavior. I monitor feature distributions, score distributions, label delay metrics, and live performance to decide retraining or rule updates.
+
+---
+
+# Security
+
+• Sampling Techniques
+        • Simple Random Sampling
+        • Stratified Sampling :-  Its for Non overlapping group e.g. Male/Female, Age Groups etc.
+        • Systematic Sampling :- Kth item in the total population , could be biased .
+        • Convenience Sampling :- Samples convenient to access e.g. Street Interview
+• Data and Measures
+        ○ Nominal Data :- Categorical Data
+        ○ Ordinal Data :- Order of the Data important
 
 *End of Guide*

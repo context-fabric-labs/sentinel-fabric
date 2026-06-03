@@ -1,24 +1,192 @@
 
-Target 06/18 - 18 days 
-	STAR			:- 80 %	:- 0.5 day
+Target 06/18 - 16 days 
+	Area			Current Level 	Time needed to prepare for 95 % 
+	STAR			:- 80 %	:- 0 day
 	Search			:- 70 % :- 1 day
-	Inferencing		:- 70 %	:- 2 day
-	System	(K8)	:- 60 %	:- 1 day
-	CUDA & GPU		:- 60 %	:- 2 day
-	Data Science/NLP:- 70 %	:- 0.5 day
-	Training		:- 60 % :- 2 day
-	C++ & RUST		:- 40 %	:- 2 day
+	Inferencing		:- 70 %	:- 2 day(With Security and Goverenance)
+	System	(K8)	:- 60 %	:- 0.5 day
+	CUDA & GPU		:- 60 %	:- 0.5 day
+	Data Science/NLP:- 70 %	:- 0.25 day
+	Training		:- 60 % :- 0.5 day
+	C++ & RUST		:- 40 %	:- 1 day
 	DSA 			:- 30 %	:- 7 day				
 
 	======================================
-	
+	Target 06/07
+		DSA :- Must complete all LinkedIn problems 
+		STAR :- Must be all star stories 
+		System Design :- Must complete all system design problems 
+		Inferencing :- Must complete Inferencing with System, security
+
+
 	======================================
 
 	* Daily one STAR story must be complete - 1 Hr
 	* Daily one topic on RUST and C++ which is relevant - 1 Hr 
 	* Daily some DSA warn-up - 30 min 
 
+===================
 
+═══════════════════════════════════════════════════════════════════
+PHASE 1: FOUNDATION BUILDING (Days 1–6) — Weakest areas first
+═══════════════════════════════════════════════════════════════════
+
+DAY 1 (Sun Jun 1) — DSA: Core Patterns
+  Morning (3h):  Arrays/Strings, Two Pointers, Sliding Window (6-8 problems)
+  Afternoon (3h): HashMap/HashSet patterns, Binary Search (6-8 problems)
+  Evening (1h):  STAR story #1 (write + rehearse aloud)
+  
+DAY 2 (Mon Jun 2) — DSA: Trees & Graphs
+  Morning (3h):  BFS/DFS, Tree traversals, BST operations (6-8 problems)
+  Afternoon (3h): Graph: shortest path, topological sort, union-find (4-6 problems)
+  Evening (1h):  C++: RAII, smart pointers, templates — read + write small programs
+  
+DAY 3 (Tue Jun 3) — DSA: DP + System Design Patterns
+  Morning (3h):  DP: 1D (climbing stairs, house robber), 2D (grid, LCS) (5-6 problems)
+  Afternoon (2h): Heap/Priority Queue, Monotonic Stack (4 problems)
+  Afternoon (1h): System design: practice explaining YOUR fraud scoring architecture (timed 35 min)
+  Evening (1h):  STAR story #2 (rehearse)
+  
+DAY 4 (Wed Jun 4) — C++/RUST: Systems Programming
+  Morning (3h):  C++: memory arena, SPSC queue, atomic ops — WRITE code, compile, run
+  Afternoon (2h): Rust: ownership, MPSC, memmap2, error handling — implement small examples
+  Afternoon (1h): DSA review: redo 3 hardest problems from Days 1-3
+  Evening (1h):  STAR story #3 (rehearse)
+  
+DAY 5 (Thu Jun 5) — CUDA & GPU: Architecture
+  Morning (3h):  GPU arch deep study: SM, warps, memory hierarchy, occupancy, Tensor Cores
+                 MI300X vs H100 comparison, ROCm stack, wavefronts (64-wide)
+  Afternoon (3h): CUDA programming: streams, graphs, coalesced access, kernel fusion
+                 Practice explaining: "How does a GEMM kernel use shared memory tiling?"
+  Evening (1h):  DSA: 3 medium problems (keep skills warm)
+  
+DAY 6 (Fri Jun 6) — CUDA & GPU: Profiling + AMD
+  Morning (3h):  Nsight Systems/Compute workflow, roofline analysis, stall categories
+                 rocprof/Omniperf equivalents, TunableOp, Infinity Cache
+  Afternoon (2h): Practice whiteboard: "Profile and optimize a slow BERT inference kernel"
+  Afternoon (1h): C++: write a simple CUDA kernel from memory (vectorAdd, reduction)
+  Evening (1h):  STAR story #4 (rehearse)
+
+═══════════════════════════════════════════════════════════════════
+PHASE 2: ROLE-CORE DEPTH (Days 7–12) — AMD JD direct skills
+═══════════════════════════════════════════════════════════════════
+
+DAY 7 (Sat Jun 7) — Inference: Serving Fundamentals
+  Morning (3h):  vLLM architecture, continuous batching, PagedAttention, KV cache math
+                 Study: 6-Inference.md Sections 1-8
+  Afternoon (3h): TensorRT-LLM, SGLang, RadixAttention, constrained decoding
+                 Practice: "Compare vLLM vs SGLang vs TRT-LLM for production"
+  Evening (1h):  DSA: 3 problems (graph/tree)
+  
+DAY 8 (Sun Jun 8) — Inference: AMD + Benchmarking
+  Morning (3h):  vLLM on MI300X, FP8 quantization, RCCL for TP
+                 Study: 6-Inference.md Sections 16-18, 4-GPU.md Sections 17-18
+  Afternoon (2h): Inference benchmarking methodology (TTFT/TPOT/throughput sweeps)
+                 Practice: "Design a benchmark playbook for MI300X inference"
+  Afternoon (1h): Review 8-LLM-Ops-Governance.md (multi-tenant, guardrails)
+  Evening (1h):  STAR story #5 (rehearse)
+  
+DAY 9 (Mon Jun 9) — Inference: Security & Governance
+  Morning (3h):  Study: 8-LLM-Ops-Governance.md (full doc)
+                 Multi-tenant isolation, guardrails, rate limiting, audit
+  Afternoon (2h): Study: Coupang doc Sections 3-6 (architecture, guardrails, IAM)
+                 Practice: "Design multi-tenant LLM platform for 50 enterprises"
+  Afternoon (1h): DSA: 3 DP problems (review)
+  Evening (1h):  C++/Rust: review code you wrote on Day 4
+  
+DAY 10 (Tue Jun 10) — K8s & Platform: GPU Orchestration
+  Morning (3h):  GPU Operator, device plugins, GFD, topology-aware scheduling
+                 Gang scheduling (Volcano, Kueue), MPI Operator, Kubeflow
+                 Study: 3-Platform.md Sections 19-20
+  Afternoon (2h): CPU Manager static, NUMA, cgroups v2, eviction, PDB
+                 Practice: "Design K8s cluster for 64 GPUs serving multi-tenant inference"
+  Afternoon (1h): RCCL/NCCL tuning for multi-GPU inference (2-Network.md Section 18)
+  Evening (1h):  STAR story #6 (rehearse)
+  
+DAY 11 (Wed Jun 11) — Training: Distributed Training on K8s
+  Morning (3h):  DDP, FSDP, 3D parallelism (TP/PP/DP), ZeRO stages
+                 Study: 4-GPU.md Section 13
+  Afternoon (3h): Training on K8s: Kubeflow Training Operator, PyTorchJob, MPIJob
+                 Checkpointing (sync, async, distributed), elastic training
+                 RCCL communication benchmarking, scaling efficiency metrics
+  Evening (1h):  DSA: 3 problems (heap, sliding window)
+  
+DAY 12 (Thu Jun 12) — Training: Benchmarking + Optimization
+  Morning (3h):  Step time analysis, MFU calculation, communication profiling
+                 MLPerf training benchmarks, NCCL tests, HPL
+                 CPU/GPU affinity for training, topology-aware placement
+  Afternoon (2h): Practice: "Design distributed training stack for 128-GPU LLM training"
+                 Practice: "Debug NCCL timeout in 32-node training job"
+  Afternoon (1h): Search: review hybrid retrieval (BM25 + FAISS), embedding training
+  Evening (1h):  STAR: rehearse all 6 stories (2-min versions, rapid fire)
+
+═══════════════════════════════════════════════════════════════════
+PHASE 3: INTEGRATION & POLISH (Days 13–16) — Connect everything
+═══════════════════════════════════════════════════════════════════
+
+DAY 13 (Fri Jun 13) — Search & Recommendation
+  Morning (3h):  Full retrieval pipeline: sparse (BM25) + dense (FAISS/HNSW)
+                 Index types (IVF, HNSW, CAGRA), GPU search, sharding
+                 Study: relevant Search-Deep-Dive sections
+  Afternoon (2h): Ranking (cross-encoder, two-tower), RRF, cold start
+                 Practice: "Design search ranking for 1B documents at 50K QPS"
+  Afternoon (1h): DSA: 3 medium problems (random selection, timed)
+  Evening (1h):  Data Science/NLP: transformers, attention, embeddings (quick review)
+  
+DAY 14 (Sat Jun 14) — System Design Practice Day
+  Morning (3h):  Practice (timed 35 min each):
+                 1. "Design LLM serving platform for 1000 concurrent users"
+                 2. "Design real-time fraud detection at 50K TPS"
+  Afternoon (3h): Practice (timed 35 min each):
+                 3. "Design GPU cluster management platform with multi-tenancy"
+                 4. "Design inference benchmarking and optimization workflow"
+  Evening (1h):  Review weak spots identified during practice
+  
+DAY 15 (Sun Jun 15) — DSA Intensive (Final Push)
+  Morning (3h):  Top patterns for system-adjacent coding:
+                 LRU Cache, Rate Limiter, Design HashMap, Trie, Interval Merge
+  Afternoon (3h): Coding practice (timed 25 min each):
+                 2 Medium + 1 Hard (system-related: concurrent data structures, scheduling)
+  Evening (1h):  STAR: rehearse top 4 stories (most relevant to AMD JD)
+  
+DAY 16 (Mon Jun 16) — Full Mock Day
+  Morning (2h):  Mock behavioral (45 min) + system design (45 min)
+  Afternoon (2h): Mock coding (45 min) + technical deep-dive (45 min)
+  Afternoon (2h): Review and patch gaps from mock performance
+  Evening (1h):  Light review of most-forgotten material
+
+═══════════════════════════════════════════════════════════════════
+PHASE 4: FINAL PREP (Days 17–18) — Confidence building
+═══════════════════════════════════════════════════════════════════
+
+DAY 17 (Tue Jun 17) — Review & Memorize
+  Morning (2h):  Numbers by heart: H100/MI300X specs, latency budgets,
+                 throughput numbers, bandwidth, NCCL times
+  Morning (1h):  Key phrases from Coupang doc (Section 12: rapid study sheet)
+  Afternoon (2h): Re-read: 6-Inference Sections 16-18, 4-GPU Sections 17-18
+                 (AMD-specific content — this is YOUR differentiator)
+  Afternoon (1h): Light DSA: 2 easy-medium problems (confidence, not learning)
+  Evening (1h):  STAR: final rehearsal (record yourself, listen back)
+  
+DAY 18 (Wed Jun 18) — Interview Day
+  Morning:       Light review of cheat sheets only
+                 15-min walk, clear head
+                 DO NOT cram new material
+                 Review: your questions for the interviewer
+
+
+
+
+
+
+Every day includes:
+  □ 1 STAR story rehearsal (rotate through 6-8 stories)
+  □ 30-60 min DSA warm-up (after Day 6, maintenance mode)
+  □ 1 "explain aloud" session (practice articulating to a wall/mirror)
+
+
+
+  
 
 =========
 
