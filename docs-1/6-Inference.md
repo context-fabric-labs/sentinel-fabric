@@ -1641,3 +1641,909 @@ Cross-tier observability:
   - Preemption tracking (how often Tier 3 evicted)
   - Cost attribution per team/namespace
 ```
+
+---
+---
+
+# SECTION 19: PER-TENANT KV CACHE ISOLATION (End-to-End Implementation)
+
+---
+
+## 19.1 The Vulnerability: Shared Prefix Caching in Multi-Tenant Inference
+
+```
+DEFAULT vLLM BEHAVIOR (enable_prefix_caching=True):
+
+Request from Tenant A:  [system_prompt: 500 tokens] + [user query: 200 tokens]
+Request from Tenant B:  [system_prompt: 500 tokens] + [user query: 150 tokens]
+
+vLLM prefix cache hash:  hash(token_block_content)
+  Both tenants have SAME system prompt → SAME hash → SHARED KV BLOCKS
+
+WHY THIS IS A SECURITY VULNERABILITY:
+  KV values are NOT just the prefix tokens.
+  Due to causal attention, KV values at position i are computed with
+  ALL prior context visible. If Tenant A's KV was computed with
+  tenant-specific context in a prior turn, that context is ENCODED
+  in the KV values — and now Tenant B reads those values.
+
+  Think of it as: the KV cache is a "compressed memory" of everything
+  the model has seen. Sharing it = sharing that memory across tenants.
+
+ATTACK VECTOR (proven):
+  1. Tenant A asks: "What are our auto loan underwriting thresholds?"
+  2. Model generates answer, KV cache stored (prefix + answer tokens)
+  3. Tenant B sends request with matching prefix
+  4. vLLM serves cached KV from Tenant A's computation
+  5. Tenant B's generation is "primed" with Tenant A's context
+  6. Result: Tenant B sees auto loan data they shouldn't have access to
+```
+
+## 19.2 Architecture: Tenant-Scoped Cache Keys
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     API GATEWAY (Kong / Envoy)                   │
+│  JWT validation → extract tenant_id from claims                 │
+│  Set header: X-Tenant-ID: {tenant_id}                           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    vLLM API SERVER                                │
+│  Read X-Tenant-ID header (or reject 400 if missing)             │
+│  Attach tenant_id to SamplingParams / SequenceGroup              │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    SCHEDULER                                      │
+│  SequenceGroup carries tenant_id                                 │
+│  Passes to BlockManager on allocate()                            │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              BLOCK MANAGER (PrefixCachingBlockAllocator)          │
+│                                                                  │
+│  OLD hash: hash(parent_hash, *token_ids)                         │
+│  NEW hash: hash(tenant_id, parent_hash, *token_ids)              │
+│                                                                  │
+│  Same tokens + different tenant → DIFFERENT hash → NO sharing    │
+│  Same tokens + same tenant → SAME hash → sharing OK ✓           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              GPU BLOCK TABLE                                      │
+│  Physical KV blocks on GPU memory                                │
+│  Each block tagged with: content_hash + tenant_id                │
+│  Evictor: LRU per-tenant (prevents one tenant evicting another)  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 19.3 Implementation: Step-by-Step Code Changes
+
+### Step 1: API Layer — Extract and Validate tenant_id
+
+```python
+# vllm/entrypoints/openai/api_server.py
+
+from fastapi import HTTPException, Request
+
+async def create_chat_completion(
+    request: ChatCompletionRequest, 
+    raw_request: Request
+):
+    # FAIL-CLOSED: reject if no tenant identity
+    tenant_id = raw_request.headers.get("X-Tenant-ID")
+    if not tenant_id:
+        # Also check extra_body for direct API usage
+        tenant_id = getattr(request, "tenant_id", None)
+    
+    if not tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Tenant-ID header required for multi-tenant serving"
+        )
+    
+    # Sanitize: tenant_id must be alphanumeric (prevent injection)
+    if not tenant_id.isalnum() or len(tenant_id) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid tenant_id format"
+        )
+    
+    # Pass to engine
+    results = await engine.generate(
+        prompt=prompt,
+        sampling_params=sampling_params,
+        request_id=request_id,
+        tenant_id=tenant_id,  # NEW
+    )
+```
+
+### Step 2: Sequence Group — Carry tenant_id Through Scheduling
+
+```python
+# vllm/sequence.py
+
+class SequenceGroup:
+    def __init__(
+        self,
+        request_id: str,
+        seqs: List[Sequence],
+        sampling_params: SamplingParams,
+        arrival_time: float,
+        tenant_id: str = "default",  # NEW FIELD
+        ...
+    ):
+        self.request_id = request_id
+        self.seqs = seqs
+        self.sampling_params = sampling_params
+        self.arrival_time = arrival_time
+        self.tenant_id = tenant_id  # Propagated to block allocator
+```
+
+### Step 3: AsyncLLMEngine — Thread tenant_id to Scheduler
+
+```python
+# vllm/engine/async_llm_engine.py
+
+async def generate(
+    self,
+    prompt: PromptType,
+    sampling_params: SamplingParams,
+    request_id: str,
+    tenant_id: str = "default",  # NEW
+    ...
+) -> AsyncGenerator[RequestOutput, None]:
+    
+    # Create SequenceGroup with tenant context
+    seq_group = SequenceGroup(
+        request_id=request_id,
+        seqs=[seq],
+        sampling_params=sampling_params,
+        arrival_time=time.time(),
+        tenant_id=tenant_id,  # Propagated
+    )
+    
+    # Add to scheduler
+    self.scheduler.add_seq_group(seq_group)
+```
+
+### Step 4: Block Allocator — Tenant-Scoped Hash (THE CRITICAL CHANGE)
+
+```python
+# vllm/core/block/prefix_caching_block.py
+
+class PrefixCachingBlock(Block):
+    """Block with content-based hashing for prefix caching."""
+    
+    def __init__(
+        self,
+        prev_block: Optional[Block],
+        token_ids: List[int],
+        block_size: int,
+        allocator: BlockAllocator,
+        tenant_id: str = "default",  # NEW
+        block_id: Optional[int] = None,
+    ):
+        self._prev_block = prev_block
+        self._token_ids = token_ids
+        self._block_size = block_size
+        self._allocator = allocator
+        self._tenant_id = tenant_id  # Stored for hash computation
+        self._block_id = block_id
+        self._content_hash: Optional[int] = None
+    
+    @property
+    def content_hash(self) -> Optional[int]:
+        """Compute tenant-scoped content hash.
+        
+        SECURITY INVARIANT: Two blocks with identical token content
+        but different tenant_ids MUST produce different hashes.
+        This makes cross-tenant KV sharing architecturally impossible.
+        """
+        if self._content_hash is None:
+            if not self.is_full:
+                return None
+            
+            parent_hash = (
+                self._prev_block.content_hash 
+                if self._prev_block is not None 
+                else None
+            )
+            
+            # TENANT-SCOPED HASH — the security boundary
+            self._content_hash = hash((
+                self._tenant_id,   # ← THIS IS THE FIX
+                parent_hash,
+                *self._token_ids
+            ))
+        
+        return self._content_hash
+```
+
+### Step 5: Block Manager — Pass tenant_id on Allocation
+
+```python
+# vllm/core/block_manager.py
+
+class BlockSpaceManagerV2:
+    
+    def allocate(self, seq_group: SequenceGroup) -> None:
+        """Allocate block table for a new sequence group."""
+        for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
+            block_table = self._allocate_sequence(
+                seq,
+                tenant_id=seq_group.tenant_id  # PASS THROUGH
+            )
+            self._block_tables[seq.seq_id] = block_table
+    
+    def _allocate_sequence(
+        self, 
+        seq: Sequence, 
+        tenant_id: str = "default"
+    ) -> BlockTable:
+        """Create blocks with tenant-scoped hashing."""
+        token_ids = seq.get_token_ids()
+        blocks: List[Block] = []
+        
+        for i in range(0, len(token_ids), self.block_size):
+            block_tokens = token_ids[i:i + self.block_size]
+            
+            block = PrefixCachingBlock(
+                prev_block=blocks[-1] if blocks else None,
+                token_ids=block_tokens,
+                block_size=self.block_size,
+                allocator=self._allocator,
+                tenant_id=tenant_id,  # SCOPED CACHE KEY
+            )
+            blocks.append(block)
+        
+        return BlockTable(blocks=blocks)
+```
+
+### Step 6: Evictor — Per-Tenant LRU Fairness
+
+```python
+# vllm/core/evictor.py
+
+class TenantAwareLRUEvictor:
+    """LRU evictor that prevents one tenant from monopolizing cache.
+    
+    Policy: Each tenant gets a fair share of cache blocks.
+    When evicting, prefer blocks from the tenant that is OVER its quota.
+    This prevents a high-traffic tenant from evicting a low-traffic
+    tenant's hot cache entries.
+    """
+    
+    def __init__(self, max_blocks: int, max_tenants: int = 100):
+        self._blocks: Dict[int, EvictableBlock] = {}  # hash → block
+        self._tenant_blocks: Dict[str, OrderedDict] = {}  # tenant → LRU
+        self._max_blocks = max_blocks
+        self._fair_share = max_blocks // max_tenants
+    
+    def add(self, block: EvictableBlock, tenant_id: str) -> None:
+        self._blocks[block.content_hash] = block
+        if tenant_id not in self._tenant_blocks:
+            self._tenant_blocks[tenant_id] = OrderedDict()
+        self._tenant_blocks[tenant_id][block.content_hash] = block
+    
+    def evict(self) -> EvictableBlock:
+        """Evict from the most over-quota tenant first."""
+        # Find tenant with most blocks over fair share
+        over_quota = [
+            (tid, len(blocks) - self._fair_share)
+            for tid, blocks in self._tenant_blocks.items()
+            if len(blocks) > self._fair_share
+        ]
+        
+        if over_quota:
+            # Evict LRU block from most over-quota tenant
+            over_quota.sort(key=lambda x: -x[1])
+            target_tenant = over_quota[0][0]
+        else:
+            # All under quota — global LRU
+            target_tenant = min(
+                self._tenant_blocks,
+                key=lambda t: next(iter(self._tenant_blocks[t].values())).last_access
+            )
+        
+        # Pop oldest block from target tenant
+        _, block = self._tenant_blocks[target_tenant].popitem(last=False)
+        del self._blocks[block.content_hash]
+        return block
+    
+    def access(self, block_hash: int, tenant_id: str) -> None:
+        """Mark block as recently accessed (move to end of LRU)."""
+        if block_hash in self._tenant_blocks.get(tenant_id, {}):
+            self._tenant_blocks[tenant_id].move_to_end(block_hash)
+```
+
+## 19.4 Gateway Integration: JWT → tenant_id Flow
+
+```
+END-TO-END REQUEST FLOW:
+
+1. Client sends request with Bearer JWT token
+   POST /v1/chat/completions
+   Authorization: Bearer eyJhbGciOiJSUzI1NiI...
+   
+2. API Gateway (Kong/Envoy) validates JWT:
+   - Verifies signature (RS256, public key from JWKS endpoint)
+   - Checks exp, iss, aud claims
+   - Extracts: claims.tenant_id = "credit_cards"
+   - Sets header: X-Tenant-ID: credit_cards
+   
+3. vLLM API server reads X-Tenant-ID (trusts gateway — internal network)
+   - Does NOT re-validate JWT (gateway already did)
+   - Rejects if header missing (fail-closed)
+   
+4. tenant_id flows: API → Engine → Scheduler → BlockManager → Block Hash
+
+GATEWAY CONFIG (Kong example):
+```
+
+```yaml
+# Kong JWT plugin + header injection
+plugins:
+  - name: jwt
+    config:
+      claims_to_verify: [exp]
+      key_claim_name: iss
+  - name: request-transformer
+    config:
+      add:
+        headers:
+          - "X-Tenant-ID:$(jwt.claims.tenant_id)"
+      # Remove any client-set X-Tenant-ID (prevent spoofing)
+      remove:
+        headers:
+          - "X-Tenant-ID"
+```
+
+```yaml
+# Envoy equivalent (ext_authz + Lua filter):
+http_filters:
+  - name: envoy.filters.http.jwt_authn
+    typed_config:
+      providers:
+        auth0:
+          issuer: "https://auth.company.com/"
+          audiences: ["inference-api"]
+          remote_jwks:
+            http_uri:
+              uri: "https://auth.company.com/.well-known/jwks.json"
+      rules:
+        - match: { prefix: "/v1/" }
+          requires: { provider_name: "auth0" }
+  
+  - name: envoy.filters.http.lua
+    typed_config:
+      inline_code: |
+        function envoy_on_request(handle)
+          local jwt = handle:headers():get("x-jwt-payload")
+          local claims = json.decode(base64_decode(jwt))
+          handle:headers():add("X-Tenant-ID", claims.tenant_id)
+        end
+```
+
+## 19.5 Deployment Topology Options
+
+```
+OPTION A: Shared Engine, Scoped Cache (RECOMMENDED — cost optimal)
+┌──────────────────────────────────────────────────────┐
+│ Single vLLM Engine (per GPU)                          │
+│ ┌──────────────────────────────────────────────────┐ │
+│ │ KV Cache (GPU Memory)                             │ │
+│ │  ┌─────────────┐  ┌─────────────┐  ┌──────────┐ │ │
+│ │  │ Tenant A    │  │ Tenant B    │  │ Tenant C │ │ │
+│ │  │ blocks      │  │ blocks      │  │ blocks   │ │ │
+│ │  │ (hash=A+tok)│  │ (hash=B+tok)│  │(hash=C+t)│ │ │
+│ │  └─────────────┘  └─────────────┘  └──────────┘ │ │
+│ │  No cross-tenant block sharing possible           │ │
+│ └──────────────────────────────────────────────────┘ │
+│ Scheduler: shared (all tenants in same batch)         │
+│ Model weights: shared (read-only, safe)               │
+│ Continuous batching: cross-tenant batching OK          │
+│ (batching ≠ cache sharing — weights are stateless)    │
+└──────────────────────────────────────────────────────┘
+
+  Pros: Maximum GPU utilization, minimal cost
+  Cons: No compute isolation (noisy neighbor at compute level)
+  Use when: tenants don't need latency SLA guarantees per-tenant
+
+OPTION B: Per-Tenant Engine (maximum isolation)
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ vLLM Engine A    │  │ vLLM Engine B    │  │ vLLM Engine C    │
+│ GPU: MIG 3g.40gb │  │ GPU: MIG 3g.40gb │  │ GPU: Full H100   │
+│ Tenant: credit   │  │ Tenant: auto     │  │ Tenant: banking  │
+│ Dedicated KV     │  │ Dedicated KV     │  │ Dedicated KV     │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+
+  Pros: Full isolation (memory, compute, cache)
+  Cons: Wasteful (each engine loads model weights separately)
+  Use when: regulatory requirement, strict SLA per tenant
+
+OPTION C: Hybrid (recommended for Capital One-like deployment)
+┌──────────────────────────────────────────────────────────────┐
+│ HIGH-VALUE TENANTS: Dedicated engines (Option B)              │
+│   credit_cards (high volume, strict SLA) → own H100          │
+│   banking (regulated, PCI compliance) → own H100             │
+│                                                              │
+│ STANDARD TENANTS: Shared engine (Option A)                    │
+│   auto_loans, disputes, collections → shared pool            │
+│   Tenant-scoped cache keys prevent leakage                   │
+│   Cost-effective, slightly weaker compute isolation           │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## 19.6 Timing Side-Channel Mitigation (Advanced)
+
+```
+PROBLEM: Even with scoped cache keys, TIMING reveals information.
+  Cache hit: 45 ms (skip prefill)
+  Cache miss: 120 ms (full prefill)
+  
+  In shared households (Apple Siri use case):
+  Device A queries "medical symptoms" → KV cached for that user
+  Device B (attacker) sends same prefix → measures latency
+  If 45 ms → Device A recently asked about medical topics (privacy violation!)
+
+THIS ATTACK WORKS EVEN WITH TENANT-SCOPED KEYS IF:
+  - Users within same tenant share a cache (family members = same "household tenant")
+  - The attacker can measure response timing accurately
+
+MITIGATION: Constant-Time Response Layer
+
+Architecture:
+┌────────────────────────────────────────────────────────────┐
+│ CONSTANT-TIME RESPONSE PROXY (sits between client & vLLM)  │
+│                                                            │
+│ 1. On request arrival: start timer                         │
+│ 2. Forward to vLLM backend                                 │
+│ 3. Receive response (fast = cache hit, slow = cache miss)  │
+│ 4. If response arrived BEFORE target_time:                 │
+│       buffer response, wait until target_time, then send   │
+│ 5. If response arrived AFTER target_time:                  │
+│       send immediately (already past deadline)             │
+│                                                            │
+│ target_time = p90 of cache-miss latency                    │
+│ Result: ALL responses appear to take ~same time            │
+│         Timing side-channel eliminated                     │
+└────────────────────────────────────────────────────────────┘
+```
+
+```python
+# Constant-time response proxy (simplified)
+import asyncio
+import time
+
+class ConstantTimeProxy:
+    """Normalize response timing to eliminate cache-hit/miss signal."""
+    
+    def __init__(self, target_latency_ms: float = 130.0):
+        # Set slightly above p90 of cache-miss latency
+        self.target_latency = target_latency_ms / 1000.0
+    
+    async def handle_request(self, request):
+        start = time.monotonic()
+        
+        # Forward to vLLM (may return fast on cache hit)
+        response = await self.vllm_client.generate(request)
+        
+        elapsed = time.monotonic() - start
+        remaining = self.target_latency - elapsed
+        
+        if remaining > 0:
+            # Cache hit was fast — add delay to normalize timing
+            await asyncio.sleep(remaining)
+        
+        # Response timing is now constant (within jitter)
+        return response
+```
+
+```
+ALTERNATIVE: Preemptive Cache Warming
+  On session start: warm KV cache for ALL common domain prefixes
+  (not just the one the user will query)
+  
+  Result: ALL prefixes have cache hits → no timing differential
+  Cost: more GPU memory (cache entries for unused prefixes)
+  Tradeoff: memory vs privacy (acceptable for consumer products)
+
+  Implementation:
+    warm_prefixes = [
+        "You are a music assistant...",
+        "You are a health assistant...",
+        "You are a shopping assistant...",
+        "You are a navigation assistant...",
+        "You are a smart home assistant...",
+    ]
+    # At session start, prefill ALL → all cached
+    for prefix in warm_prefixes:
+        await engine.prefill_only(prefix, user_id=user_id)
+    # Now any user query hits cache → no timing signal
+```
+
+## 19.7 Testing & Validation Framework
+
+```python
+# tests/test_tenant_kv_isolation.py
+
+import pytest
+import hashlib
+
+class TestTenantIsolation:
+    """Comprehensive tests for KV cache tenant isolation."""
+    
+    # --- UNIT TESTS (block-level) ---
+    
+    def test_different_tenants_different_hashes(self):
+        """CRITICAL: identical tokens from different tenants must not collide."""
+        tokens = list(range(16))  # arbitrary token block
+        
+        block_a = PrefixCachingBlock(
+            prev_block=None, token_ids=tokens,
+            block_size=16, allocator=mock_alloc,
+            tenant_id="credit_cards"
+        )
+        block_b = PrefixCachingBlock(
+            prev_block=None, token_ids=tokens,
+            block_size=16, allocator=mock_alloc,
+            tenant_id="auto_loans"
+        )
+        
+        assert block_a.content_hash != block_b.content_hash
+    
+    def test_same_tenant_same_hash(self):
+        """Performance: same tenant + same tokens SHOULD share."""
+        tokens = list(range(16))
+        
+        block_a = PrefixCachingBlock(
+            prev_block=None, token_ids=tokens,
+            block_size=16, allocator=mock_alloc,
+            tenant_id="credit_cards"
+        )
+        block_b = PrefixCachingBlock(
+            prev_block=None, token_ids=tokens,
+            block_size=16, allocator=mock_alloc,
+            tenant_id="credit_cards"
+        )
+        
+        assert block_a.content_hash == block_b.content_hash
+    
+    def test_hash_chain_propagates_tenant(self):
+        """Multi-block sequences: tenant propagates through chain."""
+        tokens_1 = list(range(16))
+        tokens_2 = list(range(16, 32))
+        
+        # Tenant A chain
+        block_a1 = PrefixCachingBlock(None, tokens_1, 16, mock_alloc, "tenant_a")
+        block_a2 = PrefixCachingBlock(block_a1, tokens_2, 16, mock_alloc, "tenant_a")
+        
+        # Tenant B chain (same tokens!)
+        block_b1 = PrefixCachingBlock(None, tokens_1, 16, mock_alloc, "tenant_b")
+        block_b2 = PrefixCachingBlock(block_b1, tokens_2, 16, mock_alloc, "tenant_b")
+        
+        # Block 1: different hash (tenant scoped)
+        assert block_a1.content_hash != block_b1.content_hash
+        # Block 2: also different (parent hash differs → cascades)
+        assert block_a2.content_hash != block_b2.content_hash
+    
+    def test_missing_tenant_rejected(self):
+        """Fail-closed: requests without tenant_id are rejected."""
+        with pytest.raises(HTTPException) as exc_info:
+            await create_chat_completion(
+                request=mock_request,
+                raw_request=Request(headers={})  # no X-Tenant-ID
+            )
+        assert exc_info.value.status_code == 400
+    
+    # --- INTEGRATION TESTS (engine-level) ---
+    
+    @pytest.mark.asyncio
+    async def test_cross_tenant_no_cache_hit(self):
+        """End-to-end: different tenants with same prompt don't share cache."""
+        engine = create_test_engine(enable_prefix_caching=True)
+        
+        prompt = "You are a financial assistant. Analyze this:"
+        
+        # Tenant A request
+        await engine.generate(
+            prompt=prompt + " credit card fraud pattern",
+            sampling_params=SamplingParams(max_tokens=50),
+            request_id="r1",
+            tenant_id="credit_cards"
+        )
+        
+        # Tenant B request (same prefix!)
+        metrics_before = engine.get_cache_metrics()
+        await engine.generate(
+            prompt=prompt + " auto loan application",
+            sampling_params=SamplingParams(max_tokens=50),
+            request_id="r2",
+            tenant_id="auto_loans"
+        )
+        metrics_after = engine.get_cache_metrics()
+        
+        # Tenant B must NOT get a prefix cache hit from Tenant A
+        cross_tenant_hits = (
+            metrics_after["prefix_cache_hits"] - metrics_before["prefix_cache_hits"]
+        )
+        assert cross_tenant_hits == 0, "Cross-tenant cache hit detected!"
+    
+    @pytest.mark.asyncio
+    async def test_same_tenant_gets_cache_hit(self):
+        """Performance preserved: same tenant reuses cache."""
+        engine = create_test_engine(enable_prefix_caching=True)
+        
+        prompt = "You are a financial assistant. Analyze this:"
+        
+        # First request
+        await engine.generate(
+            prompt=prompt + " pattern A",
+            sampling_params=SamplingParams(max_tokens=50),
+            request_id="r1",
+            tenant_id="credit_cards"
+        )
+        
+        # Second request (same tenant, same prefix)
+        metrics_before = engine.get_cache_metrics()
+        await engine.generate(
+            prompt=prompt + " pattern B",
+            sampling_params=SamplingParams(max_tokens=50),
+            request_id="r2",
+            tenant_id="credit_cards"  # SAME tenant
+        )
+        metrics_after = engine.get_cache_metrics()
+        
+        # Same tenant SHOULD get prefix cache hit
+        same_tenant_hits = (
+            metrics_after["prefix_cache_hits"] - metrics_before["prefix_cache_hits"]
+        )
+        assert same_tenant_hits > 0, "Same-tenant cache hit expected!"
+    
+    # --- CHAOS / SECURITY TESTS ---
+    
+    def test_tenant_id_injection_blocked(self):
+        """Malicious tenant_id values are rejected."""
+        malicious_ids = [
+            "tenant_a\x00tenant_b",  # null byte injection
+            "a" * 1000,              # overflow attempt
+            "../../../etc/passwd",   # path traversal
+            "tenant'; DROP TABLE--", # SQL injection (shouldn't matter but defense in depth)
+        ]
+        for bad_id in malicious_ids:
+            with pytest.raises(HTTPException):
+                validate_tenant_id(bad_id)
+    
+    @pytest.mark.asyncio
+    async def test_timing_side_channel_mitigated(self):
+        """Verify constant-time proxy normalizes response timing."""
+        proxy = ConstantTimeProxy(target_latency_ms=130.0)
+        
+        # Simulate cache hit (fast) and cache miss (slow)
+        timings = []
+        for _ in range(100):
+            start = time.monotonic()
+            await proxy.handle_request(mock_request)
+            timings.append(time.monotonic() - start)
+        
+        # Standard deviation of timings should be low (normalized)
+        import numpy as np
+        std_dev = np.std(timings)
+        assert std_dev < 0.005, f"Timing variance too high: {std_dev}"
+```
+
+## 19.8 Monitoring & Alerting
+
+```yaml
+# Prometheus metrics for tenant KV cache isolation
+
+# CRITICAL ALERT: Should NEVER fire after fix
+- alert: KVCacheCrossTenantHit
+  expr: vllm_kv_cache_cross_tenant_hits_total > 0
+  for: 0m
+  severity: critical
+  annotations:
+    summary: "Cross-tenant KV cache sharing detected — data isolation breach"
+    runbook: "Immediately disable prefix caching. Engage security team."
+
+# Per-tenant cache metrics
+- record: vllm:kv_cache_hit_rate_by_tenant
+  expr: |
+    rate(vllm_kv_cache_hits_total{hit_type="prefix"}[5m]) 
+    / rate(vllm_kv_cache_lookups_total[5m])
+  labels:
+    tenant_id: "{{ $labels.tenant_id }}"
+
+# Fairness: detect one tenant monopolizing cache
+- alert: KVCacheTenantMonopoly
+  expr: |
+    vllm_kv_cache_blocks_by_tenant / vllm_kv_cache_blocks_total > 0.7
+  for: 5m
+  severity: warning
+  annotations:
+    summary: "Tenant {{ $labels.tenant_id }} using >70% of KV cache"
+    
+# Timing anomaly (side-channel detection)
+- alert: ResponseTimingBimodal
+  expr: |
+    histogram_quantile(0.95, vllm_response_latency_seconds_bucket)
+    - histogram_quantile(0.05, vllm_response_latency_seconds_bucket) > 0.08
+  for: 10m
+  severity: warning
+  annotations:
+    summary: "Bimodal response timing detected — possible side-channel"
+```
+
+```python
+# Custom Prometheus metrics to add to vLLM
+from prometheus_client import Counter, Gauge, Histogram
+
+# Per-tenant cache operations
+kv_cache_hits = Counter(
+    "vllm_kv_cache_hits_total",
+    "KV cache hits",
+    ["tenant_id", "hit_type"]  # hit_type: prefix_hit, prefix_miss
+)
+
+kv_cache_blocks_by_tenant = Gauge(
+    "vllm_kv_cache_blocks_by_tenant",
+    "Number of cached blocks per tenant",
+    ["tenant_id"]
+)
+
+# Cross-tenant detection (should be 0 — canary metric)
+kv_cache_cross_tenant_hits = Counter(
+    "vllm_kv_cache_cross_tenant_hits_total",
+    "Cache lookups where hash collided across tenants (BUG if > 0)",
+    ["source_tenant", "cached_tenant"]
+)
+
+# Eviction tracking
+kv_cache_evictions = Counter(
+    "vllm_kv_cache_evictions_total",
+    "Cache evictions by tenant and reason",
+    ["tenant_id", "reason"]  # reason: lru, over_quota, memory_pressure
+)
+```
+
+## 19.9 Rollout Strategy
+
+```
+PHASE 1: IMMEDIATE CONTAINMENT (Day 0, < 30 minutes)
+  Action: Disable prefix caching entirely
+  Command: --enable-prefix-caching=false
+  Impact: +150% latency (cache miss on every request)
+  Risk: Zero — only performance regression, no data risk
+  Verification: confirm kv_cache_hits_total stops increasing
+
+PHASE 2: FORENSICS (Day 0-1)
+  Action: Audit last 72 hours of requests
+  Query: Kafka topic for response tokens containing cross-tenant terminology
+  Tool: grep response logs for product-line-specific terms appearing in wrong tenant
+  Output: Count of affected requests, severity assessment
+  Report to: Security team, compliance, legal (if PII leaked)
+
+PHASE 3: PATCH DEVELOPMENT (Day 1-3)
+  Action: Implement tenant-scoped hash in vLLM fork
+  Changes: 5 files (api_server.py, sequence.py, async_llm_engine.py,
+           prefix_caching_block.py, block_manager.py)
+  Tests: Unit + integration (see 19.7 above)
+  Review: Security team code review required
+
+PHASE 4: STAGING VALIDATION (Day 3-5)
+  Action: Deploy patched vLLM to staging environment
+  Traffic: Synthetic multi-tenant load (3 simulated tenants)
+  Validation:
+    - cross_tenant_hits metric = 0 ✓
+    - same_tenant hit rate matches pre-incident baseline ✓
+    - latency within 5% of pre-incident (prefix caching working) ✓
+    - run integration test suite (19.7) against staging ✓
+
+PHASE 5: CANARY PRODUCTION (Day 5-7)
+  Action: Route 5% production traffic to patched engine
+  Monitor: 24 hours
+  Success criteria:
+    - Zero cross-tenant hits
+    - Cache hit rate per-tenant ≥ 80% of original total hit rate
+    - p99 latency within 10% of pre-incident
+  
+PHASE 6: FULL ROLLOUT (Day 7-9)
+  Action: Roll patched engine to 100% production
+  Retain: Old engine on standby for 48 hours (instant rollback)
+  
+PHASE 7: POST-MORTEM & HARDENING (Day 9-14)
+  - Publish internal security advisory
+  - Add prefix caching isolation to security review checklist
+  - Upstream contribution to vLLM (if approved by legal)
+  - Add CI gate: test_cross_tenant_isolation runs on every vLLM upgrade
+  - Implement per-tenant cache eviction fairness (19.6)
+  - Evaluate timing side-channel risk (if applicable to deployment)
+```
+
+## 19.10 Performance Impact Analysis
+
+```
+SCENARIO: 3 tenants (credit_cards, auto_loans, banking), shared vLLM engine
+
+BEFORE FIX (APC disabled — immediate containment):
+  prefix_cache_hit_rate: 0%
+  Average TTFT: 180 ms (full prefill every request)
+  Throughput: ~800 req/s per GPU
+
+AFTER FIX (tenant-scoped APC):
+  prefix_cache_hit_rate: ~65% per-tenant (was 72% globally)
+  Average TTFT: 62 ms (cache hit on same-tenant repeated prefixes)
+  Throughput: ~1,850 req/s per GPU
+
+WHY HIT RATE DROPS SLIGHTLY:
+  Old (insecure): ALL tenants contribute to ONE cache pool
+    → More diverse traffic = more cache entries = higher hit rate
+    → But those hits leaked data!
+  
+  New (secure): Each tenant has isolated cache partition
+    → Each partition smaller = fewer entries = slightly lower hit rate
+    → But ALL hits are safe
+
+  Typical impact: 5-10% lower hit rate than insecure baseline
+  This is the CORRECT tradeoff (security > 5% throughput)
+
+MEMORY OVERHEAD:
+  Per block: +8 bytes (tenant_id string reference)
+  Per 100K blocks: +800 KB (negligible vs 80 GB GPU memory)
+  Hash computation: +2ns per block (one extra value in tuple hash)
+  
+  TOTAL OVERHEAD: < 0.001% — effectively free
+
+BATCH EFFICIENCY (important nuance):
+  Continuous batching STILL batches across tenants!
+  Batching shares MODEL WEIGHTS (read-only, safe)
+  Only CACHE is tenant-scoped (stateful, unsafe to share)
+  
+  → Throughput from batching is preserved
+  → Only prefix cache reuse is scoped
+  → Net performance: 95-97% of insecure baseline (acceptable)
+```
+
+## 19.11 Interview Quick Reference
+
+```
+"How do you implement tenant isolation in shared LLM inference?"
+
+45-SECOND ANSWER:
+  "vLLM's prefix caching hashes token content to share KV blocks
+   across requests. In multi-tenant deployments, this creates a data
+   leakage vector: same system prompt prefix → same hash → shared KV →
+   tenant A's context bleeds into tenant B's generation.
+   
+   Fix: include tenant_id in the block hash function. hash(tenant_id,
+   parent_hash, tokens) instead of hash(parent_hash, tokens). Same
+   tokens from different tenants → different hashes → impossible to share.
+   tenant_id flows from JWT via gateway header → engine → scheduler →
+   block allocator. Fail-closed: reject requests without tenant identity.
+   
+   Performance impact: ~5% lower cache hit rate (cross-tenant 'bonus'
+   hits removed — those were the vulnerability). Batching throughput
+   preserved (model weights are read-only, safe to share)."
+
+FOLLOW-UP: "What about timing side-channels?"
+  "Even with scoped keys, cache hit (45ms) vs miss (120ms) leaks
+   whether another user queried a similar prefix. Mitigate with
+   constant-time response normalization: buffer fast responses until
+   target deadline. Alternative: preemptive cache warming for all
+   domain prefixes at session start — eliminates timing differential.
+   Post-fix: attack accuracy drops from 94% to 52% (random chance)."
+
+FOLLOW-UP: "How do you detect this in production?"
+  "Three metrics: (1) cross_tenant_cache_hit counter — hard alert if > 0,
+   (2) per-tenant cache hit rate — validates isolation working,
+   (3) per-device latency distribution bimodality — detects timing side-channel.
+   Traditional infrastructure monitoring (error rate, aggregate latency)
+   is BLIND to information leakage. You need content-level audit trails
+   and per-entity timing analysis."
+```

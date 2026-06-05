@@ -1,7 +1,7 @@
 
-Target 06/18 - 16 days 
+Target 06/17 - 14 days 
 	Area			Current Level 	Time needed to prepare for 95 % 
-	STAR			:- 80 %	:- 0 day
+	STAR			:- 40 %	:- 3 day
 	Search			:- 70 % :- 1 day
 	Inferencing		:- 70 %	:- 2 day(With Security and Goverenance)
 	System	(K8)	:- 60 %	:- 0.5 day
@@ -9,15 +9,14 @@ Target 06/18 - 16 days
 	Data Science/NLP:- 70 %	:- 0.25 day
 	Training		:- 60 % :- 0.5 day
 	C++ & RUST		:- 40 %	:- 1 day
-	DSA 			:- 30 %	:- 7 day				
+	DSA 			:- 30 %	:- 6 day				
 
 	======================================
 	Target 06/07
 		DSA :- Must complete all LinkedIn problems 
 		STAR :- Must be all star stories 
 		System Design :- Must complete all system design problems 
-		Inferencing :- Must complete Inferencing with System, security
-
+		Inferencing :- Must complete Inferencing with System, security, ONNX , TensorRT-LLM
 
 	======================================
 
@@ -733,5 +732,35 @@ LOCATION:
 
 
 
+
+
+====
+Projects 
+	Capital One Fraud detection
+	Siri Home pod
+
+Technical Vision, Innovation
+	Apple :- Siri Unified Shared Memory Architecture 
+	CapitalOne :- Merging hot path with warm path and achived SLA of 200 ms 
+
+Influence , Driving and Executve communication
+	USing hybrid LLM with on-prem and Bedrock .
+	Instead of using larger GPUs , by Using FAISS and Rediss with efficient CPU pinning and direct intergration with C++ data plane , i have solved the KV-Cache explusion problem and also provided larger context . This saved tons of money .
+Conflicts  
+	CapitalOne :- Using Guradrail for warm path 
+	Unified shared memory architecture for siri but still keeping goverenance isolated for each team .
+	Using RUST over Java netty framework
+Failures, Workaround
+	Siri :- Using Milvus as choice for Vector DB . Added filter model to filter traffic 
+
+Team Player , Encouragement , Retain Resource
+	Mentor team memobers to build C++ and RUST team , prepare them .
+	Sometime i am wrong , and teammante is right and i do acknoledge them
+	I have also solved concern of one of the teammate and help him to retain 
+
+
+Following story fits better to CLUSTER D: Executive Communication & Stakeholder Management
+USing hybrid LLM with on-prem and Bedrock , where executive where kin on only AWS bedrock for LLM , i have shown them the cost breakeven hypothesis based on cuyrrent and upcoming expected usage of LLM tokens 
+Leveragd massive doscuount from Corewave and after 1 year we are at break even and infact thinking of buying own hardware 
 
 

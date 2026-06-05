@@ -204,6 +204,194 @@ Recommendation
                 ○ Kubernetes, Scaling , Deployment (Kserve)
         • Layer-1 :- Physical hardware &  Network and Network Transport
                 ○ Compute (GPU Selection) , OS Tuning (HugePages), Local Storage for Models (NVME), NCCL, RDMA, NUMA
+
+### Layer-by-Layer Inference Architecture (Bird's Eye View)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    LAYER 4: ORCHESTRATION & ROUTING                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌──────────┐    ┌───────────────────────────────────────────────────┐  │
+│  │  Client  │───▶│  API GATEWAY / INGRESS                            │  │
+│  │ Request  │    │  • AuthN/AuthZ (JWT, mTLS, RBAC)                  │  │
+│  └──────────┘    │  • Rate limiting / Token budget per tenant        │  │
+│                  │  • Request classification (model routing)          │  │
+│                  │  • Tenant context injection (X-Tenant-ID)          │  │
+│                  │  • Input guardrails (prompt injection, PII scan)   │  │
+│                  └──────────────────────┬────────────────────────────┘  │
+│                                         │                                │
+│                                         ▼                                │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  INTELLIGENT ROUTER / LOAD BALANCER                                │  │
+│  │  • KV-cache-aware routing (session affinity to warm GPU)           │  │
+│  │  • GPU-headroom scheduling (route to pod with free VRAM)           │  │
+│  │  • Model-version routing (canary, blue-green, shadow)              │  │
+│  │  • Priority queuing (P0 > P1 > P2 per tenant SLA)                 │  │
+│  │  • Backpressure / admission control (reject > capacity with 429)   │  │
+│  │  • Async plane handoff (Kafka) for non-latency-sensitive requests  │  │
+│  └──────────────────────┬──────────────────────────────────────────┘   │
+│                          │                                               │
+└──────────────────────────┼───────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    LAYER 3: INFERENCE RUNTIME                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  TOKENIZATION & CONTEXT ASSEMBLY                                   │  │
+│  │  • Tokenizer (SentencePiece / tiktoken)                            │  │
+│  │  • System prompt + user prompt + RAG context composition           │  │
+│  │  • Token budget enforcement (max_model_len truncation)             │  │
+│  │  • Prefix detection for cache reuse                                │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  SCHEDULER (Continuous Batching Engine)                             │  │
+│  │  • Inflight/continuous batching (no head-of-line blocking)         │  │
+│  │  • Prefill vs Decode phase separation (chunked prefill)            │  │
+│  │  • Sequence preemption (evict low-priority if memory pressure)     │  │
+│  │  • Speculative decoding orchestration (draft → verify)             │  │
+│  │  • Multi-LoRA adapter selection per request                        │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  KV CACHE MANAGER (PagedAttention / RadixAttention)                │  │
+│  │  • Paged allocation (variable-length, no fragmentation)            │  │
+│  │  • Prefix caching (shared system prompt KV reuse)                  │  │
+│  │  • Tenant-scoped cache keys (hash(tenant_id + tokens))             │  │
+│  │  • KV quantization (FP8 → 2× more concurrent sequences)           │  │
+│  │  • Eviction policy (per-tenant LRU fairness)                       │  │
+│  │  • Offload to CPU/NVMe when GPU memory pressure                    │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  MODEL EXECUTION ENGINE                                            │  │
+│  │  • Attention kernel (FlashAttention-2/3, FlashInfer)               │  │
+│  │  • GEMM execution (cuBLAS / Composable Kernels / TunableOp)       │  │
+│  │  • CUDA/HIP Graphs (captured decode step → single replay)         │  │
+│  │  • Tensor Parallelism (AllReduce over NVLink/Infinity Fabric)      │  │
+│  │  • Quantized inference (FP8/INT8/INT4 with calibrated scales)      │  │
+│  │  • Kernel fusion (LayerNorm + Residual + Activation → 1 kernel)   │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  OUTPUT PROCESSING & GUARDRAILS                                    │  │
+│  │  • Detokenization + streaming (SSE / WebSocket)                    │  │
+│  │  • Constrained decoding (JSON schema / regex via FSM)              │  │
+│  │  • Output guardrails (PII redaction, toxicity filter)              │  │
+│  │  • Response watermarking / attribution                             │  │
+│  │  • Constant-time response normalization (timing side-channel fix)  │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+└──────────────────────────┼───────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    LAYER 2: CONTAINER RUNTIME (KUBERNETES)                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  GPU ORCHESTRATION                                                 │  │
+│  │  • NVIDIA GPU Operator / AMD Device Plugin                         │  │
+│  │  • MIG partitioning (hardware tenant isolation)                    │  │
+│  │  • Topology-aware scheduling (NVLink mesh, NUMA locality)          │  │
+│  │  • Gang scheduling (Volcano / Kueue) for multi-GPU jobs            │  │
+│  │  • GFD (GPU Feature Discovery) for node labeling                   │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  SCALING & LIFECYCLE                                               │  │
+│  │  • HPA on GPU utilization + request queue depth + TTFT             │  │
+│  │  • KEDA (event-driven: Kafka lag, queue depth triggers)            │  │
+│  │  • Karpenter (node provisioning: right-size GPU instance)          │  │
+│  │  • KServe / Seldon (model serving abstraction)                     │  │
+│  │  • Blue-green model deployments (swap CUDA Graph pointer)          │  │
+│  │  • Canary rollout with automatic guardrail-based rollback          │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  OBSERVABILITY & SLO ENFORCEMENT                                   │  │
+│  │  • DCGM Exporter (GPU util, temp, ECC, memory, Xid errors)        │  │
+│  │  • vLLM/SGLang metrics (TTFT, TPOT, cache hit, batch fill)        │  │
+│  │  • Prometheus + Grafana + Alertmanager                             │  │
+│  │  • Distributed tracing (OpenTelemetry, per-request spans)          │  │
+│  │  • Per-tenant SLO dashboards (latency, availability, cost)         │  │
+│  │  • Anomaly detection (bimodal latency = side-channel alert)        │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+└──────────────────────────┼───────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    LAYER 1: PHYSICAL HARDWARE & OS                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  GPU HARDWARE                                                      │  │
+│  │  • H100 (80GB HBM3, 3.35 TB/s, NVLink 4, FP8 Tensor Cores)       │  │
+│  │  • MI300X (192GB HBM3, 5.3 TB/s, Infinity Fabric, CK library)    │  │
+│  │  • Multi-GPU: NVSwitch (intra-node), InfiniBand/RoCE (inter-node) │  │
+│  │  • PCIe Gen5 for H2D/D2H (pinned memory, async DMA)               │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  NETWORK & COMMUNICATION                                           │  │
+│  │  • NCCL / RCCL (GPU collective communication: AllReduce, AllGather)│  │
+│  │  • RDMA / RoCE v2 (kernel-bypass, zero-copy GPU-to-GPU)           │  │
+│  │  • SR-IOV CNI (pod-level NIC virtualization)                       │  │
+│  │  • NIC multi-queue + IRQ affinity (isolate from compute cores)     │  │
+│  │  • TCP tuning (rmem/wmem, busy polling, backlog)                   │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  CPU & MEMORY TUNING                                               │  │
+│  │  • NUMA pinning (numactl --cpunodebind=N --membind=N)              │  │
+│  │  • CPU isolation (isolcpus, nohz_full, rcu_nocbs)                  │  │
+│  │  • HugePages (2MB/1GB) for model buffers, KV cache, shared memory │  │
+│  │  • THP disabled (madvise) — prevent compaction spikes              │  │
+│  │  • CPU Manager static policy (K8s guaranteed QoS)                  │  │
+│  │  • Performance governor (no frequency scaling jitter)              │  │
+│  └──────────────────────┬────────────────────────────────────────────┘  │
+│                          │                                               │
+│                          ▼                                               │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  STORAGE                                                           │  │
+│  │  • NVMe local (model weights — fast cold start, no network pull)   │  │
+│  │  • Shared filesystem (Lustre/GPFS) for checkpoints (training)      │  │
+│  │  • DaemonSet model sync (S3 → local NVMe, pre-cached)             │  │
+│  │  • tmpfs for ephemeral scratch (tokenizer cache, temp buffers)     │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+LATENCY BUDGET BREAKDOWN (request traversing all layers):
+┌────────────────────────────────────────────────────────────────────────┐
+│  Layer 4: Gateway + Router        │  1-3 ms  (auth, routing decision)  │
+│  Layer 3: Tokenize + Schedule     │  0.5-1 ms                          │
+│  Layer 3: KV Cache Lookup         │  0.01 ms (hash + pointer)          │
+│  Layer 3: Prefill (cache miss)    │  20-100 ms (prompt length dep.)    │
+│  Layer 3: Prefill (cache hit)     │  0 ms (skip — reuse cached KV)    │
+│  Layer 3: Decode (per token)      │  5-15 ms/token (memory-BW bound)  │
+│  Layer 3: Output guardrails       │  1-2 ms                            │
+│  Layer 2: K8s overhead            │  ~0 (in-pod, no hop)               │
+│  Layer 1: H2D transfer            │  0.01-0.1 ms (pinned, async)      │
+│  Layer 1: Network (if TP)         │  0.005 ms/layer (NVLink)           │
+├────────────────────────────────────────────────────────────────────────┤
+│  TTFT (typical):  50-200 ms  │  TPOT (typical):  8-15 ms/token       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
 • Architecture
         • Control Plane
                 ○ GitOps (ArhoCD)
@@ -1375,14 +1563,117 @@ Time Series Analysis, ARIMA
 ---
 
 # Security
+### Layer-by-Layer Security Analysis
 
-• Sampling Techniques
-        • Simple Random Sampling
-        • Stratified Sampling :-  Its for Non overlapping group e.g. Male/Female, Age Groups etc.
-        • Systematic Sampling :- Kth item in the total population , could be biased .
-        • Convenience Sampling :- Samples convenient to access e.g. Street Interview
-• Data and Measures
-        ○ Nominal Data :- Categorical Data
-        ○ Ordinal Data :- Order of the Data important
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        EXTERNAL BOUNDARY                             │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────┐    ┌──────────────────────────────────────────────┐  │
+│  │  User /  │───▶│  AI GATEWAY / POLICY ENFORCEMENT POINT       │  │
+│  │API Client│    │  • AuthN (JWT/mTLS/OIDC)                     │  │
+│  └──────────┘    │  • Rate limit / Token budget                 │  │
+│                  │  • Request classification                    │  │
+│                  │  • Tenant context injection                  │  │
+│                  └──────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  IDENTITY & TENANT CONTEXT                                    │  │
+│  │  • User identity propagation                                  │  │
+│  │  • Tenant isolation boundary                                  │  │
+│  │  • Permission set resolution                                  │  │
+│  │  • Scoped capability tokens minted                            │  │
+│  └──────────────────────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  INPUT GUARDRAILS                                             │  │
+│  │  • Prompt injection detection (classifier + regex + AST)      │  │
+│  │  • Content policy (toxicity, prohibited topics)               │  │
+│  │  • Schema validation for structured inputs                    │  │
+│  │  • PII/secrets scanning                                       │  │
+│  │  • Token budget enforcement                                   │  │
+│  └──────────────────────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  RAG RETRIEVAL WITH DATA AUTHORIZATION                        │  │
+│  │  • User/tenant ACL enforced at retrieval time                 │  │
+│  │  • Metadata filtering (mandatory, not optional)               │  │
+│  │  • Document classification labels checked                     │  │
+│  │  • Retrieved content tagged as UNTRUSTED                      │  │
+│  │  • Citation/provenance metadata attached                      │  │
+│  └──────────────────────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  LLM / AGENT RUNTIME                                          │  │
+│  │  • Isolated execution context per tenant                      │  │
+│  │  • System prompt separation from user/retrieved content       │  │
+│  │  • Token/step/time budget enforcement                         │  │
+│  │  • No direct network/filesystem access                        │  │
+│  └──────────────────────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  TOOL BROKER / ACTION AUTHORIZER                              │  │
+│  │  • Policy engine evaluation (OPA/Cedar)                       │  │
+│  │  • Scoped, short-lived capability tokens per tool call        │  │
+│  │  • Parameter validation and sanitization                      │  │
+│  │  • Rate/cost/blast-radius limits per tool                     │  │
+│  │  • Human-in-the-loop gate for high-risk actions               │  │
+│  └──────────────────────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  OUTPUT GUARDRAILS                                            │  │
+│  │  • PII/secrets detection and redaction                        │  │
+│  │  • Data classification enforcement                            │  │
+│  │  • Cross-tenant data leak detection                           │  │
+│  │  • Content policy enforcement                                 │  │
+│  │  • Response attribution/watermarking                          │  │
+│  └──────────────────────────────┬───────────────────────────────┘  │
+│                                 │                                   │
+│                                 ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  AUDIT / DETECTION / INCIDENT RESPONSE                        │  │
+│  │  • Immutable audit log (every decision, every denial)         │  │
+│  │  • Anomaly detection (unusual tool patterns, data volumes)    │  │
+│  │  • Alert routing and escalation                               │  │
+│  │  • Kill switch / circuit breaker activation                   │  │
+│  │  • Forensic replay capability                                 │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-*End of Guide*
+### Input Validation
+```
+┌─────────────────────────────────────────────┐
+│ Input Validation Pipeline                    │
+├─────────────────────────────────────────────┤
+│ 1. Schema validation (JSON Schema / Pydantic)│
+│ 2. Length/token limits                       │
+│ 3. Character set validation                  │
+│ 4. Encoding normalization (prevent Unicode   │
+│    tricks)                                   │
+│ 5. Structured field extraction               │
+└─────────────────────────────────────────────┘
+```
+
+
+# Stories
+	Influence/Architecture/Outcome 	
+		Fraud detection 3 tier 
+		Siri conlidation of all stages 
+	Wrong dcesions / Failures / Mistakes
+		Initial cost estimation of using Correwave instead bedrock went wrong 
+		Using Milvus for Vector DB 
+
+	Difficult issue to fix
+		vLLM cutmization for KV sharing 
+	Conflicts
+		Usage of GuardRail in warm wath between Cyber and Product team  
+		Unified architecture for siri 

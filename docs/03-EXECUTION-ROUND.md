@@ -7,7 +7,7 @@ The 40 execution questions are grouped into **5 clusters**, each primarily answe
 | Cluster | Theme | Primary Story | Questions Covered |
 |---------|-------|---------------|-------------------|
 | **A** | Roadmap & Multi-Quarter Planning | Capital One Three-Tier Platform | Q1, Q2, Q3, Q5, Q6, Q7, Q9, Q32 |
-| **B** | Prioritization & Tradeoffs | Capital One + Broadcom | Q11, Q12, Q13, Q14, Q16, Q17, Q18, Q20 |
+| **B** | Prioritization & Tradeoffs | Capital One + Apple | Q11, Q12, Q13, Q14, Q16, Q17, Q18, Q20 |
 | **C** | Navigating Ambiguity | Apple Siri Pipeline + Capital One AI Platform | Q21, Q22, Q23, Q24, Q25, Q27, Q28, Q29 |
 | **D** | Scope & Timeline Management | Apple OS Launch Deadline | Q4, Q8, Q10, Q15, Q19, Q26, Q30 |
 | **E** | Stakeholder Management | Capital One VP + Apple Cross-Team | Q31, Q33, Q34, Q35, Q36, Q37, Q38, Q39, Q40 |
@@ -102,7 +102,7 @@ Each quarter delivered independently valuable outcomes:
 
 ## CLUSTER B: Prioritization & Tradeoffs
 
-### Primary Story: Capital One (Feature Store Incident) + Broadcom (Model Failure)
+### Primary Story: Capital One (Feature Store Incident) + Apple (Milvus Vector DB Failure)
 
 **Use for:** Q11, Q12, Q13, Q14, Q16, Q17, Q18, Q20
 
@@ -110,7 +110,7 @@ Each quarter delivered independently valuable outcomes:
 
 ### Concrete Example
 
-**CONTEXT:** At Capital One, I managed prioritization for the fraud platform with 4 consuming teams. At Broadcom, I made a kill decision on an inline deployment and re-prioritized the roadmap to build evaluation infrastructure.
+**CONTEXT:** At Capital One, I managed prioritization for the fraud platform with 4 consuming teams. At Apple, I made a kill decision on a Milvus vector DB deployment and re-prioritized to build FAISS GPU in-process as a replacement.
 
 **MY PRIORITIZATION FRAMEWORK (USED IN PRACTICE):**
 
@@ -145,14 +145,14 @@ Had 30+ requests. Approach:
 4. Published prioritized list WITH RATIONALE publicly — allowed challenges for 1 week
 5. Two teams challenged: one had valid new data (reprioritized), one didn't (held firm with explanation)
 
-**REAL KILL DECISION — Broadcom:**
+**REAL KILL DECISION — Apple (Milvus Vector DB):**
 
-After the phishing model failure, I killed the inline deployment AND paused 4 weeks of new model development. Framework:
-- Leading indicators said "won't work": FP rate was climbing, not stabilizing
-- Sunk cost was 3 months of development — irrelevant to the decision
-- Switching cost was real: customers already told about "improved detection"
-- Kill criteria (defined upfront, honestly): "If FP rate > 0.1% after 1 week shadow deployment → kill"
-- Made the kill decision a sign of engineering maturity, not failure: "We caught this before it became a customer trust issue"
+After deploying Milvus as the vector store for Siri's semantic search, production traffic exposed critical issues (p99 latency spikes, write-read contention, consistency gaps). I killed the Milvus deployment AND paused 2 weeks of planned feature work to build FAISS GPU in-process. Framework:
+- Leading indicators said "won't work": tail latency was worsening under load, not stabilizing
+- Sunk cost was 6 weeks of integration work — irrelevant to the decision
+- Switching cost was real: infra team had provisioned and was operating the Milvus cluster
+- Kill criteria (defined after initial investigation): "If p99 > 5ms under concurrent read/write at peak QPS → architectural mismatch"
+- Made the kill decision a sign of engineering maturity, not failure: "We caught this before the OS launch, and the replacement (FAISS GPU) eliminates an entire class of operational issues"
 
 **TECH DEBT VS. FEATURES — Capital One:**
 
@@ -170,10 +170,10 @@ High interest rate (Python GIL contention worsening with load): scheduled for ne
 |----------|---------------|
 | **Q11** — "You have 30 requests from different teams. How do you prioritize?" | Published all requests with impact assessment. Grouped by theme. Applied TIER framework. Made the list + rationale public. Allowed 1-week challenge period. Held firm on 80% of decisions, adjusted 20% based on new data. Key: transparency reduces gaming. |
 | **Q12** — "How do you decide between tech debt and new features?" | Quantified debt in dollars: "Python tax = 15-40ms overhead = $Y/month in wasted GPU." Debt on critical path → fix now. Debt with high interest rate (worsening with load) → schedule. Debt in stable code → leave alone. Never frame as "debt vs. features" — frame as "sustainable velocity vs. short-term output." |
-| **Q13** — "P1 security vulnerability. What do you sacrifice?" | Non-negotiable, always top priority. At Capital One: immediately triaged blast radius, paused lowest-priority in-flight work (exploration bet), redirected 2 engineers. Communicated roadmap impact to stakeholders same day. Post-fix: added systemic prevention to roadmap (not just patch-and-forget). |
+| **Q13** — "P1 security vulnerability. What do you sacrifice?" | Non-negotiable, always top priority. At Capital One: immediately triaged blast radius, paused lowest-priority in-flight work (exploration bet), redirected 2 engineers. Communicated roadmap impact to stakeholders same day. Post-fix: added systemic prevention to roadmap (not just patch-and-forget). **Stronger example — KV Cache Cross-Tenant Leakage:** Analyst saw another product line's data in AI response. I disabled prefix caching within 30 min (sacrificed 2.5× latency), performed forensics (1,247 affected requests), built tenant-scoped cache keys in 48 hrs. Communicated to compliance same hour. Sacrificed: all performance work paused for 48 hours. Non-negotiable: data isolation > latency. |
 | **Q14** — "Everyone says their request is urgent. How do you handle?" | Created visible urgency definition: "Urgent = revenue impact per hour OR SLA breach." Made it self-assessable. Force-ranked publicly (transparency reduces gaming). At Capital One, created explicit tiers with response SLAs: P0 (4h), P1 (1 day), P2 (1 sprint), P3 (next quarter). Teams that tried to game the system got pushback with data. |
-| **Q16** — "How do you prioritize reliability improvements with no active incident?" | Quantified risk: "Feature store has no compaction guard. Probability of recurrence: ~1/month. Impact: 12-minute SLO violation affecting 18,000 transactions." Used post-mortem trends: "Last 3 incidents all relate to maintenance job scheduling." Connected to cost: "Each P1 costs 4 engineer-hours + $X in delayed transactions." Ran chaos test to make risk visible to leadership. |
-| **Q17** — "How do you decide when to stop investing in a failing project?" | At Broadcom: defined kill criteria BEFORE deployment ("FP rate > 0.1% → kill"). When criteria hit, killed immediately — 3 months of sunk cost was irrelevant. Distinguished "not working yet" (stabilizing metrics) from "won't work" (climbing FP rate). Made the kill a sign of maturity, not failure. Celebrated the learning. |
+| **Q16** — "How do you prioritize reliability improvements with no active incident?" | Quantified risk: "Feature store has no compaction guard. Probability of recurrence: ~1/month. Impact: 12-minute SLO violation affecting 18,000 transactions." Used post-mortem trends: "Last 3 incidents all relate to maintenance job scheduling." Connected to cost: "Each P1 costs 4 engineer-hours + $X in delayed transactions." Ran chaos test to make risk visible to leadership. **Additional example — Proactive Timing Side-Channel Discovery (Apple):** During routine latency analysis, I discovered a KV cache timing side-channel between household devices — no active incident, no user report. Quantified risk: one device could infer another user's query patterns with 94% accuracy. Prioritized above feature work because: privacy violation in shared households (domestic abuse scenario), Apple's privacy bar is non-negotiable, and cheap to exploit once discovered. Fixed before any user was affected. |
+| **Q17** — "How do you decide when to stop investing in a failing project?" | At Apple: Milvus deployment had worsening tail latency under production load — not stabilizing. Killed it after 1 week in production. 6 weeks of sunk integration cost was irrelevant. Distinguished "not working yet" (needs tuning) from "architectural mismatch" (network hop incompatible with sub-ms budget). Made the kill a sign of maturity: shipped FAISS GPU replacement in 2 weeks that was 10× faster. |
 | **Q18** — "High certainty/moderate value vs. low certainty/enormous value?" | Portfolio approach at Capital One: 70% on certainties (hot-path optimization — known 4× improvement), 20% on de-risked bets (LLM analysis — ran 4-week POC before committing $2.1M GPU budget), 10% on exploration (70B model experiments — time-boxed, killable). De-risked the uncertain project with minimal investment (POC) before full commitment. |
 | **Q20** — "Manager disagrees with your prioritization?" | VP at Capital One wanted 100% launch immediately; I ranked phased rollout higher. Approach: understood their perspective (quarterly metrics pressure), presented my data (failure modes at scale), identified the root disagreement (risk tolerance, not direction). Made my case, then committed to their adjusted timeline (faster phases, same safety gates). Built trust through the eventual success. |
 
@@ -235,7 +235,7 @@ For the LLM serving stack, technology choice wasn't obvious:
 | **Q21** — "Improve platform reliability — no specific target." | Exactly what I did at Capital One: (1) Defined reliability = sub-5ms p99 + 99.999% uptime; (2) Measured current: 35ms p99, frequent GC-induced spikes; (3) Benchmarked: card network SLAs required < 10ms; (4) Gap analysis: biggest gap was kernel launch overhead + serialization; (5) Prioritized: host-level foundation first (biggest bang for buck); (6) Proposed targets: sub-10ms in Q1, sub-5ms in Q2; (7) Got alignment with data from Nsight profiling; (8) Executed against profiling evidence. |
 | **Q22** — "Build an AI platform with no requirements." | Capital One approach: Interviewed 4 consuming teams. Identified common patterns: (1) inference serving with guardrails, (2) RAG for knowledge retrieval, (3) agent workflows. Started with highest-pain capability (agent response time). Built for one real use case (fraud triage) first, then generalized to disputes and loans. 3-month first deliverable with clear success criteria (15-20% deflection). |
 | **Q23** — "New VP wants to modernize everything." | This was the Capital One VP situation. Started with curiosity: "What outcomes are you targeting?" Provided context: "Previous bot failed because X." Found alignment: VP's goal (reduce cost) aligned with our approach (phased AI rollout). Proposed concrete first step (5% traffic POC). Delivered quick win that built trust. Key: be a partner, not a resistor. |
-| **Q24** — "Project that three engineers failed to complete." | Apple Siri search pipeline — exactly this situation. Why it failed before: organizational (no e2e ownership), not technical. Changed fundamental assumption: created interface contracts instead of assigning to one team. Set explicit checkpoints with go/no-go criteria. Key insight: if the same inputs keep producing the same outputs, change the approach, not the effort level. |
+| **Q24** — "Project that three engineers failed to complete." | Apple Siri search pipeline — exactly this situation. Why it failed before: organizational (no e2e ownership), not technical. Changed fundamental assumption: created interface contracts instead of assigning to one team. Set explicit checkpoints with go/no-go criteria. Key insight: if the same inputs keep producing the same outputs, change the approach, not the effort level. **Additional angle — Apple KV Cache Timing Side-Channel:** This was a novel security problem with no playbook. No prior art on LLM inference side-channel attacks in consumer products. My approach: (1) formalized the threat model mathematically (mutual information between timing and query content), (2) designed constant-time response layer (novel — no existing solution existed), (3) validated attack-accuracy reduction from 94% to 52%. Succeeded because I treated it as a research problem with engineering constraints, not a standard bug fix. |
 | **Q25** — "Vision for a system but only 2 engineers." | At Capital One, initial POC was me + 1 engineer for 3 weeks. Approach: reduce scope to "prove sub-5ms is feasible" (not "build the whole platform"). Used managed Kafka (didn't build streaming infra). Automated CI benchmarks early (2 people can't manually regression-test). Showed value in 4 weeks → earned 6 more engineers for full build. |
 | **Q27** — "When do you have enough information to decide?" | GPU infrastructure ($2.1M) was irreversible → ran 4-week POC before committing. Model selection (8B vs 70B) was reversible → decided fast, iterated. "What information would change my mind?" For the GPU bet: "If POC can't hit 5ms p99 at target TPS." After POC proved 2.8ms, I had enough. For routing strategy: no way to know without production data → shipped round-robin, iterated to KV-cache routing with real metrics. |
 | **Q28** — "Estimate a project you've never done before." | The LLM-powered fraud analysis was novel. Decomposed: host config (known, 2 weeks), CUDA Graphs (partially known, 3 weeks + 1 week contingency), LLM integration (unknown, 4 weeks + 2 week contingency), guardrails (unknown, 3 weeks + 2 week contingency). Provided range: "10-16 weeks depending on TensorRT-LLM integration complexity." Proposed 2-week spike on biggest unknown (guardrail overhead). Actual: 13 weeks. Within range. |
@@ -423,7 +423,7 @@ At Capital One, product leadership changed priorities 3 times in one quarter (di
 | Day | Cluster | Practice Focus |
 |-----|---------|---------------|
 | 1 | A (Roadmap) | Practice telling the Capital One roadmap story with quarterly milestones and metrics |
-| 2 | B (Prioritization) | Practice the framework + Broadcom kill decision with authentic vulnerability |
+| 2 | B (Prioritization) | Practice the framework + Apple Milvus kill decision with authentic vulnerability |
 | 3 | C (Ambiguity) | Practice structuring Apple's ambiguous situation into clear success criteria |
 | 4 | D (Scope/Timeline) | Practice the VP compression conversation with specific tradeoff numbers |
 | 5 | E (Stakeholders) | Practice the "burned team trust" story with emotional authenticity |

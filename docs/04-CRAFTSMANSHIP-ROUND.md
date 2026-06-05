@@ -6,11 +6,11 @@ The Craftsmanship round evaluates technical depth, engineering excellence, and o
 
 | Theme | Discussion Topics | Primary Project Context |
 |-------|-------------------|------------------------|
-| **A** | Build vs. Buy Decisions | Capital One (Rust gateway, Triton, managed Kafka) + Broadcom (TF Serving vs. custom) |
+| **A** | Build vs. Buy Decisions | Capital One (Rust gateway, Triton, managed Kafka) + Apple (FAISS GPU vs. Milvus) |
 | **B** | Monitoring & Observability | Capital One (SLO-based, multi-tier tracing) + Apple (unified pipeline observability) |
 | **C** | Reliability & Failure Design | Capital One (99.999% uptime, feature store incident) + Apple (graceful degradation) |
-| **D** | Testing & Deployment Strategy | Capital One (shadow deployment, canary, chaos) + Broadcom (evaluation framework) |
-| **E** | Technical Debt & On-Call | Capital One (Python→Rust migration) + Broadcom (systematic process improvement) |
+| **D** | Testing & Deployment Strategy | Capital One (shadow deployment, canary, chaos) + Apple (production-representative benchmarks) |
+| **E** | Technical Debt & On-Call | Capital One (Python→Rust migration) + Apple (Milvus→FAISS systematic process improvement) |
 
 ---
 
@@ -154,6 +154,32 @@ I built unified tracing that propagated trace context through shared memory boun
 
 Result: MTTI from 45 min to 3 min. Teams stopped blaming each other because the trace showed exactly which stage was slow."
 
+### Observability-Driven Security Discovery (KV Cache Incidents)
+
+**How monitoring revealed security flaws that no one else detected:**
+
+**Capital One — Cross-Tenant KV Cache Leakage (discovered via audit trail):**
+"A fraud analyst noticed auto loan terminology in their credit card AI response and filed a support ticket. Standard debugging: checked FAISS audit logs — retrieval was correctly tenant-scoped. Checked system prompt injection — correct tenant template. The contamination was invisible in traditional metrics (no error rate spike, no latency anomaly). Only the content audit trail (Kafka trace with response tokens) allowed me to trace the information back to a prefix cache hit from a different product line.
+
+Post-fix monitoring added:
+- `kv_cache_cross_tenant_hit_count` — should be 0 (hard alert)
+- `kv_cache_hit_tenant_match_rate` — should be 100%
+- `prefix_cache_origin_tenant` metadata in every cache write — enables forensic queries
+
+Key insight: traditional infrastructure monitoring (latency, error rate, GPU utilization) would NEVER catch this. You need content-level audit trails + tenant attribution on shared state."
+
+**Apple — Timing Side-Channel (discovered via latency distribution analysis):**
+"During routine p50/p99 analysis, I noticed bimodal latency PER DEVICE — not per request type. Some HomePod devices consistently got 45ms while others got 120ms for identical query types. Standard monitoring aggregates across devices — this pattern was invisible in aggregate dashboards.
+
+I built a per-device latency histogram (bucketed by device_id × query_domain) and the timing correlation with other household members' activity became statistically significant.
+
+Post-fix monitoring added:
+- Per-device latency variance (bimodal detection)
+- `cache_probe_anomaly_score` — detects rapid sequential queries across domains with minimal content (probing pattern)
+- Timing normalization verification: p50 and p99 should converge after fix (cache hit no longer faster than miss)
+
+Key insight: side-channels live in DISTRIBUTIONS, not averages. You need per-entity (per-device, per-tenant, per-user) latency analysis to detect them. Aggregate SLO dashboards are blind to information leakage."
+
 ---
 
 ## THEME C: Reliability & Failure Design
@@ -194,6 +220,21 @@ Result: MTTI from 45 min to 3 min. Teams stopped blaming each other because the 
    Bounded SPSC queues between tiers.
    If Tier 2/3 queues fill: requests dropped gracefully (not blocking Tier 1).
    Admission control at gateway: reject > capacity with 503 (fast fail).
+
+6. TENANT ISOLATION IN SHARED INFERENCE (KV Cache Security):
+   Capital One: Prefix caching shared KV blocks across tenants (performance
+              optimization). But KV values contain encoded context from ALL
+              tokens computed together — sharing prefix KV = sharing hidden state.
+              Fix: tenant-scoped cache keys (hash(tenant_id + tokens)) ensure
+              architectural impossibility of cross-tenant sharing.
+   Apple: Shared KV cache across household devices created timing side-channel.
+         Cache hit = 45ms, cache miss = 120ms. One device can infer another's
+         queries by probing. Fix: constant-time response layer + preemptive
+         cache warming. Timing variance eliminated (52% → random chance).
+
+   PRINCIPLE: Performance optimizations that share state across trust boundaries
+   are security vulnerabilities. Isolation must be enforced at the cache key level,
+   not just at the retrieval level.
 ```
 
 ### Multi-Region Architecture (Real Implementation)
@@ -267,7 +308,7 @@ Shadow Testing:
 • New models shadow-score real production traffic
 • Compare decisions: new vs. current model
 • Alert if disagreement rate > threshold (model drift detection)
-• Required for ALL model promotions — learned from Broadcom failure
+• Required for ALL model promotions — learned from Apple Milvus failure (benchmarks didn't match production)
 
 Chaos Engineering:
 • Monthly: kill GPU nodes (verify Level 3 fallback activates)
@@ -328,7 +369,7 @@ Shadow Traffic (safest):
 • Scores real transactions but doesn't affect decisions
 • Compare: new model decisions vs. current production model
 • Graduate to canary only after shadow metrics pass
-• Learned this from Broadcom — shadow deployment would have caught FP spike
+• Learned this from Apple Milvus incident — production-representative benchmarks would have caught the write-contention issue
 
 Canary Deploys:
 • 1% traffic for 30 minutes (automated)
@@ -341,7 +382,7 @@ Feature Flags:
 • Kill switch: < 1 second to disable (config flag, not deployment)
 
 NEVER in Production:
-• Untested model without shadow period (Broadcom lesson)
+• Untested infrastructure without production-pattern benchmarks (Apple Milvus lesson)
 • Destructive data changes without backup verified
 • Load testing without Ops awareness
 • Changes to PCI-DSS-scope components without compliance review
@@ -466,7 +507,7 @@ Cultural practices I built:
 • "Contributing factors" (not "root cause") — forces systemic thinking
 • Quarterly "patterns" report: "3 of last 5 incidents relate to maintenance scheduling"
 • New hires read recent postmortems as onboarding material
-• I shared MY OWN failures first (Broadcom model incident) — leaders go first
+• I shared MY OWN failures first (Apple Milvus vector DB incident) — leaders go first
 
 Key principle: "A human made an error" → "The system allowed an error"
 The person who caused the incident often has the best insight into how to prevent it.
@@ -502,7 +543,7 @@ Punishing them destroys that insight.
 
 1. Start with what you DON'T test (shows maturity)
 2. Walk through your real deployment pipeline (canary → regional → global)
-3. Emphasize the Broadcom lesson: shadow deployment is non-negotiable for ML
+3. Emphasize the Apple Milvus lesson: production-representative benchmarks are non-negotiable for infrastructure
 4. Discuss chaos engineering with specific monthly exercises
 
 ### When Asked About Debt/On-Call
@@ -518,7 +559,7 @@ Punishing them destroys that insight.
 
 | Red Flag | Fix |
 |----------|-----|
-| Textbook answers without real examples | Ground every answer in Capital One / Apple / Broadcom |
+| Textbook answers without real examples | Ground every answer in Capital One / Apple |
 | "We should monitor everything" | Show prioritization: what you DON'T alert on matters |
 | Over-engineering for hypothetical scale | Right-size: "At our scale X is appropriate; at LinkedIn's scale I'd do Y" |
 | Ignoring organizational factors in build/buy | Always include: team capability, on-call burden, knowledge loss risk |
