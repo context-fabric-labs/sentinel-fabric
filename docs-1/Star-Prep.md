@@ -1563,6 +1563,7 @@ Time Series Analysis, ARIMA
 ---
 
 # Security
+
 ### Layer-by-Layer Security Analysis
 
 ```
@@ -1650,6 +1651,7 @@ Time Series Analysis, ARIMA
 ```
 
 ### Input Validation
+
 ```
 ┌─────────────────────────────────────────────┐
 │ Input Validation Pipeline                    │
@@ -1663,17 +1665,22 @@ Time Series Analysis, ARIMA
 └─────────────────────────────────────────────┘
 ```
 
-
 # Stories
-	Influence/Architecture/Outcome 	
-		Fraud detection 3 tier 
-		Siri conlidation of all stages 
-	Wrong dcesions / Failures / Mistakes
-		Initial cost estimation of using Correwave instead bedrock went wrong 
-		Using Milvus for Vector DB 
 
-	Difficult issue to fix
-		vLLM cutmization for KV sharing 
+
+“I’m Shailesh, and I bring 25+ years of experience across distributed systems, programming, data analytics, and data science, with the last 8 years focused deeply on AI systems engineering for ultra-low-latency, high-throughput, HPC-style production platforms. My strength is that I understand both sides of AI and security. On the **AI for Security** side, I’ve built real security products powered by AI: fraud detection platforms processing tens of thousands of transactions per second with sub-5ms decisioning, conversational AI inference pipelines like Siri at massive concurrency, and cyber-security inference systems that inspect web traffic using multi-model AI pipelines. These systems required deep work across Rust/C++, CUDA, GPU inference, XGBoost/BERT/LLMs, zero-copy data flow, Kubernetes, observability, and production SLOs. On the **Security for AI** side, I’ve also worked on securing the AI infrastructure itself: multi-tenant isolation, guardrails, policy-based tool authorization, secure RAG, auditability, KV-cache isolation, timing side-channel mitigation, and fail-closed controls around LLM and agent platforms. So my journey has been from building distributed data and analytics systems, to building AI-powered security products, to securing the AI platforms that now power those products. At the Principal level, I focus on designing systems where performance, reliability, and security are not separate concerns, but part of the same architecture.”
+
+==
+
+    Influence/Architecture/Outcome 
+		Fraud detection 3 tier
+		Siri conlidation of all stages
+	Wrong dcesions / Failures / Mistakes
+		Initial cost estimation of using Correwave instead bedrock went wrong
+		Using Milvus for Vector DB
+
+    Difficult issue to fix
+		vLLM cutmization for KV sharing
 	Conflicts
-		Usage of GuardRail in warm wath between Cyber and Product team  
-		Unified architecture for siri 
+		Usage of GuardRail in warm wath between Cyber and Product team
+    Unified architecture for siri
