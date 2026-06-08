@@ -13,9 +13,22 @@ Target 06/17 - 14 days
 
 	======================================
 	Target 06/07
-		DSA :- Must complete all LinkedIn problems 
-		STAR :- Must be all star stories 
-		System Design :- Must complete all system design problems 
+		Interview prep  :- Must complete Inter prep for  Sandisk-Memory, Microsoft-ONNX , Socure-Fraud-detection 
+		STAR :- Must be all star stories for Leadership, Execution, Forgeman
+		DSA :- Must complete all LinkedIn Graph problems 
+		System Design :- Must complete 3 system design problems 
+		
+		
+
+	Target 06/12
+		MICROSOFT
+		Sandisk
+		LinkenIn 
+		IREN
+		
+		 
+		
+
 		Inferencing :- Must complete Inferencing with System, security, ONNX , TensorRT-LLM
 
 	======================================
@@ -764,3 +777,9 @@ USing hybrid LLM with on-prem and Bedrock , where executive where kin on only AW
 Leveragd massive doscuount from Corewave and after 1 year we are at break even and infact thinking of buying own hardware 
 
 
+    Influence/Architecture/Outcome
+		Fraud detection 3 tier
+		Siri conlidation of all stages
+	Wrong dcesions / Failures / Mistakes
+		Initial cost estimation of using Correwave instead bedrock went wrong
+		Using Milvus for Vector DB

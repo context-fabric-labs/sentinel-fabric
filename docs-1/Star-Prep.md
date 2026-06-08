@@ -1,29 +1,21 @@
----
-# STAR
+# Intro
 
-    ○ CapitalOne
-                        § Three-Tier Fraud Detection
-                                □ Architecture Brief
-                                        ® How we orchestrate the Gateway Routing to transformer and LLM models leveraging pericular GPU
-                                □ Infra Brief
-                                □ Stories
-                                        ® Sub-50 ms hot path which includes XGBoost + Transformer + FAISS + TigerGraph
-                                                ◊ Difficult Target, Ownership, Delivery Under Pressure, Technical Depth
-                                        ® Replaced vLLM with SGLang and TensorRT LLM Fusion bringing warm path into hot Path
-                                                ◊ Innovation, Failure (Turning into Oppertunity)
-                                        ® Fusion of GuradRail with LLM for 20 ms optimization . Build GuardRail governance pipeline
-                                                ◊ Conflict with Compliance , Product , GuardRail team
-                                        ® Intelligent RUST Gateway
-                                                ◊ Above and Beyond
-                        § Siri for Apple HomePod
-                                □ Stories
-                                        ® Unified memory architecture
-                                                ◊ Innovation
-                        § Broadcom Security Gateway
-                                □ Stories
-                                        ® ProxySG integration with DLP, CASB , MA
-                                                ◊ Unclear requirementsSTAR
+I’m Shailesh. I bring 25+ years of experience building distributed systems, data platforms, and high-performance production infrastructure, with the last 8+ years focused deeply on AI systems engineering — especially large-scale inference, multi-model serving, GPU-aware platforms, and low-latency distributed AI workloads.
+My strongest area is building and optimizing production AI platforms where multiple models have to work together under strict latency, throughput, reliability, and cost constraints. I’ve worked on fraud-decisioning and identity platforms processing high transaction volumes, Siri-style conversational inference pipelines, and cyber-security inspection systems.
+At the Principal level, my focus is designing AI infrastructure where performance, reliability, cost, and security are built into the same architecture .
+
 ---
+
+# Stories
+
+* CapitalOne Fraud Detection Platform
+  * Innovation
+    * 3-Tier Fraud Platform with
+    * ultra low latency Hot and Warm Path
+* Apple Siri
+  HomePod
+  * Innovation
+
 ---
 
 # Search & Recommendation
@@ -1664,23 +1656,3 @@ Time Series Analysis, ARIMA
 │ 5. Structured field extraction               │
 └─────────────────────────────────────────────┘
 ```
-
-# Stories
-
-
-“I’m Shailesh, and I bring 25+ years of experience across distributed systems, programming, data analytics, and data science, with the last 8 years focused deeply on AI systems engineering for ultra-low-latency, high-throughput, HPC-style production platforms. My strength is that I understand both sides of AI and security. On the **AI for Security** side, I’ve built real security products powered by AI: fraud detection platforms processing tens of thousands of transactions per second with sub-5ms decisioning, conversational AI inference pipelines like Siri at massive concurrency, and cyber-security inference systems that inspect web traffic using multi-model AI pipelines. These systems required deep work across Rust/C++, CUDA, GPU inference, XGBoost/BERT/LLMs, zero-copy data flow, Kubernetes, observability, and production SLOs. On the **Security for AI** side, I’ve also worked on securing the AI infrastructure itself: multi-tenant isolation, guardrails, policy-based tool authorization, secure RAG, auditability, KV-cache isolation, timing side-channel mitigation, and fail-closed controls around LLM and agent platforms. So my journey has been from building distributed data and analytics systems, to building AI-powered security products, to securing the AI platforms that now power those products. At the Principal level, I focus on designing systems where performance, reliability, and security are not separate concerns, but part of the same architecture.”
-
-==
-
-    Influence/Architecture/Outcome 
-		Fraud detection 3 tier
-		Siri conlidation of all stages
-	Wrong dcesions / Failures / Mistakes
-		Initial cost estimation of using Correwave instead bedrock went wrong
-		Using Milvus for Vector DB
-
-    Difficult issue to fix
-		vLLM cutmization for KV sharing
-	Conflicts
-		Usage of GuardRail in warm wath between Cyber and Product team
-    Unified architecture for siri
