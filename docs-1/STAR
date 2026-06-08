@@ -783,3 +783,270 @@ Leveragd massive doscuount from Corewave and after 1 year we are at break even a
 	Wrong dcesions / Failures / Mistakes
 		Initial cost estimation of using Correwave instead bedrock went wrong
 		Using Milvus for Vector DB
+===
+Here is the Sandisk discussion summary + exact preparation plan.
+
+1. What the Sandisk role seems to be
+
+The Sandisk role is not a perfect AI inference/platform role. It is closer to:
+
+AI system architecture
+memory systems
+SoC / accelerator platform
+DRAM / HBM / GDDR / LPDDR / NAND
+PCIe / CXL / RDMA / interconnect
+platform-level performance
+customer AI workload enablement
+
+The JD asks for things like:
+
+SoC design
+memory system development
+DRAM / DDR / LPDDR / GDDR / NAND
+AI accelerators / GPU / NPU
+RTL / system-level modeling
+PCIe / CXL / NoC / RDMA
+
+So the role has a memory/SoC/hardware-platform flavor.
+
+Your direct match is not RTL / memory-controller / PHY design.
+
+Your match is as a:
+
+AI workload-driven systems architect who understands how real inference workloads stress GPU memory, host memory, storage, PCIe/CXL, and platform topology.
+
+2. Your fit estimate
+
+Approximate fit:
+
+AI workload / inference systems:        Strong
+GPU/HBM/performance reasoning:          Good
+PCIe/RDMA/NUMA/platform debugging:      Good enough as bridge
+NAND/NVMe/model-loading angle:          Moderate-good
+Memory/SoC/RTL/deep hardware design:    Weak
+Overall match:                          45–60%
+
+So this is a bridge/stretch role, not your strongest match.
+
+Your stronger matches remain:
+
+Socure / Coupang / Microsoft AI infra / LinkedIn AI infra
+
+Sandisk is worth preparing for only if they are open to someone who brings AI workload/system architecture into memory/storage/platform teams.
+
+3. Your positioning for Sandisk
+
+Do not position yourself as:
+
+Memory-controller designer
+RTL engineer
+DDR/HBM PHY expert
+SoC designer
+Signal-integrity engineer
+
+Position yourself as:
+
+“My strength is AI workload-driven system architecture. I understand how production AI inference workloads expose bottlenecks across GPU memory, host memory, PCIe, CXL, RDMA, storage, Kubernetes placement, model/index loading, and runtime behavior. I can translate customer AI symptoms into evidence that memory, storage, firmware, platform, validation, and hardware teams can act on.”
+
+Your best one-liner:
+
+I bridge AI workload symptoms to memory, storage, interconnect, and platform architecture.
+
+4. Best Sandisk story angle
+
+The strongest story for Sandisk is not pure GPU debugging.
+
+The best story is:
+
+Model + FAISS index loading / recovery story
+
+Why this fits Sandisk:
+
+NAND
+NVMe
+SSD read bandwidth
+model artifact loading
+FAISS index loading
+cold start
+rollout/recovery
+local cache
+storage latency consistency
+
+Story summary:
+
+In a Sentinel-style fraud platform, the model and FAISS index were optimized during steady-state inference, but rollout/recovery was slow because model artifacts and vector indexes took minutes to load during pod restart. This reduced available capacity, increased gateway queue depth, and caused p99 risk during deployment. I decomposed startup into model load, index load, CUDA warmup, readiness, and traffic admission. The evidence showed the GPU was idle while artifacts loaded. The fix was to pre-stage model and FAISS index on local NVMe, use readiness only after warmup, and coordinate with storage/platform teams on NVMe throughput, queue depth, filesystem behavior, and caching strategy.
+
+Sandisk relevance:
+
+“This shows how AI workloads create concrete storage requirements around read bandwidth, latency consistency, local model cache, artifact layout, and recovery time.”
+
+5. Second useful Sandisk story
+FAISS / Transformer memory-bandwidth story
+
+This connects to memory systems.
+
+Story angle:
+
+Transformer inference
+FAISS GPU vector search
+embedding/index size
+HBM pressure
+GPU memory bandwidth
+PCIe copy-back
+host-device transfer
+
+Your framing:
+
+“FAISS/vector search is useful for memory-system discussion because it is often memory-bandwidth and layout sensitive, not pure compute-bound. If FAISS p99 increases after index growth, I would look at index size, embedding dimension, nprobe/top-k, HBM utilization, memory bandwidth, GPU residency, and whether we are copying too much data back to CPU.”
+
+Sandisk relevance:
+
+“This translates AI search workload behavior into memory capacity, bandwidth, and data-movement requirements.”
+
+6. Third useful story: vendor/platform coordination
+
+This is relevant only as a supporting story.
+
+If using Equinix/CoreWeave/AWS bare metal and a GPU node looks bad:
+
+Your role is not to repair hardware.
+
+Your role is:
+
+prove issue follows node/GPU
+compare healthy vs bad node
+collect DCGM / nvidia-smi / Nsight / dmesg / benchmark
+cordon node
+shift traffic
+escalate to vendor/platform team
+validate after replacement/reimage
+
+Interview line:
+
+“I own workload proof and production mitigation; the vendor/platform team owns hardware validation and replacement.”
+
+Sandisk relevance:
+
+“This shows I can convert an AI workload symptom into a platform-debuggable evidence package.”
+
+7. What “other engineers” look like from Sandisk perspective
+
+The other side is not usually random network/storage support. It may be:
+
+SSD/NAND systems architect
+NVMe firmware/performance engineer
+memory systems architect
+PCIe/CXL platform architect
+GPU/accelerator platform engineer
+firmware/BIOS engineer
+lab validation engineer
+customer systems engineer
+field application engineer
+
+Your interface to them:
+
+workload profile
+model size
+FAISS index size
+access pattern
+latency histogram
+FIO/iostat/DCGM/Nsight evidence
+expected vs actual throughput
+repro benchmark
+specific ask
+
+Your strongest line:
+
+“I do not just say storage or GPU is slow. I provide the workload, measurements, topology, counters, and reproducible case.”
+
+8. What to study — only 2 hours
+
+Do not go deep into RTL, PHY, or DDR timing.
+
+0–20 min: Positioning
+
+Memorize:
+
+“I am not a pure memory-controller or RTL engineer. My value is AI workload-driven system architecture. I understand how real inference workloads stress HBM, DDR, PCIe, CXL, RDMA, NVMe/NAND, and platform topology.”
+
+20–45 min: Memory basics
+
+Know only:
+
+HBM: GPU/accelerator high-bandwidth memory; important for transformers, KV cache, FAISS, embeddings.
+DDR: CPU system memory; important for feature cache, XGBoost, NUMA locality.
+GDDR: GPU-style memory.
+LPDDR: low-power memory for mobile/edge.
+NAND: persistent flash; important for model loading, index loading, recovery, checkpointing.
+ECC: reliability/correctable/uncorrectable memory errors.
+45–70 min: Interconnect basics
+
+Know:
+
+PCIe: CPU-GPU/NVMe/device interconnect.
+CXL: PCIe-based coherent memory/accelerator interconnect.
+RDMA: remote memory access without heavy CPU involvement.
+NoC: on-chip fabric connecting compute/memory blocks.
+Ethernet/RDMA/NCCL: multi-node communication.
+70–95 min: Storage/NAND AI story
+
+Prepare the model/index loading story:
+
+Symptom: pod restart/model rollout takes minutes.
+Impact: capacity drop, queue growth, p99 risk.
+Evidence: GPU idle; model/index loading dominates; FIO vs iostat; local vs remote artifact path.
+Fix: local NVMe cache, pre-stage artifacts, readiness after warmup, warm spare, optimized artifact layout.
+95–115 min: Memory/HBM AI story
+
+Prepare the FAISS/Transformer story:
+
+Symptom: FAISS/BERT p99 grows after index/context growth.
+Evidence: GPU not compute-saturated, memory-copy/HBM pressure high.
+Fix: reduce copy-back, tune FAISS nprobe/top-k, keep GPU-resident data, batch queries, compact features.
+115–120 min: Final bridge answer
+
+Memorize:
+
+“In Sentinel-style fraud systems, the business symptom is p99 latency or recovery time, but the root cause may be model loading, vector index size, GPU memory bandwidth, PCIe transfer, host memory locality, or storage layout. My role is to translate that workload symptom into a memory/storage/platform evidence package.”
+
+9. What not to study
+
+Skip:
+
+RTL
+Verilog/SystemVerilog
+DDR timing diagrams
+PHY training
+oscilloscope/signal integrity
+board-level power integrity
+deep NAND cell internals
+memory-controller microarchitecture
+
+Only know enough to say:
+
+“I understand how these layers affect AI workloads, but I have not owned them directly.”
+
+10. Your 60-second Sandisk interview answer
+
+Use this:
+
+“My background is not traditional RTL or memory-controller design. My strength is AI workload-driven system architecture. In Sentinel-style fraud and inference platforms, I worked with real production workloads where model serving, FAISS vector search, Transformer inference, GPU memory pressure, host-device transfer, NUMA locality, model/index loading, and Kubernetes placement all affected p99 latency, throughput, and recovery.
+
+From a Sandisk perspective, I can bring the customer AI workload lens. For example, model and FAISS index loading translate into NVMe/NAND read bandwidth, latency consistency, local caching, and rollout recovery requirements. FAISS and Transformer inference translate into HBM capacity, memory bandwidth, PCIe/CXL data movement, and GPU residency tradeoffs.
+
+I would not claim to be the RTL or PHY owner. My value is to isolate the workload symptom, collect traces/counters/benchmarks, and work with memory, storage, firmware, platform, and validation teams to turn that symptom into a system-level requirement or root-cause investigation.”
+
+11. Final recommendation
+
+Spend only 2 hours on Sandisk unless the recruiter confirms they want an AI workload/system architect rather than a deep memory/SoC/RTL person.
+
+Your preparation priority should remain:
+
+1. Execution / Leadership / Craftsmanship stories
+2. Microsoft ONNX / inference systems
+3. Socure / Coupang AI security + agentic platform
+4. Sandisk bridge story
+
+For Sandisk, your goal is not to become a hardware engineer.
+
+Your goal is:
