@@ -427,6 +427,692 @@ Performance with ORT:
   ORT + CUDA Graph: 3.5 ms (4.3× faster)
 ```
 
+---
+
+## 7.2.1 How ORT Graph Optimization Actually Works (Mental Model)
+
+```
+ORT optimization is a PASS-BASED graph rewriter, not a black box.
+A model loads as a graph of nodes (ops) + edges (tensors). ORT runs
+ordered passes; each pass matches a sub-graph PATTERN and rewrites it.
+
+  ONNX graph ──▶ [L1 passes] ──▶ [L2 fusions] ──▶ [L3 layout]
+              ──▶ [EP partitioning] ──▶ [EP-specific compile] ──▶ ready
+
+Two distinct optimization phases (this trips people up):
+
+  1. ORT GRAPH OPTIMIZER (hardware-agnostic, runs on CPU at load):
+     constant folding, dead-node elimination, op fusion.
+
+  2. EXECUTION PROVIDER COMPILE (hardware-specific, runs per EP):
+     CUDA EP / TensorRT EP take the partitioned sub-graphs and
+     compile them to their own kernels. TensorRT EP may even build
+     a full TRT engine for the partition it claims.
+
+The optimization LEVEL only controls phase 1. The EP controls phase 2.
+That's why "Level 99 + CPU EP" and "Level 99 + CUDA EP" produce very
+different runtime behavior from the SAME optimized graph.
+```
+
+### Why the levels are ordered the way they are
+```
+L1 (constant folding) must run FIRST — it shrinks the graph so later
+    fusions have fewer nodes to pattern-match.
+L2 (fusion) needs the cleaned graph from L1 to recognize patterns like
+    MatMul→Add→GELU. If L1 didn't fold constants, the bias might be a
+    computed node instead of an initializer and the fusion won't fire.
+L3 (layout) runs LAST because it changes tensor memory format, which
+    would break the pattern matchers in L2 if it ran earlier.
+
+Practical consequence: ALWAYS use ORT_ENABLE_ALL unless a specific
+fusion is buggy for your model — partial levels rarely help.
+```
+
+### The fusions that matter most for transformer hot-path models
+```
+| Fused op                | Replaces                          | Why it wins                |
+|-------------------------|-----------------------------------|----------------------------|
+| Attention / MHA         | 7-12 ops (QKV, scale, softmax,mm) | 1 kernel, no intermediates |
+| SkipLayerNormalization  | Add + LayerNorm                   | fuses residual + norm      |
+| EmbedLayerNormalization | Gather + Add + LayerNorm          | fuses input embedding path |
+| FastGelu / BiasGelu     | Add(bias) + Gelu                  | 1 kernel, fewer HBM trips  |
+| FusedMatMul             | MatMul + Add + (transpose)        | maps to cuBLAS GEMM+bias   |
+| MatMulIntegerToFloat    | quantized MatMul + dequant        | INT8 GEMM path             |
+
+To SEE which fusions fired, dump the optimized graph (Section 7.2.4).
+If "Attention" doesn't appear in the optimized graph, you lost the
+single biggest win — usually caused by an unsupported attention
+variant or an opset too old for the fusion to match.
+```
+
+---
+
+## 7.2.2 The Full Optimization Lever Set (beyond levels)
+
+ORT performance is NOT just `graph_optimization_level`. These are the
+levers that actually move latency, roughly in order of impact:
+
+```
+1. EXECUTION PROVIDER (biggest lever)
+   CPU EP → CUDA EP → TensorRT EP. Picking the right EP for the
+   hardware dwarfs every graph-level tweak. (Section 7.2.5)
+
+2. PRECISION
+   FP32 → FP16 (2× on GPU, near-free accuracy loss for inference)
+   FP16 → INT8 (another ~2× but needs calibration, Section 7.2.6)
+
+3. CUDA GRAPH CAPTURE
+   Eliminates per-kernel launch overhead. Huge for small-batch,
+   many-small-kernel models. Requires FIXED shapes. (Section 7.2.7)
+
+4. IO BINDING (zero-copy in/out)
+   Keep inputs/outputs on GPU; skip host<->device copies every call.
+   This is THE key integration point for your C++ data-plane. (7.2.5)
+
+5. SHAPE STRATEGY
+   Fixed/static shapes >> dynamic shapes. Dynamic axes block CUDA
+   Graphs and force re-planning. Free dimensions to fixed if you can.
+
+6. THREADING
+   intra_op_num_threads / inter_op_num_threads (CPU EP & CPU fallback
+   ops). For GPU serving, set intra-op low and pin worker threads.
+
+7. MEMORY ARENA
+   Enable arena allocator + memory pattern planning so ORT pre-plans
+   one big allocation instead of per-run malloc/free.
+
+8. PROVIDER OPTIONS
+   cudnn_conv_algo_search, do_copy_in_default_stream, arena config,
+   TRT cache paths. The defaults are conservative, not fastest.
+```
+
+---
+
+## 7.2.3 PRACTICAL STEP-BY-STEP: Optimizing an ONNX Model
+
+This is the repeatable pipeline. Do it in THIS order — each step
+assumes the previous one is done and measured.
+
+### Step 0 — Establish a baseline (never skip)
+```bash
+# Get a clean, correct baseline number BEFORE changing anything.
+# Use onnxruntime_perf_test (ships with ORT) for apples-to-apples runs.
+onnxruntime_perf_test -e cpu   -r 200 -m times model.onnx   # CPU EP
+onnxruntime_perf_test -e cuda  -r 200 -m times model.onnx   # CUDA EP
+
+# Record: p50/p90/p99 latency, throughput, and a reference OUTPUT
+# vector. Every later step must reproduce this output within tolerance.
+```
+
+### Step 1 — Clean and check the model
+```bash
+pip install onnx onnxsim onnxruntime
+
+# (a) Validate the graph is well-formed
+python -c "import onnx; onnx.checker.check_model('model.onnx')"
+
+# (b) Simplify: fold constants, remove no-ops, collapse shape math.
+#     This alone often removes dozens of nodes and unblocks fusions.
+onnxsim model.onnx model_simplified.onnx
+
+# (c) Upgrade opset if old — many fusions (Attention) need opset >= 11/13
+python -c "import onnx; from onnx import version_converter as v; \
+  onnx.save(v.convert_version(onnx.load('model_simplified.onnx'), 17), \
+            'model_op17.onnx')"
+```
+
+### Step 2 — Fix the shapes (static beats dynamic)
+```bash
+# Dynamic batch/seq axes block CUDA Graphs and slow planning.
+# If you serve a fixed batch (e.g. micro-batch=16, seq=128), pin them.
+python -m onnxruntime.tools.make_dynamic_shape_fixed \
+  --dim_param batch --dim_value 16 \
+  --dim_param seq   --dim_value 128 \
+  model_op17.onnx model_fixed.onnx
+
+# If you truly need variable shapes, define a small set of buckets
+# (e.g. seq in {64,128,256}) and keep one session per bucket.
+```
+
+### Step 3 — Apply offline graph optimization (bake it in)
+```python
+import onnxruntime as ort
+
+so = ort.SessionOptions()
+so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+# Persist the optimized graph so production loads fast and deterministic:
+so.optimized_model_filepath = "model_optimized.onnx"
+# Run with the SAME EP you'll deploy on — fusions can be EP-aware:
+ort.InferenceSession("model_fixed.onnx", so,
+                     providers=["CUDAExecutionProvider"])
+# model_optimized.onnx now contains fused Attention/LayerNorm/Gelu etc.
+```
+
+### Step 3b — Transformer-specific optimizer (do this for BERT-family)
+```bash
+# The generic optimizer is conservative. The transformer tool applies
+# aggressive, transformer-aware fusions + optional FP16 conversion.
+python -m onnxruntime.transformers.optimizer \
+  --input  model_optimized.onnx \
+  --output model_bert_fp16.onnx \
+  --model_type bert \
+  --num_heads 12 --hidden_size 768 \
+  --float16                       # convert to FP16 in one shot
+
+# Verify the big fusions actually fired:
+python -m onnxruntime.transformers.optimizer --input model_bert_fp16.onnx \
+  --output /tmp/x.onnx --model_type bert --use_gpu --verbose
+# Look for: Attention, SkipLayerNormalization, EmbedLayerNormalization,
+#           FastGelu  → these should appear with non-zero counts.
+```
+
+### Step 4 — Precision: FP16, then INT8 if needed
+```python
+# FP16 (almost always worth it on GPU): done above via --float16,
+# or convert explicitly:
+from onnxconverter_common import float16
+import onnx
+onnx.save(float16.convert_float_to_float16(onnx.load("model_optimized.onnx")),
+          "model_fp16.onnx")
+
+# INT8 (only if FP16 isn't fast/small enough — needs calibration data):
+from onnxruntime.quantization import quantize_static, CalibrationDataReader
+# Provide ~100-500 representative samples via a CalibrationDataReader.
+# Prefer static quantization for latency; dynamic for quick CPU wins.
+quantize_static("model_fp16.onnx", "model_int8.onnx", calib_reader)
+```
+
+### Step 5 — Re-validate correctness (gate before perf)
+```python
+# Compare optimized output to the Step-0 reference. Fail closed.
+import numpy as np
+np.testing.assert_allclose(opt_out, ref_out, rtol=1e-2, atol=1e-2)
+# FP16/INT8 will drift — set tolerances per business metric, not 1e-7.
+# For ranking/fraud: check that top-k order / score deciles are stable,
+# not just raw float equality.
+```
+
+### Step 6 — Re-benchmark and pick the config
+```bash
+onnxruntime_perf_test -e cuda -r 500 -m times \
+  -i "cudnn_conv_algo_search|EXHAUSTIVE" model_bert_fp16.onnx
+# Sweep: FP32 vs FP16 vs INT8 × CUDA EP vs TRT EP × CUDA Graph on/off.
+# Choose the fastest config that passes Step-5 accuracy gates AND meets
+# your p99 SLA at the batch size you actually serve.
+```
+
+### Step 7 — Lock it for production
+```
+- Ship model_optimized/_fp16 (pre-optimized) so prod load is fast and
+  byte-identical across replicas.
+- Set so.graph_optimization_level = ORT_DISABLE_ALL at load time IF the
+  model is already optimized offline (avoids re-optimizing every boot).
+- Pin EP, provider options, thread counts, and shapes in config.
+- Save the perf + accuracy numbers as the regression baseline.
+```
+
+```
+ONE-LINE MENTAL CHECKLIST:
+  simplify → fix shapes → ORT_ENABLE_ALL (offline) → transformer
+  fusions → FP16/INT8 → validate → CUDA EP + IO binding + CUDA Graph
+  → re-bench → freeze.
+```
+
+---
+
+## 7.2.4 Inspecting What Optimization Did (don't fly blind)
+
+```python
+# 1. Dump the optimized graph and open it in Netron to SEE the fusions.
+so = ort.SessionOptions()
+so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+so.optimized_model_filepath = "optimized.onnx"   # <-- inspect this
+ort.InferenceSession("model.onnx", so, providers=["CUDAExecutionProvider"])
+
+# 2. Turn on the built-in profiler to get a per-op timeline (Chrome trace)
+so.enable_profiling = True
+# After runs, ORT writes onnxruntime_profile_*.json → open in
+# chrome://tracing. Shows per-kernel time + which EP ran each node.
+
+# 3. Confirm node placement: which ops went to CUDA vs fell back to CPU.
+#    CPU fallback in the middle of a GPU graph = hidden D2H/H2D copies =
+#    latency killer. Hunt these down and eliminate them.
+```
+
+```
+RED FLAGS in the optimized graph / profile:
+  - No "Attention" node      → biggest fusion didn't fire (opset/variant)
+  - "MemcpyToHost"/"MemcpyFromHost" nodes inside the graph → CPU fallback
+  - Many tiny kernels        → candidate for CUDA Graph capture
+  - Dynamic reshape per run   → shapes not fixed, planning overhead
+```
+
+---
+
+## 7.2.5 ONNX Runtime + CUDA Execution Provider — C++ GPU Serving
+
+This is the integration that matters for the in-process hot path in the
+C++ data-plane. The goal: **model runs on GPU, inputs/outputs stay on
+GPU, zero host copies per request.**
+
+### How the CUDA EP fits
+```
+ORT session is created with an ORDERED provider list:
+  providers = [CUDAExecutionProvider, CPUExecutionProvider]
+
+  ORT partitions the graph: every node the CUDA EP supports runs on GPU;
+  anything it doesn't support FALLS BACK to the CPU EP. Fallback inserts
+  Memcpy nodes (D2H/H2D) — these are the silent latency tax. Goal: keep
+  the ENTIRE hot-path graph on CUDA EP so zero copies are inserted.
+```
+
+### Provider options that actually matter
+```cpp
+OrtCUDAProviderOptionsV2* cuda_opts = nullptr;
+Ort::ThrowOnError(api.CreateCUDAProviderOptions(&cuda_opts));
+
+std::vector<const char*> keys = {
+    "device_id",                       // which GPU
+    "arena_extend_strategy",           // kNextPowerOfTwo: fewer reallocs
+    "cudnn_conv_algo_search",          // EXHAUSTIVE: best conv kernels
+    "do_copy_in_default_stream",       // 1: correctness w/ shared stream
+    "gpu_mem_limit",                   // cap arena so it won't OOM peers
+};
+std::vector<const char*> vals = {
+    "0", "kNextPowerOfTwo", "EXHAUSTIVE", "1", "8589934592" /*8GB*/
+};
+Ort::ThrowOnError(api.UpdateCUDAProviderOptions(
+    cuda_opts, keys.data(), vals.data(), keys.size()));
+```
+
+### Full in-process C++ session setup (data-plane hot path)
+```cpp
+#include <onnxruntime_cxx_api.h>
+#include <cuda_runtime.h>
+
+class OnnxGpuModel {
+    Ort::Env env_{ORT_LOGGING_LEVEL_WARNING, "dataplane"};
+    Ort::Session session_{nullptr};
+    Ort::MemoryInfo gpu_mem_{nullptr};   // CUDA pinned memory descriptor
+
+public:
+    explicit OnnxGpuModel(const std::string& model_path, int device_id) {
+        Ort::SessionOptions so;
+
+        // Model is ALREADY optimized offline (Section 7.2.3 Step 7),
+        // so disable re-optimization for fast, deterministic load.
+        so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+
+        // Few intra-op threads: GPU does the work, don't oversubscribe CPU.
+        so.SetIntraOpNumThreads(1);
+        so.SetExecutionMode(ORT_SEQUENTIAL);
+
+        // Attach CUDA EP (then CPU EP as last-resort fallback).
+        const auto& api = Ort::GetApi();
+        OrtCUDAProviderOptionsV2* cuda_opts = nullptr;
+        api.CreateCUDAProviderOptions(&cuda_opts);
+        const std::string dev = std::to_string(device_id);
+        const char* keys[] = {"device_id", "cudnn_conv_algo_search",
+                              "do_copy_in_default_stream"};
+        const char* vals[] = {dev.c_str(), "EXHAUSTIVE", "1"};
+        api.UpdateCUDAProviderOptions(cuda_opts, keys, vals, 3);
+        so.AppendExecutionProvider_CUDA_V2(*cuda_opts);
+        api.ReleaseCUDAProviderOptions(cuda_opts);
+
+        session_ = Ort::Session(env_, model_path.c_str(), so);
+
+        // MemoryInfo describing GPU-resident tensors for IO binding.
+        gpu_mem_ = Ort::MemoryInfo("Cuda", OrtArenaAllocator,
+                                   device_id, OrtMemTypeDefault);
+    }
+
+    // d_input / d_output are RAW DEVICE POINTERS already on the GPU,
+    // produced by the data-plane's CUDA transport (zero-copy).
+    void infer(float* d_input,  const int64_t* in_shape,  size_t in_dims,
+               float* d_output, const int64_t* out_shape, size_t out_dims) {
+        // Wrap existing device memory as ORT tensors — NO host copy.
+        Ort::Value in = Ort::Value::CreateTensor<float>(
+            gpu_mem_, d_input, numel(in_shape, in_dims),
+            in_shape, in_dims);
+        Ort::Value out = Ort::Value::CreateTensor<float>(
+            gpu_mem_, d_output, numel(out_shape, out_dims),
+            out_shape, out_dims);
+
+        // IO BINDING: bind GPU tensors directly; output written in-place
+        // on the GPU. This is what makes it truly zero-copy.
+        Ort::IoBinding binding(session_);
+        binding.BindInput (input_name_,  in);
+        binding.BindOutput(output_name_, out);
+
+        Ort::RunOptions ro;
+        session_.Run(ro, binding);   // runs on the CUDA EP / GPU stream
+    }
+
+private:
+    const char* input_name_  = "input";
+    const char* output_name_ = "output";
+    static int64_t numel(const int64_t* s, size_t n) {
+        int64_t p = 1; for (size_t i = 0; i < n; ++i) p *= s[i]; return p;
+    }
+};
+```
+
+### Why IO Binding is the whole point
+```
+WITHOUT IO binding (naive Session::Run with CPU tensors):
+  request → H2D copy inputs → GPU compute → D2H copy outputs → response
+  Two PCIe copies per call. For a 0.7 ms FAISS-like model, the copies
+  can cost MORE than the compute.
+
+WITH IO binding (BindInput/BindOutput on GPU tensors):
+  data-plane already has features in GPU memory (Layer 5 zero-copy) →
+  bind device pointers → GPU compute → output stays on GPU for the next
+  stage. ZERO PCIe copies in the hot path.
+
+This is exactly why the model lives IN-PROCESS in the C++ data-plane:
+shared GPU buffers flow model→model without ever touching host memory.
+```
+
+### Stream alignment with the data-plane
+```
+- Run ORT on the SAME CUDA stream the transport uses (or a stream you
+  synchronize against) so compute overlaps transfers correctly.
+- do_copy_in_default_stream=1 keeps any internal copies ordered on the
+  default stream — set it unless you fully manage streams yourself.
+- For multi-worker serving: ONE session can be called from multiple
+  threads (ORT sessions are thread-safe for Run), but give each worker
+  its own IoBinding + pre-allocated GPU output buffers to avoid sharing.
+```
+
+---
+
+## 7.2.6 INT8 Quantization for ONNX (when FP16 isn't enough)
+
+```
+Two modes:
+  DYNAMIC quantization  → weights INT8, activations quantized at runtime.
+     No calibration data. Easy. Best for CPU / lightweight models.
+  STATIC quantization   → weights AND activations INT8 via calibration.
+     Needs representative data. Best for GPU latency + max throughput.
+
+Static flow:
+  1. Collect 100-500 representative production samples.
+  2. Implement CalibrationDataReader to feed them.
+  3. quantize_static(fp16_model, int8_model, reader,
+                     quant_format=QDQ, per_channel=True)
+  4. Validate: accuracy drop must pass business metric (not raw MSE).
+
+GPU note: on CUDA/TensorRT EP, INT8 needs QDQ (QuantizeLinear/
+DequantizeLinear) format so the EP can fuse Q/DQ into INT8 GEMMs.
+Per-channel weight quant preserves accuracy far better than per-tensor.
+```
+
+---
+
+## 7.2.7 CUDA Graphs with ORT (squeeze out launch overhead)
+
+```
+For small-batch transformer/ranking models, kernel LAUNCH overhead can
+rival compute. CUDA Graph capture records the whole kernel sequence once
+and replays it as a single launch.
+
+Enable on the CUDA EP:
+  provider option "enable_cuda_graph" = "1"
+
+HARD REQUIREMENTS (or it silently won't help / will error):
+  - FIXED input shapes (this is why Section 7.2.3 Step 2 matters).
+  - Same GPU memory addresses each run → use IO binding with STABLE,
+    pre-allocated input/output buffers (don't realloc per request).
+  - First run "captures" the graph; subsequent runs "replay" it.
+
+Typical win: 3.5 ms → ~3.0-3.2 ms for a small BERT (launch-bound). The
+smaller and more kernel-heavy the model, the bigger the relative gain.
+```
+
+---
+
+## 7.2.8 CUDA EP vs TensorRT EP (which GPU EP to pick)
+
+```
+| Aspect            | CUDA EP                    | TensorRT EP                  |
+|-------------------|----------------------------|------------------------------|
+| Setup             | drop-in, no build step     | builds TRT engine (minutes)  |
+| Peak speed        | fast                       | usually fastest (compiled)   |
+| Dynamic shapes    | handles well               | needs opt profiles, harder   |
+| INT8/FP8          | INT8 via QDQ               | best calibration + FP8       |
+| Portability       | any CUDA GPU               | engine is GPU-arch specific  |
+| Cold start        | fast                       | slow (engine build/cache)    |
+| Fallback          | per-op to CPU EP           | unsupported sub-graph→CUDA EP |
+
+Rule of thumb:
+  - Start with CUDA EP. It's the integration above and needs no build.
+  - Move hot, shape-stable models to TensorRT EP for the last 10-30%.
+  - Cache TRT engines on local NVMe (trt_engine_cache_enable=1) so you
+    don't rebuild on every cold start (ties to Section 9 warm-up).
+  - You can stack them: providers=[TensorRT EP, CUDA EP, CPU EP] — TRT
+    claims what it can, CUDA EP catches the rest, CPU is last resort.
+```
+
+---
+
+## 7.2.9 DevOps: Building the ONNX Optimization Pipeline (raw → optimized)
+
+The manual steps in 7.2.3 are correct, but a human running them by hand
+is not reproducible, not auditable, and not safe for production. From a
+DevOps view, model optimization is a **build pipeline with the same
+discipline as a code build**: versioned input, deterministic stages,
+automated gates, signed output artifact.
+
+### The mental shift
+```
+Code pipeline:   source → compile → test → package → sign → registry
+Model pipeline:  raw.onnx → optimize → validate → benchmark → package
+                 → sign → model registry
+
+A model is just another build artifact. Treat the raw ONNX like source
+code and the optimized FP16/INT8 model like a compiled, signed binary.
+```
+
+### Pipeline topology (what runs where)
+```
+┌──────────────┐   push raw.onnx     ┌────────────────────────────────┐
+│ Model author │ ──── + metadata ──▶ │ Artifact store (S3/GCS/OCI)    │
+│ (DS / train) │                     │ raw/<model>/<version>/model.onnx│
+└──────────────┘                     └───────────────┬────────────────┘
+                                                     │ event/trigger
+                                                     ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ CI RUNNER #1: CPU stage (no GPU needed — cheap, parallelizable)       │
+│   simplify → opset upgrade → fix shapes → ORT_ENABLE_ALL (offline)    │
+│   → transformer fusions → FP16 convert → numeric self-check (CPU)     │
+│   Output: candidate_fp16.onnx + fusion report                         │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │ artifact handoff
+                                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ CI RUNNER #2: GPU stage (scheduled on a GPU node — the SAME arch as   │
+│   production: build for H100 on H100)                                 │
+│   CUDA EP correctness gate → (optional) INT8 calibrate → TRT engine   │
+│   build + cache → benchmark sweep (perf_test) → SLA gate              │
+│   Output: optimized.onnx (+ optional trt_engine.cache) + perf report  │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │ if all gates pass
+                                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ PACKAGE + SIGN + PUBLISH                                              │
+│   bundle(model + manifest + perf.json + accuracy.json) → cosign sign  │
+│   → push to MODEL REGISTRY as optimized/<model>/<version>            │
+│   → mark "staging"; promotion to "prod" is a separate gated step      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Why the CPU/GPU split matters (DevOps cost + correctness)
+```
+- CPU stage is hardware-agnostic and cheap → run it on normal CI runners,
+  fan out across many models in parallel.
+- GPU stage MUST run on the same GPU architecture you deploy to, because
+  CUDA Graph capture, cuDNN algo choice, and especially TensorRT engines
+  are architecture-specific. Build for H100 on an H100 runner.
+- Splitting keeps scarce GPU CI minutes spent only on what truly needs a
+  GPU (correctness + benchmark + TRT build).
+```
+
+### The pipeline as a single declarative spec
+```yaml
+# optimize.pipeline.yaml — input-driven, one model per run
+input:
+  model_uri: s3://models/raw/ranker/v7/model.onnx
+  model_type: bert            # drives transformer optimizer
+  num_heads: 12
+  hidden_size: 768
+  fixed_shapes: { batch: 16, seq: 128 }
+  target_gpu: h100            # selects GPU runner + TRT build target
+
+precision_candidates: [fp16, int8]   # pipeline tries each, picks best-passing
+
+gates:
+  accuracy:
+    dataset_uri: s3://datasets/ranker/validation_5k.parquet
+    metric: ndcg@10
+    max_relative_drop: 0.005          # <=0.5% NDCG loss allowed
+  performance:
+    batch_size: 16
+    p99_latency_ms_max: 10
+    min_throughput_qps: 1500
+  safety:
+    no_cpu_fallback_nodes: true        # fail if Memcpy nodes appear
+    require_fused_attention: true      # fail if Attention fusion missing
+
+output:
+  registry: oci://registry.internal/models/optimized
+  sign: true                           # cosign / sigstore
+  promote_to: staging                  # never auto-promote to prod
+```
+
+### What the pipeline runner actually executes (stage script)
+```python
+# optimize_pipeline.py — invoked by CI, fully non-interactive.
+# Each stage is idempotent and writes an artifact + a JSON report so the
+# whole run is auditable. Exit non-zero on ANY gate failure (fail-closed).
+
+def run(cfg):
+    raw   = fetch(cfg.input.model_uri)              # pull versioned input
+    ref   = compute_reference_outputs(raw, cfg)      # Step-0 baseline
+
+    # ---- CPU stage (hardware-agnostic) ----
+    m = simplify(raw)
+    m = upgrade_opset(m, 17)
+    m = fix_shapes(m, cfg.input.fixed_shapes)
+    m = graph_optimize_all(m)                        # ORT_ENABLE_ALL offline
+    m, report = transformer_optimize(m, cfg)         # fusion report
+    assert_gate(report.has_fused_attention,          # safety gate
+                cfg.gates.safety.require_fused_attention)
+
+    best = None
+    for prec in cfg.precision_candidates:            # try fp16, int8...
+        cand = to_precision(m, prec, calib=cfg.gates.accuracy.dataset_uri)
+
+        # ---- GPU stage (same arch as prod) ----
+        place = check_node_placement(cand)           # detect CPU fallback
+        assert_gate(not place.has_cpu_fallback,
+                    cfg.gates.safety.no_cpu_fallback_nodes)
+
+        acc  = evaluate_accuracy(cand, ref, cfg.gates.accuracy)
+        perf = benchmark(cand, cfg.gates.performance) # perf_test sweep
+
+        if acc.passed and perf.passed:
+            best = pick_better(best, cand, perf)     # keep fastest passing
+
+    if best is None:
+        fail("no precision candidate passed accuracy + SLA gates")
+
+    artifact = package(best, manifest=cfg, accuracy=acc, perf=perf)
+    sign(artifact)                                   # cosign
+    publish(artifact, cfg.output.registry, tag="staging")
+```
+
+### The manifest = provenance (audit + rollback)
+```json
+// Published ALONGSIDE the optimized model. This is what makes the
+// pipeline auditable and reversible.
+{
+  "model": "ranker", "version": "v7",
+  "source_raw_sha256": "ab12...",        // exact input that produced this
+  "pipeline_git_sha": "9f3c...",         // which pipeline code ran
+  "ort_version": "1.18.0",
+  "precision": "fp16",
+  "target_gpu": "h100",
+  "fixed_shapes": {"batch":16,"seq":128},
+  "fusions": {"Attention":12,"SkipLayerNorm":24,"FastGelu":12},
+  "accuracy": {"metric":"ndcg@10","baseline":0.812,"optimized":0.810},
+  "performance": {"p99_ms":8.4,"throughput_qps":1720,"cuda_graph":true},
+  "built_at": "2026-06-08T10:00:00Z",
+  "signature": "cosign:..."
+}
+```
+
+### Gating philosophy (the DevOps non-negotiables)
+```
+1. FAIL-CLOSED: any gate failure aborts the run. Never publish a model
+   that missed an accuracy or SLA gate "to unblock" someone.
+2. DETERMINISTIC: pin ORT version, CUDA/cuDNN version, opset, and shapes.
+   Same raw input + same pipeline SHA must produce byte-stable output.
+3. PROVENANCE: every optimized artifact traces to one raw SHA + one
+   pipeline SHA. No mystery models in prod.
+4. SEPARATE BUILD FROM DEPLOY: pipeline produces a SIGNED artifact tagged
+   "staging". Promotion to "prod" is a different, separately-approved
+   step (ties to canary in Section 12).
+5. REGRESSION BASELINE: store this run's perf+accuracy. Next version must
+   not regress without explicit sign-off.
+```
+
+### CI integration (where it plugs in)
+```yaml
+# .github/workflows/optimize-model.yml (sketch)
+on:
+  workflow_dispatch: { inputs: { model_uri: { required: true } } }
+  repository_dispatch: { types: [new-raw-model] }   # train job triggers it
+jobs:
+  cpu-stage:
+    runs-on: [self-hosted, cpu]
+    steps:
+      - run: python optimize_pipeline.py --stage cpu --config optimize.pipeline.yaml
+  gpu-stage:
+    needs: cpu-stage
+    runs-on: [self-hosted, gpu, h100]                # MUST match prod arch
+    steps:
+      - run: python optimize_pipeline.py --stage gpu --config optimize.pipeline.yaml
+      - run: cosign sign --key $COSIGN_KEY $ARTIFACT  # sign on success only
+```
+
+### Operating the pipeline (Day-2 concerns)
+```
+- CACHE TRT engines keyed by (model_sha, ort_ver, gpu_arch, shapes) so
+  re-runs skip multi-minute engine builds.
+- REPRODUCIBLE RUNNERS: pin the toolchain in a container image
+  (onnxruntime-gpu + tensorrt + cuda) — the pipeline runs INSIDE it so
+  every run uses identical tool versions.
+- QUARANTINE failures: a model that fails gates is pushed to a "rejected"
+  path with its report attached, not silently dropped.
+- OBSERVABILITY: emit per-stage duration, gate pass/fail, and final
+  perf/accuracy as metrics → dashboard model-build health over time.
+- SECURITY: validate the raw ONNX (onnx.checker) before loading; an ONNX
+  file is a deserialized graph and a malformed/hostile one is an input-
+  validation risk. Run the pipeline in an isolated, least-privilege job.
+```
+
+### Interview-ready one-liner
+```
+"We treat optimization as a build pipeline: versioned raw ONNX is the
+source, a containerized two-stage job (cheap CPU graph optimization, then
+GPU correctness + benchmark on the SAME arch as prod) produces a SIGNED,
+provenance-tagged optimized artifact. It's fail-closed on accuracy and
+p99 SLA gates, deterministic via pinned tool versions, and publishes to
+a model registry as 'staging' — promotion to prod is a separate canary."
+```
+
+---
+
 ## 7.3 TensorRT Build Process
 
 ```
