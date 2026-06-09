@@ -441,3 +441,452 @@ At Capital One, product leadership changed priorities 3 times in one quarter (di
 | No metrics | Quantify everything: weeks, %, dollars, TPS |
 | Passive victim of ambiguity | Show how YOU created structure from chaos |
 | Perfect outcomes only | Show obstacles, adjustments, and what you'd do differently |
+
+## Exec from OneNote'
+
+Introduction
+I’m Shailesh. I bring 25+ years of experience building distributed systems, data platforms, and high-performance production infrastructure, with the last several years focused deeply on AI systems engineering — especially large-scale inference, multi-model serving, GPU-aware platforms, and low-latency distributed AI workloads.
+
+My strongest area is building and optimizing production AI platforms where multiple models have to work together under strict latency, throughput, reliability, and cost constraints. I’ve worked on fraud-decisioning and identity platforms processing high transaction volumes, Siri-style conversational inference pipelines, and cyber-security inspection systems.
+
+At the Principal level, my focus is designing AI infrastructure where performance, reliability, cost, and security are built into the same architecture .
+Stories
+• CapitalOne Fraud Detection Platform
+        • Innovation, Influence, Strategy , Execution and Communication
+                ○ 3-Tier Fraud Platform with ultra low latency Hot and Warm Path
+        • Conflicts
+                ○ Enabling GuardRail in warn path for LLM
+        • Failure
+                ○ Wrong Capacity estimation for LLM infra 
+        • Difficult Issue
+                ○ Zero copy corruption
+        • Miscommunication, Cross team 
+                ○ Arrow schema mistmatch 
+        • Mentorship
+                ○ Building team of RUST developers
+• Apple Siri HomePod
+        • Innovation, Influence, Driving and Communication
+                ○ Unified Memory Architecture for multi-hop Siri Conversational pipeline
+        • Conflicts
+                ○ Ownership conflict for merging conversation stages 
+        • Failure
+                ○ Using Milvus as choice for Vector DB . Added filter model to filter traffic 
+        • Difficult Issue
+                ○ Fraud due to Rebuilding of IVF Indexes appending HSNW index 
+        • Mis Communication Cross team 
+                ○ Version mist match between Query and Document embedding models 
+        • Mentorship
+                ○ Teaching HPC style of programming using C++
+Delivery/Execution
+• Planning & Cadence
+        ○ Program with Goals, KPI , Scope , Timelines , DRIs
+        ○ Quarterly Roadmap with Milestone Plan for (2/4/6/ weeks) .
+        ○ OKR (Business + Technical) with RAID (Risk, Assumptions, Issues and Dependencies)
+        ○ Decision Records 
+• Scope Change and Re-baseline
+        ○ Impact Analysis
+        ○ Change Request Process
+        ○ Stake Holders Sign Off
+        ○ Re-Bassline Dates and Risks 
+• Dependencies ( Resource, Cross Team, Cross Org )
+        ○ Program Board with dependencies (Owners, Due Date , Risk Levels)
+        ○ Interface Contract , SLOs
+        ○ DRI and Escalation Ladder
+        ○ Weekly Status Check 
+        ○ Prioritization, Long Pole first , Low Hanging Items First 
+• Risk & Incidents 
+        ○ Incident register with detailed Root Case and impacts on Capacity, Timeline , Scope . Detailed Postmortem .
+        ○ Risk Level adjustment over Progress in Time 
+• Quality & Readiness
+        ○ Launch Readiness Checklist 
+        ○ Test Pans (Unit, Integration, Functional, Performance) .
+        ○ Observability and Monitoring Checklist i.e. logs/metrics/traces
+        ○ Support Readiness and PagerDuty
+        ○ Compliance and Safety
+                ○ Control Checklist (PCI, SOC 2 , GDPR)
+                ○ Audit Trails 
+• Resourcing
+        ○ Resource Capacity (Weekly Check) Plan and Skills Matrix
+        ○ Infrastructure Capacity and Budgeting 
+        ○ Contingency Planning
+        ○ PTO Callender
+        ○ Contract hiring 
+        ○ Adjustment of Milestone
+• Communication
+        ○ Stakeholders Map & Cadence (PM, Delivery, Infra, Finance, Legal , Support et.) . 
+        ○ Quarterly / Monthly Execution readouts 
+        ○ Call out on Incidents, Decision records .
+        ○ Weekly Status Report 
+        ○ Audience Targeting 
+• Q & A 
+        ○ 8–12 week plan to deliver X (goals/KPIs, milestones 2/4/6/8, DRIs, ADRs).
+Answer hints: State business + tech KPIs; break into milestones with DRIs; show RAID log; call out early decisions (ADRs); weekly RAG + single dashboard.
+        ○ Compliance change mid-quarter (EU): impact → change request → sign-off → re-baseline.
+Answer hints: Quantify impact (KPI/date/budget); RICE/MoSCoW reprioritization; stakeholder approvals (PM/Risk/Finance/Legal); update roadmap/OKRs/ADR; broadcast comms.
+        ○ Cross-org dependency is long pole; protect the date.
+Answer hints: Program board (owners/dates/risk); decouple via mocks/flags; contingency path; escalation ladder with decision options; weekly status with explicit asks.
+        ○ p95 latency regresses post-rollout; unclear business impact.
+Answer hints: Kill-switch thresholds + canary rollback; triage with logs/metrics/traces; SLO/error budget gating; blameless postmortem (timeline, 5-Whys, owner/dates); increase risk level; add CI perf gates.
+        ○ Pre-GA quality & readiness (tests, checklist, observability, support, compliance, resourcing).
+Answer hints: Acceptance thresholds + perf budgets; shadow/canary + rollback; observability checklist; Support runbooks + PagerDuty; PCI/SOC2/GDPR controls & audit trails; people/infra capacity aligned.
+        ○ Build capacity plan & staff critical path (skills matrix, infra/budget).
+        Answer hints: Map outcomes→skills; assign DRIs; FTE vs contractor mix; GPU/infra sizing with buffers; onboarding plan; weekly capacity review.
+        ○ Weekly comms system: team → XFN → exec.
+Answer hints: 5-bullet update (Goal, Progress vs Plan, KPI deltas, Risks, Asks); shared dashboards; ADRs for decisions; avoid “green-until-red”.
+
+        
+People Management
+• Team Topology
+        • Team Charter :- Mission, Customers , Success Matrix
+        • Org Map and Responsibility Matrix (Platform , Product , Enablement)
+        • Skill Metrix
+                • Q1: Walk me through your team charter—mission, customers, success metrics—and how that drives Platform/Product/Enablement split.
+                        • Answer hints: Mission tied to business outcome (e.g., conversion↑, cost/tx↓); name customers; success KPIs (p95, cost/tx, incidents, TTI); Platform (serving/observability), Product pods (RAG/agents), Enablement (SDK/guardrails); API+SLO contracts; result = fewer stalls, faster onboarding.
+                • Q2: How do you use a skills matrix to staff DRIs and close capability gaps?
+                        • Answer hints: Map streams → skills → DRIs; identify gaps (e.g., quantization); short-term contractor + pairing; checkpoint by sprint; measurable impact (e.g., INT4 safely, -30% cost, p95 < 200ms).
+
+• Growth
+        • Individual Development Plan with Monthly/Quarterly outcomes .
+        • Delegation Ladder and Pairing (You + Leads + Seniors ) . Vision/ Guardrails 
+        • Mentorship and Sponsorship Roster .
+                • Q1: How do you run IDPs with monthly/quarterly outcomes that lead to promotions?
+                        • Answer hints: IDP goals linked to KPIs; monthly demos, quarterly ship; evidence (ADRs, dashboards); influence & reliability signals; promotion dossier anchored in outcomes.
+                • Q2: Describe your delegation ladder (you → leads → seniors) and use of mentorship vs sponsorship.
+                        • Answer hints: You set guardrails/vision; leads drive programs/RAID; seniors own components/DRIs; mentorship for skill, sponsorship for scope/visibility; scope expansions → title/comp readiness.
+                        
+• Culture and Inclusion
+        • Meeting Hygiene :- Agenda , Rotating Facilitation
+        • Buddy System / Shadowing / Participation Equity 
+        • Measure inclusion :- Speaking Time , Skip level pulses .
+        • Psychologic Safety :- Blame free , Critique Ides (Not People) , Condor with Care (Clear and Kind), Honest mistakes vs Bad Behaviors 
+        • Recognition Cadence 
+                • Q1: What inclusive meeting practices do you enforce?
+                        ○ Answer hints: Pre-reads/agenda, rotating facilitation, time-boxed rounds, buddy/shadowing; decisions documented; shorter meetings, higher participation.
+                • Q2: How do you measure psych safety and maintain a recognition cadence?
+                        ○ Answer hints: Speaking-time review, skip-level pulses; blameless PMs, “critique ideas, not people,” clear & kind feedback; monthly spotlights tied to values; metrics: pages↓, pulse scores↑.
+                • 
+• Performance Management
+        • Performance Narrative Template :- Exceptions by Role and Level , Outcomes and Evidence linked , weekly checkpoints 
+        • Improvement Plan :- Milestones , Enablement , Review Cadence , weekly checkpoints 
+        • Feedback Log 
+                • Q1: Example of a performance narrative tied to role/level expectations.
+                        • Answer hints: Rubric-aligned competencies; evidence links (ADRs, KPIs, partner quotes); weekly checkpoints; decision (meets/strong/exceeds) with next-scope plan.
+                • Q2: How do you run an improvement plan (PIP last resort) humanely?
+                        • Answer hints: Expectations memo (outcomes/behaviors), milestones + enablement, weekly reviews; objective criteria; outcomes: improvement or fair transition with HR.
+                
+• Resilience
+        • Burnout Prevention , Individual Growth , Inclusion , Psychological Safety 
+                • Q1: What systems prevent burnout while sustaining growth?
+                        • Answer hints: On-call hygiene/runbooks, error budgets gate releases, meeting budgets, rotation of high-intensity streams; results: pages/person↓, cycle time↑.
+                • Q2: How do you spot early burnout signals and intervene?
+                        • Answer hints: Signals: after-hours load, cycle time creep, missed 1:1s; actions: re-score with RICE, reduce WIP, shift staffing, protect focus time; recovery tracked over 1–2 sprints.
+                
+• Conflict Resolutions
+        • Conflict classification , Personality vs Tech 
+        • Alignment n Shared Goal and Constraint 
+        • Mediation notes with Options and Experiments 
+        • Interest based negotiations and Nonviolent communication 
+                ○ Q1: Resolve a personality vs technical conflict.
+                        ○ Answer hints: Classify conflict; restate shared goals/constraints; time-boxed experiment; ADR with revisit date; coach behaviors; “disagree & commit.”
+                ○ Q2: Use interest-based negotiation / NVC to reach agreement.
+                        ○ Answer hints: Surface needs behind positions; propose options addressing both (e.g., on-call simplicity + quality gains); phased rollout + observability; durable alignment.
+                
+• Communication and Leadership Cadence 
+        • Communication on items from Delivery
+                ○ Q1: What is your weekly communication system (team → XFN → exec)?
+                        ○ Answer hints: 5-bullet update (Goal, Progress vs Plan, KPI deltas, Risks, Asks); one shared dashboard; decisions captured as ADRs; avoids “green-until-red.”
+                ○ Q2: Example where cadence prevented a surprise.
+                        ○ Answer hints: Early metric drift flagged; kill-switch/canary; fix, re-measure, resume; document in ADR; zero customer impact.
+                
+                
+Product/Program Collaboration
+• Problem Framing
+        • Problem Statement :- User Pain, Business Impact , Constraint etc .
+        • KPI Tree , Assumptions and Constraint
+        • Stakeholder map (PM, Tech, Infra, Financ , Support etc.)
+• Discovery
+        • Current State Doc :- Architecture , Data Flows , Constraint etc.
+        • Research Brief :- User/Stakeholder interviews , log analysis , Support tickets 
+        • Areas of improvement and Funnel analysis (5 Why)
+        • Opportunity sizing 
+• Proposal
+        • PRD or RFC 
+        • Option comparison table (Option A/B/C with Cost, Latency, Risk, Time-to-ship).
+        • ADR (Architecture / Decision Record) with recommendation
+        • Draft rollout / launch plan (canary, shadow, regional)
+        • Budget / capacity estimate
+        • Stakeholder sign-off (PM, Eng, DS, Risk/Legal, Finance)
+• Execution
+        • Items from Delivery
+• Measurement
+• Change Management
+        • Scope Change and Re-baseline from Delivery section
+Project Management
+○ Management Challenges 
+        ○ Scope creep → OKRs per pillar; Architecture Council gate.
+        ○ Cost overruns → FinOps dashboards, per-model budgets, autoscale/rightsizing.
+        ○ Quality regressions → pre-/post-deploy evals; feature flags; shadow tests.
+        ○ Security incidents → mandatory guardrails, DLP, audit logging by default.
+○ Budget & FinOps
+        ○ FP&A: Workday Adaptive Planning, Anaplan, Pigment, Mosaic. WorkdayAnaplan IncPigmentMosaic
+        ○ Cloud cost: CloudZero (unit economics, cost per feature/customer), VMware Tanzu CloudHealth (multi-cloud cost mgmt). CloudZeroVMware
+        ○ Monthly Cost Reviews: per-pillar unit cost and capacity targets.
+○ Resource Management 
+○ Quarterly Architecture Reviews (AAR): team-pillar deep dives; approve standards.
+○ SLO/SLA Baselines: per service; green/yellow/red with auto rollbacks.
+○ Security Gates: pre-prod safety eval, PII redaction checks, model card updates.
+○ Hiring / HRIS / ATS
+        ○ HRIS: Workday (HCM), BambooHR (SMB). ATS: Greenhouse, Lever. Know what they track and how you partner with HR/recruiting. Team Topologies+1manager-tools.comHarvard Business Impact
+○ Performance & engagement
+        ○ Lattice, Culture Amp for reviews, 1:1s, pulse/engagement, and calibration workflows. LatticeCulture Amp
+○ OKRs / strategy execution
+        ○ WorkBoard, Quantive (formerly Gtmhub), Microsoft Viva Goals—how to cascade objectives and run a cadence. WorkdayBambooHRGreenhouse
+Engineering delivery & incidents
+        • PagerDuty, FireHydrant—on-call, runbooks, stakeholder comms, retros. PagerDutyFireHydrant
+        • Delivery analytics often tie back to DORA metrics. Dora
+○ Competition Roadmap 
+○ Management Resources 
+        • The Manager’s Path — day-to-day mechanics of tech leadership. O'Reilly Media
+        • An Elegant Puzzle — scaling systems, teams, and org mechanics. press.stripe.com
+        • Radical Candor — practical feedback culture. Radical Candor
+        • High Output Management — timeless ops & management fundamentals. Amazon
+        • Team Topologies — org design for flow. Team Topologies
+        • Measure What Matters — OKRs as an operating system (use judiciously). What Matters
+        • https://www.manager-tools.com/manager-tools-basics
+○ Frameworks & Tools
+        • RICE — Prioritization scoring: Reach × Impact × Confidence ÷ Effort to rank ideas/features.
+        • RACI — Responsibility matrix: Responsible, Accountable, Consulted, Informed roles for each task/decision.
+        • ADRs — Architecture/Decision Records: short, versioned docs capturing a decision, alternatives, and why/when.
+        • CCB — Change Control Board: forum that reviews/approves significant scope or design changes.
+        • PERT — Program Evaluation & Review Technique: estimates using optimistic/likely/pessimistic times to model schedules.
+        • PACT — Consumer-driven contract testing (e.g., Pact): verifies producer/consumer services honor their API contracts.
+        • RAID — Program log of Risks, Assumptions, Issues, Dependencies tracked with owners/dates.
+        • SCQA — Narrative framing: Situation, Complication, Question, Answer for clear, logical storytelling.
+        • BLUF — Bottom Line Up Front: lead with the conclusion/ask, then provide supporting detail.
+        • JTBD — Jobs To Be Done: product lens focusing on the user’s underlying “job” they’re hiring a solution to accomplish.
+
+STAR
+
+Story 1 – Capital One – Difficult Customer & GenAI Chatbot (Customer Obsession)
+Category: Story 1 – Difficult Customer / Customer Obsession
+Theme: RAG chatbot rollout for a very demanding Ops leader; GenAI, RAG, observability, data quality.
+S – Situation
+Capital One’s credit card support center was under pressure: long handle times, high transfer rates, and senior operations leadership was skeptical of “chatbot hype” due to a failed earlier bot. You were asked to lead a new LLM + RAG agent to deflect call volume for complex “fee, dispute, and rewards” questions. The Ops VP was openly hostile, citing prior bad CX and hallucinations.
+        • ○ Often customers bypassed the automated system by saying “agent” and directly sought live agent help.
+        • ○ Agents spent a lot of time manually searching through multiple tools (wikis, SharePoint, PDFs, policy docs) to answer even routine questions on products, fees, and policies.
+        • ○ The cost of the solution was high—both due to agent handle time and multiple model / platform teams maintaining separate stacks (NLP, rules engine, IVR, web chat).
+        • ○ New feature or policy rollouts required coordination across several teams (NLP, UI, backend services), making time-to-market for changes very slow.
+        • ○ There was no end-to-end explainability or observability—it was hard to see which intent fired, what knowledge source was used, and why the system failed for a given user.
+        • ○ Previous “chatbot” attempts had damaged stakeholder trust; Operations leaders were skeptical about another AI initiative unless it clearly improved CSAT and deflection.
+
+T – Task
+Own the end-to-end design and rollout of the GenAI chatbot:
+        • Prove safe, grounded answers using enterprise knowledge bases.
+        • Hit target of 15–20% self-service deflection in 3 months.
+        • Win over the skeptical Ops VP and frontline managers by showing reliability, not just demos.
+A – Action
+        • Designed a hybrid RAG + multi-agent workflow using LangGraph, Bedrock/OpenAI, and OpenSearch/PGVector, with:
+                ○ Tools for policy lookup, fee calculators, and account-agnostic flows.
+                ○ JSON-schema outputs (Pydantic) to keep responses structured and controllable.
+        • Worked closely with Ops to curate the source-of-truth KB:
+                ○ Flagged conflicting docs, outdated policies, and missing flows.
+                ○ Added metadata tags (product, region, channel) to improve retrieval precision.
+        • Implemented AI observability:
+                ○ OpenTelemetry traces, LangSmith runs, plus dashboards for: groundedness, escalation rate, latency, and hallucination flags.
+                ○ Weekly review with Ops on real transcripts and error cases.
+        • When the Ops VP wanted “full launch to 100% traffic” after a strong POC, you pushed back:
+                ○ Proposed a phased rollout (5% → 25% → 50%) with guardrails and auto-escalation thresholds.
+                ○ Backed with data: what failure modes might look like at scale and how we’d detect/mitigate.
+R – Result
+        • Within 8–10 weeks:
+                ○ ~22% deflection on eligible intents,
+                ○ ~35% reduction in manual handle time on calls that started with the bot,
+                ○ “Unhelpful / misleading” responses cut to low single digits through RAG + guardrails.
+        • Ops VP became a champion; the earlier “failed bot story” was replaced by this success, and you were asked to replicate the pattern for other domains (disputes, loans).
+Covers keywords:
+        • Difficult customer, Went above & beyond, Missed expectation / recovery, Prioritizing customers, Customer wanted X but needed Y, Pushing back on customer, Delivering bad news, Most impactful customer win
+
+Story 2 – Apple – Ownership & Big Delivery Under Pressure (LLM Search & Reco)
+Category: Story 2 – Ownership & Big Delivery Under Pressure
+Theme: Siri search/recommendation pipeline with LLM augmentation under hard launch deadline.
+S – Situation
+At Apple, Siri’s knowledge-graph search + recommendation stack was missing relevance targets ahead of a major OS release. A new LLM-augmented query understanding and neural re-ranking pipeline was prototyped, but the project was behind schedule, ownership was unclear, and multiple teams (search, KG, personalization) pointed fingers.
+Situation :- Siri’s search and recommendation experience was falling short of internal quality targets ahead of a major OS release.
+        • ○ Existing pipelines relied heavily on keyword / BM25 search and classic ML rankers, which struggled with complex, conversational, or ambiguous queries.
+        • ○ A new LLM-augmented query understanding + neural re-ranking prototype existed, but lived as a research POC with fragile scripts and no production readiness.
+        • ○ Multiple teams were involved—Search, Knowledge Graph, Personalization, Infra—and ownership for “end-to-end delivery” was unclear, leading to delays and finger-pointing.
+        • ○ Latency budgets for Siri were strict (multi-device, global footprint, voice UX), so naive LLM integration risked breaking p95 latency SLOs.
+        • ○ Leadership had committed to relevance improvements in this OS cycle, so there was a firm deadline with high visibility, but the project timeline was already slipping.
+        • ○ On-call teams lacked clear dashboards or metrics for the LLM-assisted pipeline, making it risky to deploy something that couldn’t be properly monitored in production.
+
+T – Task
+Step up as the de facto technical owner and:
+        • Stabilize and productionize the LLM-assisted search pipeline.
+        • Hit relevance and latency SLOs in time for the OS launch.
+        • Coordinate 3–4 cross-functional teams in ~12 weeks.
+A – Action
+        • Took end-to-end ownership:
+                ○ Mapped all components: query logs → embeddings → KG search → LLM re-ranker → final answer.
+                ○ Identified the critical path and removed nonessential “nice-to-haves” from v1.
+        • Re-architected the pipeline:
+                ○ Introduced hybrid retrieval (BM25 + semantic + KG) feeding into a cross-encoder re-ranker.
+                ○ Used a smaller, distilled LLM for re-ranking to meet latency targets.
+        • Built robust data & evaluation loops:
+                ○ Offline: curated eval sets from query logs by intent, language, and device type.
+                ○ Online: A/B tests with guardrails for latency and click-through degradation.
+        • Implemented observability and SLO tracking:
+                ○ Exposed metrics (p50/p95 latency, recall@k, click-through) into unified dashboards.
+                ○ Defined on-call runbooks and error budgets with the platform team.
+        • Negotiated scope with Product:
+                ○ Pushed back on lower-priority personalization features that risked latency.
+                ○ Kept v1 focused on “core answers right, fast, and safe”.
+R – Result
+        • Delivered the pipeline on time for launch.
+        • Achieved:
+                ○ ~12–15% lift in top-1 answer precision,
+                ○ p95 latency within SLO despite LLM re-ranking,
+                ○ Significantly fewer “no answer” / generic responses.
+        • Leadership recognized you as the technical owner for Siri’s LLM-augmented search and reused the architecture for other verticals.
+Covers keywords:
+        • Extreme ownership, Impossible deadline, Many priorities / juggling, Took over failing project, Outside responsibility, High-pressure delivery, Team falling behind, Most important project
+
+Story 3 – Capital One – Ambiguity, Innovation & LLM Platform (Training + Inference)
+Category: Story 3 – Ambiguity, Problem-Solving & Innovation
+Theme: Designing a multi-tenant LLM training + inference platform in a very ambiguous environment.
+S – Situation
+Capital One wanted to move from ad-hoc LLM POCs on Bedrock/OpenAI to a first-class internal LLM platform: multi-tenant, GPU-efficient, and compliant. Requirements were vague: some teams wanted fine-tuning, others only retrieval-based inference; budget and GPU allocation were contested; no one had a clear reference architecture.
+Situation :- Capital One was seeing a rapid increase in GenAI POCs across lines of business, but had no unified LLM platform.
+        • ○ Different teams were separately calling external APIs (OpenAI/Bedrock) or spinning up their own GPU stacks, leading to duplicated effort, inconsistent guardrails, and rising costs.
+        • ○ Requirements were ambiguous and conflicting: some groups wanted full fine-tuning and training, others only low-latency inference and RAG; security and compliance had strong opinions but no standard patterns yet.
+        • ○ GPU resources (on-prem / cloud) were limited and expensive; there was no shared mechanism for scheduling jobs, tracking utilization, or enforcing cost governance across tenants.
+        • ○ There was no “golden path” for data → training → evaluation → deployment; teams reinvented pipelines and MLOps patterns for each use case.
+        • ○ Observability for training and inference was ad-hoc: different teams used different tools (logs, homegrown dashboards, basic CloudWatch metrics) with no unified view for leadership.
+        • ○ Leadership wanted a clear platform strategy that balanced experimentation speed with compliance, performance, and predictable cost—but nobody had yet defined or owned that architecture.
+
+T – Task
+Create an end-to-end GenAI platform architecture and deliver the first working slice:
+        • Support both training (fine-tuning / PEFT) and high-throughput inference.
+        • Provide observability, cost governance, and guardrails.
+        • Reduce per-use-case reinvention of pipelines and infra.
+A – Action
+        • Ran discovery sessions with product, platform, security, and data teams to clarify:
+                ○ What models (LLAMA, Mistral, proprietary) and sizes they actually needed.
+                ○ Which workloads truly required fine-tuning vs prompt/RAG solutions.
+        • Designed a control-plane / data-plane architecture:
+                ○ Data-plane: GPU clusters with Kubeflow Training Operator, KFServing/KServe, vLLM/TensorRT-LLM, continuous batching, and quantization for inference.
+                ○ Control-plane: central APIs for job submission, model registry integration, config-as-code, and chargeback.
+        • Implemented a prototype pipeline:
+                ○ Used LoRA/QLoRA fine-tuning via PyTorch + DeepSpeed on curated data from Databricks (Bronze/Silver/Gold).
+                ○ Deployed fine-tuned models to vLLM with dynamic batching, KV cache tuning, and OpenTelemetry metrics.
+        • Built AI observability + cost dashboards:
+                ○ Training: TFLOPs/GPU, $/step, throughput, convergence metrics.
+                ○ Inference: tokens/sec, cost per 1k tokens, latency histograms, model utilization by team.
+        • Simplified complexity:
+                ○ Codified “golden paths”: RAG-first for many use cases, fine-tuning only where necessary.
+                ○ Published reference templates (YAML, notebooks, FastAPI wrappers) so teams could onboard quickly.
+R – Result
+        • Platform reduced time-to-first-POC for new teams from months to weeks.
+        • Achieved 30–40% lower inference cost via quantization + continuous batching without violating p95 latency.
+        • Leadership adopted your architecture as the standard GenAI platform roadmap.
+Covers keywords:
+        • Worked with no clear direction, High ambiguity, Saw hidden problem, Designed new solution / innovation, Data-driven decision, Incomplete info decision, Challenged status quo, Simplified complex system
+
+Story 4 – Apple – Leadership, Conflict & Influence (Privacy vs Data for LLM/RAG)
+Category: Story 4 – Leadership, Conflict & Influence
+Theme: Conflict between ML team and Privacy/Legal over what data can be used for LLM/RAG personalization & observability.
+S – Situation
+For Siri’s LLM-augmented personalization and RAG flows, your team wanted to leverage richer query logs and device telemetry to improve relevance, and more detailed logs for LLM observability. The Privacy and Legal teams pushed back hard on logging and data retention, worried about identifiable patterns and regulatory exposure. Product was stuck between “better personalization” and “risk”.
+Situation :- Apple wanted to enhance Siri’s relevance and personalization by using LLMs and RAG over richer logs and device telemetry.
+        • ○ The ML/search teams saw an opportunity to improve results by leveraging more detailed query logs, context signals, and click/engagement data for both training and online evaluation.
+        • ○ Privacy and Legal teams, however, were extremely cautious about any central logging that could inadvertently capture sensitive or identifying patterns, especially for EU regions and child accounts.
+        • ○ Observability for the new LLM/RAG flows required some level of request tracing, error logging, and feature inspection, which seemed at odds with strict privacy constraints.
+        • ○ Product managers were caught in the middle: they wanted better Siri experiences and more robust metrics, but could not risk shipping anything that might violate Apple’s privacy commitments.
+        • ○ Discussions often stalled: ML engineers felt blocked by “privacy red tape”, while Privacy/Legal felt ML was pushing for “unnecessary” data collection.
+        • ○ Without a clear compromise, there was a real risk that key LLM-augmented features would slip or ship with weak observability, making it hard to maintain or improve them after launch.
+
+T – Task
+Influence cross-functional partners to find a balanced design:
+        • Maintain strong relevance and debug-ability for the LLM/search system.
+        • Respect strict privacy constraints (especially for EU/child accounts).
+        • Avoid delaying roadmap items due to gridlock.
+A – Action
+        • Facilitated multi-team workshops:
+                ○ Brought in ML, Privacy, Legal, Security, and Product to map user journeys and data flows end-to-end.
+                ○ Separated “must-have signals for quality” from “nice-to-have but risky” logging.
+        • Proposed a tiered data strategy:
+                ○ On-device aggregation + federated signals for some personalization features.
+                ○ Differentially private summaries and heavily-aggregated metrics for observability.
+                ○ Strict redaction / hashing for sensitive fields before logs reached central systems.
+        • Negotiated guardrails and controls:
+                ○ Short retention windows and regional data residency for certain logs.
+                ○ Config flags to disable advanced telemetry for specific geos or user segments.
+                ○ Clear documentation for “what is collected and why”.
+        • Created shared dashboards:
+                ○ Showed that even with constrained data, we could still measure relevance, latency, and error rates.
+                ○ Built trust by demonstrating how we detect and correct quality regressions without user-level raw data.
+        • Coached junior engineers on how to discuss these trade-offs with non-technical stakeholders.
+R – Result
+        • Reached an agreement that allowed your team to ship LLM-augmented features without delays, while satisfying Privacy/Legal.
+        • The pattern (tiered data, on-device aggregation, strict retention) became a template for future ML/LLM projects.
+        • You were seen as a bridge between engineering and compliance, not just a “model person”.
+Covers keywords:
+        • Conflict with stakeholder, Influenced without authority, Disagreed with manager/stakeholder, Convincing team / getting buy-in, Coaching / mentoring, Giving hard feedback (on risk), Aligning misaligned teams
+
+Story 5 – Symantec – Failure, Risk & Learning (Security ML Model & False Positives)
+Category: Story 5 – Failure, Risk, Ethics & Learning
+Theme: New deep-learning phishing model for web security causing harmful false positives; you own the mistake and fix.
+S – Situation
+At Symantec, you led development of a new deep-learning URL/page-text model (char-CNN/LSTM/transformer) to detect phishing and malicious sites from web telemetry. Early offline metrics looked fantastic (high recall, strong AUC), so the team pushed to roll it into an inline detection path. Shortly after limited rollout, several large enterprise customers complained about legitimate login portals being blocked, disrupting their business.
+Situation :- At Symantec/BlueCoat, you led development of a new deep-learning model to detect phishing and malicious sites from large-scale web proxy telemetry.
+        • ○ The existing rules + reputation-based system had good precision but missed newer, fast-changing phishing patterns, so leadership wanted a modern deep learning model (char-CNN/LSTM/transformer).
+        • ○ Offline experiments on historical data showed impressive metrics (high recall, strong AUC), creating optimism that this model could significantly boost protection.
+        • ○ Under pressure to differentiate the product and close competitive gaps, there was a push to move the model quickly into an inline blocking path, not just analysis mode.
+        • ○ Evaluation focused heavily on aggregate metrics; customer-specific validation sets and real-world “good” login patterns were underrepresented in the training/validation pipeline.
+        • ○ The team rolled the model out in a limited but real traffic path, with partial safeguards—but without a fully mature shadow deployment and rollback framework.
+        • ○ Shortly after rollout, large enterprise customers reported that legitimate login portals and internal web apps were being mistakenly blocked, causing business disruption and escalations to executive level.
+
+T – Task
+Own the failure, minimize customer impact, and rebuild trust while fixing the model and process:
+        • Diagnose why the model behaved differently in production.
+        • Reduce false positives to acceptable levels.
+        • Put processes in place so this kind of incident doesn’t repeat.
+A – Action
+        • Immediately recommended rolling back the model from blocking mode to shadow mode:
+                ○ Communicated transparently with Product and Support: what happened, what we know, what we’re doing.
+        • Led a post-mortem with detailed analysis:
+                ○ Discovered training data bias (over-representation of certain “login-style” templates from previous campaigns).
+                ○ Realized that some URLs mis-labeled in historical data caused the model to over-weight particular lexical patterns.
+        • Built a more robust evaluation framework:
+                ○ Constructed customer-specific validation sets from their domains and known good/bad traffic.
+                ○ Added business-critical whitelists and tiered decisioning: model → reputation DB → policy rules.
+        • Retrained and re-integrated the model:
+                ○ Cleaned labels, added harder negative examples, and introduced calibrated thresholds per segment.
+                ○ Deployed it first in monitor-only mode with rich telemetry logs to compare old vs new decisions.
+        • Documented lessons learned:
+                ○ Mandatory customer-representative datasets before inline deployment.
+                ○ Requirement: run models in shadow mode for N weeks and pass drift/fp criteria before gating real traffic.
+                ○ Shared the learning with other ML teams to prevent similar issues.
+R – Result
+        • False positives for those customers dropped to below previous baselines after retraining and gating.
+        • Customers appreciated transparent communication and the speed of rollback + fix; no major churn.
+        • The new deployment and evaluation policies became standard practice across multiple security products.
+        • You had a strong, honest “failure story” showing ownership, ethics, and learning.
+Covers keywords:
+        • Major failure, Biggest mistake, Risk that went wrong, Missed goal / deadline (quality goal), Critical feedback received, Not proud of performance, Tough ethical decision (rollback, owning impact), Admitting you were wrong
+
+
+Project :- Conversational service backend API for C1 CardTech team to help Customer and Agents 
+        • Problem :-  Capital one has the Legacy Conversation API build with legacy NLP solutions which was not working very well and have an underlying issues 
+                ○ Often customer bypass the automated system and seek and live agent help 
+                ○ Agent used to take lot of time to find the relevant information on Products and Policies to answer customer queries , 
+                ○ Cost of the solution was too high accounted for both Agent time and multiple model teams .
+                ○ New feature rollout was very time consuming due to muti team dependencies 
+                ○ No end to end Explainability . 
+        • Business Objective :- Build the chatbot for C1 customer support with following objectives :- 
+                ○ Reduce the tripping from automated system to Agents by 50 % in Phase-1 
+                ○ Reduce the response time by providing enhanced Assistant to agents from 1-3 min to 10-30 sec
+                ○ Reduce operation cost by reorganizing the teams and services .
+Q & A
+• Where do you see technology going in next 3/5 years 
+• What is the next big thing after GenAI
+
