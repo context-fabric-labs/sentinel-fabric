@@ -874,7 +874,10 @@ storage latency consistency
 
 Story summary:
 
-In a Sentinel-style fraud platform, the model and FAISS index were optimized during steady-state inference, but rollout/recovery was slow because model artifacts and vector indexes took minutes to load during pod restart. This reduced available capacity, increased gateway queue depth, and caused p99 risk during deployment. I decomposed startup into model load, index load, CUDA warmup, readiness, and traffic admission. The evidence showed the GPU was idle while artifacts loaded. The fix was to pre-stage model and FAISS index on local NVMe, use readiness only after warmup, and coordinate with storage/platform teams on NVMe throughput, queue depth, filesystem behavior, and caching strategy.
+In a Sentinel-style fraud platform, the model and FAISS index were optimized during steady-state inference,
+ but rollout/recovery was slow because model artifacts and vector indexes took minutes to load during pod restart. 
+ This reduced available capacity, increased gateway queue depth, and caused p99 risk during deployment. 
+ I decomposed startup into model load, index load, CUDA warmup, readiness, and traffic admission. The evidence showed the GPU was idle while artifacts loaded. The fix was to pre-stage model and FAISS index on local NVMe, use readiness only after warmup, and coordinate with storage/platform teams on NVMe throughput, queue depth, filesystem behavior, and caching strategy.
 
 Sandisk relevance:
 
@@ -1049,4 +1052,121 @@ Your preparation priority should remain:
 
 For Sandisk, your goal is not to become a hardware engineer.
 
-Your goal is:
+======
+
+
+Execution
+
+Situation :- 
+	1. 	Big projects with cross-org dependencies
+		Theme :- Full SDLC/ Ownership
+		Story :- 
+			1 Year of CapitalOne Fraud detection Platform  
+			Action:-
+				1. Northstar architecture with PRD and TDD
+				2. OKR, Roadmap and Prioritization
+				3. Risk and dependancies . Backup and Contengency plan . 
+				4. Epic and Stories .
+				5. Daily standup , Bi-Weekly/Monthly status .
+				6. Execuative communication 
+				Result :- 
+					1. Each quarter shipped an independently valuable milestone i.e. Hot, Warm and Cold Path
+					2. Five teams stayed aligned on stable contracts; no milestone slipped the critical path.
+					Impact :- 
+						1. Reduced Infra cost to 1/3, saving about 20 M per year
+						2. Saving of about 45 Million for first year .
+						3. Lesser prod incidents and quick triage cmpared to legacuy counterpart
+						Questions:-
+							1.	How do you build a technical roadmap for an infrastructure platform serving 20+ teams?"
+							2.	You have a 2-year infrastructure modernization. How do you structure it?"
+							3.	How do you sequence work with dependencies across 5 teams
+
+	2.	Ambiguity / Unclear requirements / Difficult Target / Owwenership
+		Story :- 
+			Siri redesign for HomePod in one quarter with 300 ms latency budgets . No clear requirements on use cases and underlying tools and services.
+			Action:-
+				1. Interview stakeholders which are Product BA to list all praobable use cases and sucess metrics
+				2. breaking each use case into required Inputs, service calls, 
+				3. Figured out the gaps and riskest items for assumptions , kickstart SPIKE for them immidetly . 
+				4. Prioratize use cases with given contraint and alogned with stakeholders after discussion
+				5. TDD with phases to accomodate incremental use cases per qurter.
+				6. Signed Off 
+				Result :- 
+					1. Delivered MVP for first 2 high proiority use cases.(? which use cases)
+					2. Demontrated easeir goverenance model, faster iterations and quick triage compred to existing process .
+					Impact :- 
+						1. It helped product to annuonce exact launch date of the product with clear idea on its capababilities
+						2. It helped to create solid foundation for next one year plan .
+						3. The current architecture became a reference for other Apple product line like maps and music .
+						Questions:-
+							1.	Improve platform reliability — no specific target.
+							2.	New VP wants to modernize everything.
+
+	3.  Scope Change / Ownership
+		Story:- Product wanted to use Warm Path for every transaction , to capture False Negatives and label generation.
+		Theme :- Re-scope, push non-critical work to v2, quantify what's lost vs. gained
+			
+
+	4.	Conflicts & stakeholder management / Disagreements with peers / Escalation.
+		Story :- Disagreement witn cyber to use Guardrail Service for warm path .
+		Theme :- Present Options, Stakeholder alignment
+
+	5.	Feature vs. tech debt
+		Story :- Existing tech debt for GPU utilization, Observability fixes vs porting new Identity fraud product which require new features in Platform .
+		Theme :- Prioritization, Business impact of each
+
+	6. 	Bugs & reliability incidents/ Resource or budget constraint / Failed Projects / Contenjency plan 
+		Story :- Cross Tenant leakage and vLLM custamization
+		Theme :-
+
+	7. 	Mentorship/ Prevent BurnOut 
+		Story :- Team member has lot in pkate like On-Call , SPIKE , working on tech debt .
+
+	
+========================================================================================================================
+
+Craftmaship
+	1. Build vs Buy
+		Stories :- 
+			1. RUST SPSC Ring vs Kafka for hot path 
+			2. Triton vs own inferencing using RUST and C++ data plane 
+			3. AWS bedrock vs own Inferencing stack on K8
+			4. Building own search stack vs going with VectorDB like Milvus or Opensearch 
+			5. Own observability using eBPF + Grafana vs DataDog 
+		Decesion Framework
+			1. Differtiator :- Feature gaps,cost etc. Do you really need to build something
+			2. Cost of ownership :-Development, Maintainance , Upgrade and Support 
+			3. Braek even point and return on ivestment 
+	2. Production Issues
+		Stories:-
+			1. P99 latency spikes due to NUMA misalignment
+			2. Slow model download due to GDS was  blown off
+			3. OOM issue on pods, KV cache explosion sharing was disabled 
+			4. Arrow schema mismatch decreased the accuracy 
+		Phylosophy :- 
+			1. Layered architecture i.e. Infra, Runtime frameworks, Business metrics , Operation metrics
+			2. Escalation paths and workflows liek PagerDuty 
+			3. Proactive aproach rather than Reactive 
+	3. Reliability and Failure Design 
+		Stories
+		Principals 
+			1. Redundancy at every level like Region, Servers , Application
+			2. Isolation to reduce the blast redius
+			3. Backpressure
+			4. Fallback systems 
+			5. Scaling , up and out
+	4. Testing & Deployment
+		Testing Pyramid
+	5. Arcitecture decesion
+		Different approches and trade offs
+
+
+
+========================================================================================================================
+Leadership
+	Innovation
+		Story :-
+		1. Capital One Three tier startegy
+	Influence
+	Conflicts 
+	Execuative communication
