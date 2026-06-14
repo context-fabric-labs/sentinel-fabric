@@ -9,39 +9,6 @@ The Craftsmanship round evaluates your technical depth, engineering excellence, 
 - Testing philosophies that scale
 - Postmortem culture and learning organizations
 
-> **Same stories, deeper zoom.** This round reuses the **7 anchor stories** from the Execution round — but instead of *how you ran the program*, the interviewer wants *the engineering underneath it*. When a discussion below asks for a framework, ground it in the anchor story that already carries the technical depth. You already know the numbers; here you defend the architecture behind them.
-
----
-
-## Reuse the Execution Foundation (Read This First)
-
-Each Craftsmanship discussion maps to an anchor story. Lead with the framework, then make it concrete with the story and its (consistent) metrics.
-
-| Craftsmanship Topic | Anchor Story | Technical Depth to Drop Into |
-|---|---|---|
-| **Build vs. Buy** (queue, observability, mesh, feature store) | **#1 Capital One** ("buy commodity, build differentiation") + **Fiserv** feature store (custom Redis, sub-3ms) | Managed Kafka + custom exactly-once consumers; custom online feature store for sub-3ms + compliance lineage |
-| **Monitoring / SLO strategy** | **#1 Capital One** (sub-5ms p99 SLO @ 24,500 TPS) + **Apple Siri observability** (MTTI 45min→3min) | 4-layer metric model, error budgets, multi-window burn-rate alerts, unified cross-stage tracing |
-| **Reliability / design for failure** | **#1 Capital One** (hot/warm/cold graceful degradation) + **#6 Cross-tenant incident** | Bulkheads, circuit breakers, degrade hierarchy (ML → rule-based → default-allow+log), tenant isolation |
-| **Capacity planning** | **#1 Capital One** (24,500 TPS, GPU headroom) + **#5 GPU util** (~70%→82%, SM 18%→72%) | Bottleneck analysis, 2x peak planning, micro-batching, GPU saturation ceiling |
-| **Observability / debugging** | **Apple Siri observability** + **#1 Capital One** (cold-entity latency tail) | Tail-based sampling, span breakdown, 1%-tail RCA (new-merchant cache miss) |
-| **Testing strategy** | **#1 Capital One** (shadow + canary) + **#6 Incident** (CI tenant-isolation guardrail) | Shadow scoring, progressive canary, chaos tests targeting tenant boundaries |
-| **Postmortem culture** | **#6 Cross-tenant leakage** (blameless RCA) + **#1 Capital One** (latency-degradation PM) | RCA structure, action items to closure, prevention layers (design/CI/chaos) |
-| **Deployment at scale** | **#1 Capital One** (progressive rollout) + **#3 Scope change** (feature flags) | Canary → regional → global, automated rollback criteria, backward-compatible schema |
-| **On-call / tech debt mgmt** | **#7 Burnout** (SPIKE-exemption, workload audit) + **#5 Debt-as-dollars** | Toil reduction, rotation health, debt register (interest vs. principal) |
-
-### Canonical metrics (must stay consistent with Execution + Leadership)
-
-- **Capital One:** p99 **35ms → 3.8ms** at **24,500 TPS**; 3-tier (Rust/CUDA hot <5ms, 13B warm LLM, 70B cold LLM); infra cost to ~1/3 → **~$20M/yr saved, ~$45M total first-year**; GPU bet de-risked with a 4-week POC.
-- **Cross-tenant incident:** sev-1 PCI; vLLM tenant-tagged KV namespaces + paged-attention isolation; **FP8 (E4M3) → 0.2% accuracy loss, 40% memory savings**; **zero new GPU spend**.
-- **Feature vs. debt:** GPU util **~70% → 82%+** (SM util **18% → 72%** via micro-batching up to 32).
-- **Apple Siri observability:** MTTI **45min → 3min**.
-- **Fiserv feature store:** custom Redis online store, **sub-3ms** serving, 3 engineers × 4 months.
-- **Broadcom:** kill criteria defined up front; killed when **FP > 0.1%**.
-
-### LinkedIn value tags
-
-Weave one value per discussion: **Members First** (reliability, SLOs, zero-downtime), **Trust** (blameless postmortems, transparent rollbacks), **Care About Each Other** (sustainable on-call), **One LinkedIn** (golden paths, reused patterns), **Dream Big / Get Things Done / Know How** (build-vs-buy and architecture judgment).
-
 ---
 
 ## Build vs. Buy Discussions
@@ -716,7 +683,7 @@ TIMELINE:
 - T+8min: Root cause identified: Feature store compaction job
          running during peak hours due to timezone config error
 - T+10min: Mitigation: Paused compaction job manually
-- T+12min: Latency recovered to 3.8ms p99 (back to baseline)
+- T+12min: Latency recovered to 3.2ms p99
 - T+30min: Verified all queued transactions processed successfully
 
 IMPACT:
@@ -906,50 +873,3 @@ STRATEGIES:
 5. Tie to incidents: Every postmortem generates debt items
 6. Make it visible: Dashboard showing debt trends to leadership
 ```
-
-> **Anchor:** This is **#5 Feature vs. tech debt** + **#7 Burnout**. Make it concrete: "At Capital One I quantified debt as dollars — GPU under-utilization (~70% util) and observability gaps (slow triage) — and sequenced the debt the new Identity-Fraud product *depended on* (GPU scheduling + core observability) ahead of cosmetic debt. Result: GPU util ~70% → 82%+, the product onboarded onto a stable base. *On-call angle:* SPIKE-exemption from on-call (anchor #7) is how I keep toil from compounding debt — you can't pay down debt while being paged."
-
----
-
-## Closing: Anchor Story → Craftsmanship Discussions (Reverse Index)
-
-You walked in with 7 stories. Here's every Craftsmanship discussion each one can carry, so you never freeze on "give me an example."
-
-| Anchor Story | Discussions It Powers | One-Line Technical Hook |
-|---|---|---|
-| **#1 Capital One** | Build-vs-buy (Kafka), SLO monitoring, design-for-failure, multi-region, capacity, deployment-at-scale, postmortem | "35ms → 3.8ms p99 @ 24,500 TPS via hot/warm/cold; buy commodity (MSK), build differentiation (exactly-once consumers)." |
-| **#6 Cross-tenant leakage** | Postmortem culture, testing-in-prod (CI guardrail), reliability isolation | "Tenant-tagged KV namespaces + FP8 (0.2% acc / 40% mem) → isolation at zero new GPU spend; cross-tenant test now runs every PR." |
-| **#5 Feature vs. debt** | Tech-debt management, capacity planning, build-vs-buy | "Debt-as-dollars; GPU util ~70%→82% (SM 18%→72% via micro-batching to 32)." |
-| **#7 Burnout** | On-call excellence, toil reduction | "SPIKE-exemption from on-call; workload audit; on-call sat 3.2→4.1; bus factor 1→3." |
-| **Apple Siri observability** | Observability philosophy, debugging, monitoring | "Unified cross-stage tracing; MTTI 45min→3min; tail-based sampling on slow/error traces." |
-| **Fiserv feature store** | Build-vs-buy (feature store) | "Custom Redis online store for sub-3ms + compliance lineage; 3 eng × 4 months." |
-| **Broadcom kill** | Reliability/when-to-stop, testing philosophy | "Kill criteria defined up front; killed when FP > 0.1% — sunk cost irrelevant." |
-| **#2 Siri HomePod** | Capacity/latency-budget design, testing | "300ms budget decomposed: ASR 80 / NLU 40 / retrieval 20 / rerank 60 / TTS 80 / overhead 20." |
-| **#3 Scope change** | Deployment (feature flags), testing-in-prod | "Smart sampling via Kafka exactly-once; feature-flagged rollout 1%→100%." |
-
-### Performance-Depth Drill-Downs (when they push for systems detail)
-
-| Trigger | Drop Into |
-|---|---|
-| "How did you hit sub-5ms?" | Nsight showed 150µs CUDA launch overhead was the bottleneck (not kernel execution). HugePages + NUMA pinning → TLB miss 4.2% → 0.3%. CUDA Graphs → launch 150µs → 5µs. FAISS GPU 0.4ms/query. |
-| "How did you raise GPU utilization?" | SM utilization 18% → 72% via dynamic micro-batching (batch 1 → up to 32); Helios scheduler with per-tier GPU memory partitioning and degrade modes. |
-| "How did isolation fit the GPU budget?" | vLLM customization: per-tenant KV namespaces in paged attention; FP8 (E4M3) quantization recovered 40% memory at 0.2% accuracy cost. |
-
-### LinkedIn Scale Bridge (have it ready, don't volunteer it)
-
-> "At LinkedIn's scale the *frameworks* are identical; the *forcing functions* change. Build-vs-buy tips toward build because vendor cost at hundreds of millions of members exceeds an internal team's. SLOs get multi-window burn-rate alerting because you can't eyeball thousands of services. Tenant isolation and chaos testing become continuous and automated, not monthly. And on-call fairness needs tooling, not a spreadsheet. The judgment I'd bring is the same — the automation bar is higher."
-
----
-
-## Craftsmanship Prep Plan (mirrors your Execution drill)
-
-| Day | Topic | Anchor Story to Defend | Performance Depth |
-|---|---|---|---|
-| 1 | Build vs. Buy | #1 Capital One + Fiserv | "Buy commodity, build differentiation"; sub-3ms feature store |
-| 2 | Monitoring / SLOs | #1 Capital One + Apple observability | 4-layer model, burn-rate alerts, MTTI 45→3min |
-| 3 | Reliability / design-for-failure | #1 Capital One + #6 Incident | Degrade hierarchy, tenant isolation, circuit breakers |
-| 4 | Capacity planning | #1 Capital One + #5 GPU util | 2x peak, SM 18%→72%, GPU ceiling |
-| 5 | Observability / debugging | Apple observability + #1 (1%-tail) | Tail sampling, cold-entity cache-miss RCA |
-| 6 | Testing + Postmortems | #6 Incident + #1 Capital One | CI tenant guardrail, blameless RCA, shadow/canary |
-| 7 | Deployment + On-call + Debt | #7 Burnout + #5 Debt-as-dollars | Progressive rollout, toil reduction, debt register |
-

@@ -9,60 +9,11 @@ The Leadership round evaluates your ability to influence, collaborate, and drive
 - Developing engineering talent
 - Communicating with executives
 
-> **You don't need new stories for this round.** This document is built on the **same 7 anchor stories** you already mastered in the Execution round. Leadership just asks them from a different angle — *influence, judgment, talent, and business value* instead of *delivery mechanics*. Learn the 7 stories once; reuse them everywhere.
-
----
-
-## Reuse the Execution Foundation (Read This First)
-
-Every behavioral answer in this round routes back to one of the **7 anchor stories** from the Execution round. Same stories, same metrics — only the *emphasis* changes.
-
-| # | Anchor Story | Execution Emphasis | Leadership Emphasis | LinkedIn Value |
-|---|---|---|---|---|
-| **1** | **Capital One fraud platform** (1-yr rebuild, 35ms→3.8ms p99 @ 24,500 TPS, 5 teams, ~$45M saved) | Full SDLC / dependency DAG | Multi-year vision, architecture judgment, executive communication, org-scale influence | Dream Big, Get Things Done, Know How |
-| **2** | **Siri HomePod redesign** (1 qtr, 300ms budget, MVP 2 use cases, became Maps/Music reference) | Define success, spike risk | Vision under ambiguity, reversible vs. irreversible decisions, raising the bar | Know How + Members First |
-| **3** | **Warm-path scope-change** (smart sampling, 95% label value at 5–10% GPU cost) | Re-scope / CR discipline | Saying no constructively, transparent tradeoffs, executive negotiation | Trust |
-| **4** | **Cyber Guardrail conflict** (inline certified PII filter, reused by 4 services) | Options A/B/C + escalation ladder | Influence without authority, building consensus, conflict diplomacy, platform selling | One LinkedIn + Trust |
-| **5** | **Feature vs. tech debt** (GPU/observability debt vs. Identity-Fraud, util ~70%→82%) | Prioritize by business impact | Build-vs-buy, infra-vs-product investment, TCO, business-technical translation | Dream Big, Get Things Done |
-| **6** | **Cross-tenant leakage incident** (sev-1 PCI, vLLM/FP8, zero new GPU spend) | Contain→RCA→prevent | Crisis leadership, delivering bad news, killing a project, courage under pressure | Members First + Trust |
-| **7** | **Mentorship / burnout** (workload audit, SPIKE-exemption, on-call sat 3.2→4.1) | Protect the team | Developing senior talent, sponsorship, inclusive culture, delegation, ego management | Care About Each Other |
-
-**Supporting stories** (pull in as backup or for variety):
-- **Apple Siri observability** — unified tracing, MTTI 45min→3min (pure *influence without authority*).
-- **Apple KG dependency** — loaned an engineer, shrank the ask to a static snapshot, unblocked in 5 days (cross-team influence; gave up credit).
-- **Broadcom kill** — defined kill criteria up front, killed when FP > 0.1% (your go-to *failure / judgment* story).
-- **Fiserv feature store** — custom Redis online store, sub-3ms serving (build-vs-buy judgment).
-
-### SARI applies here too
-
-Leadership answers use the **same SARI funnel** as Execution: **S**ituation (stakes + the conflict) → **A**ction (your judgment, options weighed, decision rule) → **R**esult (measured change) → **I**mpact (durable business/org value, *quantified*). The Leadership-specific signal layered on top: **scope** (org/cross-team, not a single team), **influence** (you moved people without authority), and **learning** (what you'd do differently).
-
-### LinkedIn Values — Quick Reference (weave one in per answer)
-
-| Value | Natural Phrase |
-|---|---|
-| **Members First** | "I asked: what's the member impact if we get this wrong?" |
-| **Trust** | "I communicated at week 3, not week 7 — trust requires no surprises." |
-| **Care About Each Other** | "I restructured the load before it became a burnout risk." |
-| **Dream Big, Get Things Done, Know How** | "The vision was ambitious — sub-5ms with LLM analysis — but I de-risked it with milestones." |
-| **One LinkedIn** | "I optimized for the whole org — the certified-inline pattern was reused by 4 teams." |
-
-### Master Map: 50 Questions → Anchor Story
-
-| Category | Questions | Primary Anchor Story | Backup |
-|---|---|---|---|
-| **1. Influence Without Authority** | Q1–Q10 | **#4 Cyber Guardrail** + **Apple Siri observability** | #1 Capital One |
-| **2. Technical Leadership & Vision** | Q11–Q20 | **#1 Capital One** + **#2 Siri HomePod** | #5 Debt vs. features |
-| **3. Conflict & Difficult Situations** | Q21–Q30 | **#4 Cyber Guardrail** + **#3 Scope change** + **#6 Incident** | Broadcom (failure) |
-| **4. Team & Talent Development** | Q31–Q40 | **#7 Mentorship/Burnout** + **Apple KG (sponsorship)** | #4 Cyber (give up credit) |
-| **5. Strategic & Business Thinking** | Q41–Q50 | **#5 Feature vs. debt** + **#1 Capital One (ROI/TCO)** | Fiserv / Broadcom (build-vs-buy, kill) |
-
 ---
 
 ## 50 Behavioral Questions with Interviewer Intent
 
 ### Category 1: Influence Without Authority (Questions 1-10)
-*Anchor: **#4 Cyber Guardrail** (certified-inline pattern reused by 4 teams) and **Apple Siri observability** (MTTI 45min→3min). Backup: **#1 Capital One**.*
 
 **Q1:** "Tell me about a time you drove a significant technical change across teams you didn't manage."
 - **Intent:** Can you influence at Senior Staff scope? Do you have organizational leverage?
@@ -107,7 +58,6 @@ Leadership answers use the **same SARI funnel** as Execution: **S**ituation (sta
 ---
 
 ### Category 2: Technical Leadership & Vision (Questions 11-20)
-*Anchor: **#1 Capital One** (3-tier hot/warm/cold architecture, $2.1M GPU bet de-risked with a 4-week POC) and **#2 Siri HomePod** (vision under ambiguity, 300ms budget). Backup: **#5 Feature vs. debt** for build-vs-buy and reversible/irreversible framing; **Broadcom** for the failed bet (Q16).*
 
 **Q11:** "Tell me about a time you defined a multi-year technical vision for an organization."
 - **Intent:** Can you think beyond quarterly planning?
@@ -152,7 +102,6 @@ Leadership answers use the **same SARI funnel** as Execution: **S**ituation (sta
 ---
 
 ### Category 3: Conflict & Difficult Situations (Questions 21-30)
-*Anchor: **#4 Cyber Guardrail** (disagreement resolved at the working level), **#3 Scope change** (saying no constructively / delivering tradeoffs), and **#6 Cross-tenant incident** (crisis leadership, bad news). Backup: **Broadcom** for the championed project that failed (Q29).*
 
 **Q21:** "Tell me about a time you had a significant disagreement with your manager about technical direction."
 - **Intent:** Professional courage. Ability to disagree and commit.
@@ -197,7 +146,6 @@ Leadership answers use the **same SARI funnel** as Execution: **S**ituation (sta
 ---
 
 ### Category 4: Team & Talent Development (Questions 31-40)
-*Anchor: **#7 Mentorship/Burnout** (workload audit, Rust stretch task, on-call sat 3.2→4.1, bus factor 1→3) and **Apple KG** (sponsoring/loaning an engineer, giving up credit). Backup: **#4 Cyber** for empowering another team to own a pattern.*
 
 **Q31:** "How have you developed other Staff-level engineers?"
 - **Intent:** Multiplier effect. Growing senior talent.
@@ -242,7 +190,6 @@ Leadership answers use the **same SARI funnel** as Execution: **S**ituation (sta
 ---
 
 ### Category 5: Strategic & Business Thinking (Questions 41-50)
-*Anchor: **#5 Feature vs. debt** (debt-as-dollars, infra-vs-product sequencing) and **#1 Capital One** (ROI/TCO: infra cost to ~1/3 → ~$45M first-year savings). Backup: **Fiserv** (build-vs-buy feature store) and **Broadcom** (kill decision / TCO of a failing bet).*
 
 **Q41:** "How do you determine the right level of investment in infrastructure vs. product features?"
 - **Intent:** Business-technical translation. ROI thinking.
@@ -286,24 +233,11 @@ Leadership answers use the **same SARI funnel** as Execution: **S**ituation (sta
 
 ---
 
-## SARI Story Templates — Anchored to the 7 Execution Stories
-
-These templates are just **SARI** (Situation → Action → Result → Impact) with a Leadership lens. Each one is wired to an anchor story you already know — don't invent new material, reuse the foundation. Metrics below match the Execution round exactly so you never contradict yourself across rounds.
-
-| Template | Anchor Story | Best For |
-|---|---|---|
-| 1. Conflict Resolution | **#4 Cyber Guardrail** | Q5, Q21, Q23, Q25, Q30, Q36 |
-| 2. Influence Without Authority | **Apple Siri observability** | Q1, Q4, Q6, Q7, Q10 |
-| 3. Architecture Decision | **#1 Capital One** | Q12, Q14, Q18, Q19, Q45 |
-| 4. Project Failure | **Broadcom kill** | Q16, Q29, Q35 |
-| 5. Roadmap Ownership | **#1 Capital One** + **#3 Scope change** | Q11, Q43, Q47 |
-| 6. Mentorship | **#7 Burnout** + **Apple KG** | Q31, Q32, Q37, Q38 |
-| 7. Organizational Change | **#4 Cyber** (certified-inline) | Q4, Q20, Q43 |
-| 8. Executive Communication | **#3 Scope change** + **#6 Incident** | Q2, Q17, Q22, Q46 |
+## STAR-Based Story Templates
 
 ### Template 1: Conflict Resolution
 
-**Anchor:** #4 Cyber Guardrail · **Use for:** Q5, Q21, Q23, Q25, Q30, Q36
+**Use for:** Q5, Q21, Q23, Q25, Q28
 
 ```
 SITUATION (30 seconds):
@@ -331,18 +265,18 @@ RESULT (30 seconds):
 This approach became [lasting impact]. I learned [lesson]."
 ```
 
-**Your Story (Capital One — anchor #4 Cyber Guardrail / inference-platform conflict):**
-"At Capital One, the ML Engineering team wanted a custom inference server for the fraud model, while Platform Engineering mandated standardized serving infrastructure. The fraud system needed sub-5ms p99 — non-negotiable for real-time decisioning at 24,500 TPS.
+**Your Story (Capital One):**
+"At Capital One, the ML Engineering team wanted to use a custom inference server for the fraud model, while Platform Engineering mandated standardized serving infrastructure. The fraud system needed sub-5ms p99 — non-negotiable for real-time decisioning at 24,500 TPS.
 
-I separated the *requirement* (latency SLA) from the *mechanism* (whose server). I facilitated a design review where I reframed the problem: rather than choosing one team's approach, I proposed extending our standard serving infrastructure with a 'hot path' tier that met the latency requirement while keeping operational consistency. I created a performance benchmark framework both teams accepted as the arbiter.
+I facilitated a design review where I reframed the problem: rather than choosing one team's approach, I proposed extending our standard serving infrastructure with a 'hot path' tier that met the latency requirements while maintaining operational consistency. I created a performance benchmark framework that both teams accepted as the arbiter.
 
-Result: We hit 3.8ms p99 on the standard platform with hot-path optimizations, satisfying both teams without escalation. *One LinkedIn angle:* the certified pattern was adopted by 4 other latency-sensitive services — the real deliverable was a reusable org standard, not a one-off win."
+Result: We achieved 3.2ms p99 on the standard platform with hot-path optimizations, satisfying both teams. The pattern was adopted by 4 other latency-sensitive services."
 
 ---
 
 ### Template 2: Influence Without Authority
 
-**Anchor:** Apple Siri observability · **Use for:** Q1, Q4, Q6, Q7, Q10
+**Use for:** Q1, Q6, Q7, Q8, Q10
 
 ```
 SITUATION:
@@ -366,7 +300,7 @@ RESULT:
 "[Adoption metrics]. [Business impact]. [Ongoing influence]."
 ```
 
-**Your Story (Apple — supporting story: Siri observability):**
+**Your Story (Apple):**
 "At Apple, the Siri orchestration platform had fragmented observability — each team (ASR, NLU, Search, TTS) had different monitoring approaches, making end-to-end latency debugging nearly impossible.
 
 I had no authority over these teams. My strategy: I built a unified tracing prototype that correlated spans across all pipeline stages. I demoed it during a P1 incident, showing how we could identify the bottleneck in 2 minutes vs. the typical 45 minutes. The ASR team adopted first because they were tired of being blamed for latency issues that were actually downstream. Once three teams were on board, the remaining teams joined voluntarily.
@@ -377,7 +311,7 @@ Result: Mean-time-to-identify reduced from 45 min to 3 min. The approach became 
 
 ### Template 3: Architecture Decision
 
-**Anchor:** #1 Capital One · **Use for:** Q12, Q14, Q18, Q19, Q45
+**Use for:** Q12, Q14, Q18, Q19, Q45
 
 ```
 SITUATION:
@@ -407,18 +341,18 @@ RESULT:
 What I'd do differently: [honest reflection]."
 ```
 
-**Your Story (Capital One — anchor #1):**
+**Your Story (Capital One):**
 "For the fraud decisioning platform, I faced a choice between three architectures: (A) synchronous microservices with caching, (B) pre-computed decision tables, or (C) a hybrid hot/warm/cold architecture with GPU-accelerated inference.
 
-Option A couldn't meet sub-5ms at 24,500 TPS. Option B couldn't handle model freshness — fraud patterns change hourly. I chose Option C: a Rust/CUDA hot tier (<5ms) with pre-loaded models for known patterns, a 13B-LLM warm tier for near-real-time reasoning, and a 70B-LLM cold tier for batch triage/retraining.
+Option A couldn't meet sub-5ms at 24,500 TPS. Option B couldn't handle model freshness requirements — fraud patterns change hourly. I chose Option C: hot tier with pre-loaded models on GPU for known patterns, warm tier for near-real-time model updates, cold tier for batch retraining.
 
-The irreversible bet was the GPU infrastructure commitment ($2.1M annually). I de-risked it with a 4-week POC that hit 2.8ms p99 at target TPS *before* committing the spend — reversible decisions I deferred and iterated on. Result: steady-state p99 35ms → 3.8ms at 24,500 TPS, infra cost cut to ~1/3 (~$20M/yr saved, ~$45M total first-year savings). The architecture has scaled 3x without a redesign. *What I'd do differently:* invest earlier in automated dependency health checks so cross-team slips surface automatically, not in weekly syncs."
+The irreversible bet was GPU infrastructure commitment ($2.1M annually). I validated with a 4-week proof-of-concept that demonstrated 2.8ms p99 at target TPS. Result: $47M annual fraud prevention improvement. Architecture has scaled 3x without redesign."
 
 ---
 
 ### Template 4: Project Failure
 
-**Anchor:** Broadcom kill (defined kill criteria up front; killed when FP > 0.1%) · **Use for:** Q16, Q29, Q35
+**Use for:** Q16, Q29, Q35
 
 ```
 SITUATION:
@@ -450,7 +384,7 @@ What I changed: [specific behavior change in subsequent work]"
 
 ### Template 5: Roadmap Ownership
 
-**Anchor:** #1 Capital One + #3 Scope change · **Use for:** Q11, Q43, Q47
+**Use for:** Q11, Q43, Q47
 
 ```
 SITUATION:
@@ -472,19 +406,16 @@ ACTION:
 5. Communication: [how you made it visible]
 6. Adaptation: [how you evolved it]"
 
-RESULT (30 seconds):
+RESULT:
 "[Delivery metrics]. [Stakeholder satisfaction]. [Business outcomes].
 Key tradeoffs made: [what you explicitly deprioritized and why]."
 ```
-
-**Your Story (Capital One + warm-path scope change — anchors #1 + #3):**
-"I owned the year-long fraud-platform roadmap across 5 teams against a contractual card-network SLA. I framed it around one KPI (sub-5ms p99), a quarterly roadmap where each tier (hot → warm → cold) shipped independent value, and milestone-level OKRs. Mid-program, Product asked to route *every* transaction through the 13B warm-path LLM — infeasible at 24,500 TPS. Instead of a flat no, I ran a change request: quantified the GPU blow-up, found the real need (false-negative label coverage, not literal full reasoning), and proposed smart sampling (100% declines + uncertainty band + 5% control). Result: captured ~95% of the labeling value at ~5–10% of the GPU cost, kept the program on budget and timeline. *Trust angle:* every milestone had a public go/no-go — no silent scope creep."
 
 ---
 
 ### Template 6: Mentorship
 
-**Anchor:** #7 Burnout + Apple KG · **Use for:** Q31, Q32, Q37, Q38
+**Use for:** Q31, Q32, Q37, Q38
 
 ```
 SITUATION:
@@ -507,14 +438,11 @@ RESULT:
 This became a pattern: I've developed [N] engineers to [level]."
 ```
 
-**Your Story (anchor #7 — mentorship/burnout):**
-"A senior engineer was carrying on-call, a multi-week TensorRT-LLM vs. vLLM SPIKE, and three hot-path debt items at once. I saw the early signals in week 2 — thinner SPIKE updates, doubled review turnaround, weekend work. I named it directly ('your plate isn't sustainable; let's fix it together'), pulled them off on-call, and split the SPIKE — keeping their TensorRT half but assigning vLLM benchmarking to an engineer who wanted inference-serving experience. I handed the Rust serialization debt to a mid-level engineer as a stretch task and paired with them day one. *Sponsorship:* that mid-level engineer later became the team's Rust mentor. Result: SPIKE quality recovered (the doc became the team reference), on-call satisfaction rose 3.2→4.1/5, and bus factor on the hot path went from 1 to 3. I institutionalized it with a monthly workload audit. *Care About Each Other:* caring is structural — you build systems that prevent burnout, not just empathize after it."
-
 ---
 
 ### Template 7: Organizational Change
 
-**Anchor:** #4 Cyber (certified-inline pattern) · **Use for:** Q4, Q20, Q43
+**Use for:** Q4, Q20, Q43
 
 ```
 SITUATION:
@@ -538,14 +466,11 @@ RESULT:
 "[Before/After metrics]. [Cultural shift evidence]. [Sustainability]."
 ```
 
-**Your Story (anchor #4 — certified-inline becomes an org standard):**
-"The Cyber team mandated their centralized Guardrail Service for PII/PAN filtering before any LLM call — non-negotiable for PCI-DSS, but it added latency and a hard failure dependency that broke the warm-path budget. I separated the requirement (compliance) from the mechanism (their service), measured the cost, and presented options A/B/C. I had Cyber *certify* an inline Sentinel filter by running their own compliance test suite against it. It passed within budget, resolving the conflict without escalation. *Organizational change:* Cyber then adopted the certified-inline pattern for other low-latency services — a blocking mandate became a reusable joint standard. The lasting shift was cultural: 'certify the alternative' replaced 'mandate the central service' as the default for latency-sensitive teams."
-
 ---
 
 ### Template 8: Executive Communication
 
-**Anchor:** #3 Scope change + #6 Incident · **Use for:** Q2, Q17, Q22, Q46
+**Use for:** Q2, Q17, Q22, Q46
 
 ```
 SITUATION:
@@ -570,68 +495,6 @@ RESULT:
 "Decision made: [what]. Timeline: [how fast]. 
 Outcome: [what happened]. Relationship: [trust built]."
 ```
-
-**Your Story (anchor #6 \u2014 cross-tenant incident, delivering bad news):**
-"During a sev-1 cross-tenant leakage on the multi-tenant LLM serving layer \u2014 one tenant's context surfacing in another's, on a PCI platform \u2014 I had to brief leadership and compliance the same day, with no budget for more GPUs. I led with impact, not mechanics: 'Blast radius is X, no confirmed customer data exposure, contained in N minutes. Here's the compliance exposure and here are two options.' I quantified the abstract risk in audit and dollar terms, recommended the path (customize vLLM with tenant-tagged KV namespaces + FP8 quantization to fit isolation within the existing GPU budget), and named the tradeoff (0.2% accuracy for 40% memory headroom). Decision was made in one meeting; we passed the follow-up audit with zero new GPU spend. *Trust:* I surfaced the bad news immediately and came with options, not just a problem."
-
----
-
-## Full Question \u2192 Anchor Story Map (All 50)
-
-Use this to route any question to a story you already know cold. Lead with the **primary** story; switch to the backup only if you've already used the primary earlier in the loop.
-
-| Q# | Theme | Primary Story | Backup |
-|---|---|---|---|
-| Q1 | Drove change across teams | Apple Siri observability | #4 Cyber |
-| Q2 | Convince skeptical VP | #3 Scope change | #6 Incident |
-| Q3 | Killed another team's project | Broadcom kill | #6 Incident |
-| Q4 | Influenced eng culture | #4 Cyber (certified-inline) | #7 Burnout (workload policy) |
-| Q5 | Build consensus among engineers | #4 Cyber | #1 Capital One |
-| Q6 | Unpopular-but-correct decision | #1 Capital One (Rust/GPU bet) | #3 Scope change |
-| Q7 | Drive adoption of your platform | #4 Cyber (4 teams) | Apple Siri observability |
-| Q8 | Changed org technical strategy | #1 Capital One | #5 Debt vs. features |
-| Q9 | Influence without all the data | #2 Siri HomePod (SPIKE) | #1 Capital One POC |
-| Q10 | Buy-in across competing priorities | #4 Cyber | #3 Scope change |
-| Q11 | Multi-year technical vision | #1 Capital One | #2 Siri HomePod |
-| Q12 | Most impactful architecture decision | #1 Capital One | #2 Siri HomePod |
-| Q13 | Critical risk others missed | #6 Cross-tenant leakage | #1 Capital One |
-| Q14 | Innovation vs. reliability | #1 Capital One (hot/warm/cold) | #6 Incident |
-| Q15 | Sunset a system you built | Broadcom kill | #1 (legacy Java retirement) |
-| Q16 | A bet that didn't pay off | Broadcom kill | KV-cache estimation miss |
-| Q17 | Explain complex tech to execs | #3 Scope change | #6 Incident |
-| Q18 | Reversible vs. irreversible | #1 Capital One ($-bet POC) | #2 Siri HomePod |
-| Q19 | Scaled a system 10x | #1 Capital One (3x, design held) | #5 GPU util |
-| Q20 | Drive best practices org-wide | #4 Cyber (certified-inline) | #7 Workload audit |
-| Q21 | Disagreement with your manager | #4 Cyber / VP phased-rollout | #3 Scope change |
-| Q22 | Deliver bad news to leadership | #6 Incident | #3 Scope change |
-| Q23 | Two teams, conflicting requirements | #4 Cyber | #1 Capital One |
-| Q24 | Inherited tech debt + feature pressure | #5 Debt vs. features | #1 Capital One |
-| Q25 | Difficult feedback to senior engineer | #7 Burnout (reframe, vulnerability) | Apple KG |
-| Q26 | Incident that escalated | #6 Cross-tenant leakage | #1 Capital One |
-| Q27 | Pushed back on a product requirement | #3 Scope change | #4 Cyber |
-| Q28 | Navigate org politics | #4 Cyber (escalation ladder ready) | #3 Scope change |
-| Q29 | Project you championed failed | Broadcom kill | KV-cache miss |
-| Q30 | Right answer, high org cost | #4 Cyber | #1 Capital One |
-| Q31 | Develop Staff-level engineers | #7 Burnout (Rust stretch) | Apple KG |
-| Q32 | Raise the technical bar | #7 Workload/SPIKE policy | #4 Cyber |
-| Q33 | Help a struggling engineer | #7 Burnout | Apple KG |
-| Q34 | Build inclusive culture | #7 Burnout (psychological safety) | #4 Cyber |
-| Q35 | Delegated decision went wrong | Broadcom kill | #7 Burnout (SPIKE split) |
-| Q36 | Own vs. delegate | #7 Burnout (SPIKE split) | #1 Capital One (DRIs) |
-| Q37 | Sponsored a junior's proposal | Apple KG (loaned engineer) | #7 Burnout (Rust mentee) |
-| Q38 | Improve hiring / onboarding | #4 Cyber (golden-path adoption) | #7 Workload audit |
-| Q39 | Build team culture | #7 Burnout | #4 Cyber |
-| Q40 | Give up ownership to empower a team | #4 Cyber (Cyber owns pattern) | Apple KG |
-| Q41 | Infra vs. product investment | #5 Debt vs. features | #1 Capital One |
-| Q42 | Business opportunity via tech insight | #1 Capital One (GPU scoring \u2192 hourly models) | #5 GPU util |
-| Q43 | Large migration, maintain velocity | #1 Capital One (strangler fig) | #5 Debt vs. features |
-| Q44 | Regulatory implications | #4 Cyber (PCI-DSS) | #6 Incident |
-| Q45 | Build vs. buy at scale | Fiserv feature store | #1 Capital One (buy commodity, build diff) |
-| Q46 | Measure infra investment success | #5 Debt-as-dollars | #1 Capital One ($45M) |
-| Q47 | Re-prioritize on changing business needs | #3 Scope change | #5 Debt vs. features |
-| Q48 | Partner with Product on constraints | #2 Siri HomePod | #3 Scope change |
-| Q49 | Total cost of ownership | #5 Debt vs. features | Fiserv |
-| Q50 | Technology selection at org scale | #1 Capital One | Fiserv |
 
 ---
 
