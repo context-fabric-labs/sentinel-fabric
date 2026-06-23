@@ -317,3 +317,729 @@ Block 1 — Production LLM Serving ArchitectureCisco, Socure, and d-Matrix focus
 
 Block 9 — Performance Tooling, Regression Detection & Quality BarsMicrosoft AI Frameworks Focus. [NEW BLOCK]Use this to answer: "How do you architect a performance validation strategy for state-of-the-art LLMs?"Automated Regression Detection:Implement an automated continuous integration (CI) gate that intercepts every runtime compilation or model weight update.Run a multi-size synthetic workload batch to capture deterministic nsys timelines.  The Baseline Compare: Use automated scripts to parse cuda_api_sum and cuda_gpu_kern_sum from the generated .nsys-rep files. Automatically trigger a PagerDuty alert or block deployment if a steady-state compute kernel execution time slips by $>2\%$, or if an unexpected cudaLaunchKernel (e.g., fallback from a CUDA Graph to eager execution) is detected.  Benchmarking Strategy Across the Stack:Do not just benchmark the application layer. Instrument metrics collections across the entire stack: Programming Models (Triton/CUDA) $\rightarrow$ Compilers (TorchInductor/XLA) $\rightarrow$ Runtimes (ONNX Runtime/TensorRT-LLM) $\rightarrow$ Serving APIs (vLLM/Triton Server).  Use synthetic token traffic generation utilities (like genai-perf) to stress-test the system under variable request distributions.  Establishing the Performance Quality Bar:Define hard gates for production readiness: TTFT (Time-to-First-Token) must remain sub-500ms at peak concurrent batch limits, and TPOT (Time-Per-Output-Token) must map cleanly to hardware memory bandwidth limits (e.g., verifying arithmetic intensity maps along the memory-bound roofline limit of the accelerator).  Audit the Useful Compute Ratio: Measure the total GPU SM utilization cycles dedicated to active matrix multiplications (GEMM) versus cycles wasted on CPU-side dispatch latency, memory thrashing, or tokenization GIL bottlenecks.  The Microsoft Performance Tooling Line:
 “When optimizing workloads at the trillion-inference scale for Azure OpenAI, you cannot rely on manual profiling. I approach performance tooling by treating validation as a scalable distributed system. I build automated benchmarking frameworks that trace execution metrics from the high-level serving API all the way down to individual CUDA kernel launch timelines. This ensures that every model optimization or compilation change directly translates into improved hardware efficiency and measurable Capex reduction on the data center floor.”  Verifying Alignment with Existing Blocks:Qualifications Match: The JD heavily emphasizes deep experience with deep learning frameworks (specifically PyTorch and ONNX Runtime) and profiling environments (CUDA, Triton, Nsight). Your Block 3 (ONNX for edge/portability), Block 7 (PyTorch lifecycle), and the newly added Block 9 (automated Nsight parsing) completely satisfy this.  The Hardware-Software Co-Design Position: Since the team works directly with hardware groups, your existing Block 5 (Infrastructure & Networking Stack) covering pinned host memory pools, asynchronous DMA streams, and SPSC lock-free ring buffers demonstrates that you understand exactly how software maps to physical computer architecture constraints.  With this final block in place, your cheat sheet perfectly spans from high-level agentic orchestration (Socure/Cisco) to bare-metal hardware and automated performance tooling (d-Matrix/Microsoft). Focus on reviewing these 9 blocks over the next few days to keep these technical narratives sharp and top-of-mind!
+
+
+====
+
+Troubleshooting Guide 
+
+1. The master debugging flow
+
+For any LLM / AI serving issue, first ask:
+
+Is this a request-level issue, runtime-level issue, or infrastructure-level issue?
+
+Then split into five layers:
+
+Application / Gateway
+  request rate, errors, p99, queueing, tenant, model, prompt length
+
+LLM / AI Runtime
+  TTFT, TPOT, batching, KV cache, prefill/decode, model instance, token rate
+
+GPU / Accelerator
+  SM utilization, HBM capacity, HBM bandwidth, kernel gaps, copy overhead
+
+Host System
+  CPU, NUMA, huge pages, memory bandwidth, kernel scheduling, IRQs
+
+Cluster / Infra
+  Kubernetes, storage, network, RDMA/NCCL, autoscaling, rollout, node health
+
+The most important interview line:
+
+“I do not start by assuming it is a GPU issue. I first split latency into queue wait, preprocessing, prefill, decode, GPU execution, memory copy, network, and downstream time. Then I attribute each part back to model, tenant, node, GPU, and input shape.”
+
+2. Universal triage: first 5 minutes
+
+Use this order.
+
+1. RED: Is the service sick?
+   Rate, Errors, Duration
+   QPS, p95/p99, error rate, timeout rate, queue depth
+
+2. USE: Which resource is sick?
+   CPU, GPU, memory, network, disk
+   Utilization, Saturation, Errors
+
+3. Attribution:
+   Which model?
+   Which tenant?
+   Which GPU/node?
+   Which input shape?
+   Which batch size?
+   Which runtime version?
+
+4. Deep profile:
+   Nsight / perf / VTune / PyTorch profiler / ORT/Triton profile
+
+5. Fix:
+   Tune workload, runtime, placement, resource, or architecture
+
+Your crash-course file uses the same USE and RED split, where USE checks utilization, saturation, and errors for resources, and RED checks rate, errors, and duration for services.
+
+3. LLM serving issue map
+A. TTFT is high
+
+TTFT means the user waits too long for first token.
+
+Likely causes:
+
+gateway queueing
+request admission too loose
+long prompt / long context
+prefill bottleneck
+cold model load
+tokenization overhead
+batching delay
+chunked prefill disabled
+GPU saturated by long prompts
+RAG retrieval latency
+
+How to debug:
+
+Break TTFT into:
+  gateway wait
+  router wait
+  runtime queue wait
+  tokenization
+  RAG retrieval
+  prefill compute
+  first-token scheduling
+
+Tools:
+
+gateway metrics
+vLLM/SGLang/TensorRT-LLM metrics
+OpenTelemetry traces
+Nsight Systems
+PyTorch profiler if custom model path
+
+Actions:
+
+enable chunked prefill
+separate long-context traffic
+limit max prompt tokens
+add admission control
+bucket by prompt length
+use prefix caching
+pre-warm popular models
+optimize RAG retrieval
+scale prefill workers
+disaggregate prefill/decode if needed
+
+Interview line:
+
+“High TTFT usually means queueing, long prefill, cold start, or retrieval latency. I bucket by prompt length and separate queue wait from prefill execution before tuning anything.”
+
+B. TPOT is high
+
+TPOT means each generated token is slow.
+
+Likely causes:
+
+decode memory bandwidth bottleneck
+KV-cache pressure
+large active batch
+HBM bandwidth saturation
+FP16 KV cache too large
+no CUDA Graphs
+small-kernel launch overhead
+poor quantization config
+GPU memory fragmentation
+
+Tools:
+
+runtime token metrics
+Nsight Systems for kernel gaps
+Nsight Compute for memory-bound kernels
+DCGM for HBM/GPU metrics
+
+Actions:
+
+enable CUDA Graphs where supported
+use FP8/INT8 KV cache if acceptable
+enable paged attention
+tune max_num_seqs
+tune max_num_batched_tokens
+enable prefix caching
+reduce max context
+use continuous batching
+try TensorRT-LLM for optimized NVIDIA path
+
+Your crash course has a good example where LLM decode looked fine in nvidia-smi, but Nsight Systems showed kernel launch gaps and Nsight Compute showed memory-bound attention; fixes included enabling CUDA Graphs and FP8 KV cache.
+
+Interview line:
+
+“Decode is often HBM/KV-cache bound, not compute-bound. I check TPOT, KV-cache usage, HBM bandwidth, kernel gaps, and whether CUDA Graphs or KV quantization are enabled.”
+
+C. GPU utilization is low
+
+Do not assume low utilization means you need bigger batch only.
+
+Possible causes:
+
+CPU preprocessing bottleneck
+tokenization bottleneck
+request rate too low
+batching window too small
+dynamic batching not working
+H2D/D2H copies blocking
+scheduler gaps
+too many small kernels
+model cold starts
+network/RAG latency upstream
+
+Tools:
+
+htop
+perf
+PyTorch profiler
+Nsight Systems
+runtime batch histogram
+gateway traces
+
+Actions:
+
+parallel tokenization
+increase concurrency
+dynamic batching
+continuous batching
+pinned memory
+overlap H2D with compute
+CUDA streams
+CUDA Graphs
+pre-tokenize templates
+reduce serialization
+
+Interview line:
+
+“Low GPU utilization often means the GPU is starving. I look upstream at CPU preprocessing, tokenization, batching, memory copies, and scheduler gaps.”
+
+D. GPU utilization is high but throughput is poor
+
+Possible causes:
+
+nvidia-smi is misleading
+kernels running but inefficient
+HBM bandwidth saturated
+SM occupancy low
+small kernels
+memory stalls
+bad input shapes
+CPU-GPU sync
+
+Tools:
+
+Nsight Systems
+Nsight Compute
+DCGM
+runtime metrics
+
+Actions:
+
+operator fusion
+TensorRT engine
+FP16/BF16/FP8
+shape stabilization
+reduce padding
+distillation
+larger batches where latency allows
+CUDA Graphs
+
+Interview line:
+
+“nvidia-smi tells me kernels are running, not whether the GPU is efficient. Nsight Compute tells me if the kernel is compute-bound, memory-bound, or stalled.”
+
+4. CPU problems in AI serving
+Common CPU bottlenecks
+tokenization
+JSON parsing
+RAG retrieval orchestration
+feature assembly
+Python GIL
+thread contention
+kernel scheduling / CFS
+IRQ interrupt storms
+TLS/gRPC overhead
+serialization/deserialization
+logging/metrics overhead
+Symptoms
+CPU high, GPU low
+high queue wait before GPU
+high syscall time
+high context switches
+runqueue high
+one core hot
+p99 high but p50 okay
+Tools
+htop/top
+pidstat
+perf top / perf record
+perf stat
+VTune
+strace -c
+eBPF
+Actions
+CPU pinning
+thread-pool isolation
+move tokenization to worker pool
+use Rust/C++ hot path
+reduce JSON serialization
+use protobuf/Arrow/shared memory
+disable noisy background agents
+pin IRQs to housekeeping cores
+isolate latency-sensitive cores
+
+Your note about CFS cliff and IRQ interrupts is very relevant. In the crash course example, a p99 spike was caused by IRQ affinity and HugePage/NUMA problems, not the GPU.
+
+Strong answer:
+
+“For CPU bottlenecks, I check whether the GPU is starving. Then I look at tokenization, serialization, thread contention, context switches, IRQ placement, and NUMA locality. For low-latency services, I isolate cores, pin IRQs, separate housekeeping cores, and keep the hot path in Rust/C++.”
+
+5. NUMA and host memory problems
+Common issues
+model worker pinned to NUMA 0 but memory allocated on NUMA 1
+GPU attached to one NUMA node but CPU memory from another
+remote DRAM access
+TLB misses
+small pages instead of huge pages
+page faults
+memory fragmentation
+host memory pressure
+swap
+Symptoms
+p99 latency spikes
+CPU appears busy but not productive
+perf shows dTLB misses
+numastat shows remote memory
+VTune shows remote DRAM
+GPU copy latency increases
+Tools
+numactl --hardware
+numastat -p <pid>
+perf stat -e dTLB-load-misses,cache-misses
+VTune memory-access
+free -h
+vmstat
+Actions
+numactl --cpunodebind and --membind
+Kubernetes CPU Manager static policy
+Topology Manager
+HugePages
+preallocated memory pools
+pinned host memory for GPU transfers
+avoid cross-NUMA GPU placement
+
+Interview line:
+
+“In AI serving, NUMA matters because CPU preprocessing, pinned host memory, NIC, and GPU locality all affect p99. A GPU workload can look slow because the CPU thread and memory are on the wrong NUMA node.”
+
+6. GPU bottleneck mental model
+
+Always split GPU problems into four buckets:
+
+1. Compute-bound
+   Tensor cores/SMs saturated
+
+2. Memory-bandwidth-bound
+   HBM reads/writes dominate
+
+3. Capacity-bound
+   GPU memory full / OOM / fragmentation
+
+4. Launch/scheduling-bound
+   many small kernels and CPU gaps
+Tools
+nvidia-smi: first glance only
+DCGM exporter: production GPU metrics
+Nsight Systems: timeline, gaps, memcopies, launch behavior
+Nsight Compute: kernel-level compute vs memory analysis
+Fixes
+Compute-bound:
+  FP16/BF16/FP8
+  TensorRT-LLM
+  better batch size
+  tensor parallelism
+
+Memory-bandwidth-bound:
+  quantization
+  KV-cache quantization
+  FlashAttention/PagedAttention
+  reduce context length
+  better cache locality
+
+Capacity-bound:
+  reduce max sequence length
+  reduce batch size
+  lower max_num_seqs
+  model sharding
+  MIG/dedicated GPU
+  quantization
+
+Launch-bound:
+  CUDA Graphs
+  operator fusion
+  TensorRT
+  larger batches
+  reduce small kernels
+
+Strong answer:
+
+“I do not ask only whether GPU utilization is high. I ask whether we are compute-bound, HBM-bandwidth-bound, memory-capacity-bound, or launch-bound.”
+
+7. Storage problems
+
+In AI serving, storage matters for:
+
+model loading
+adapter loading
+embedding index loading
+RAG index refresh
+checkpoint restore
+cold start
+rolling deployments
+node recovery
+Symptoms
+pod ready time slow
+model loading takes minutes
+rolling update causes traffic impact
+NVMe underutilized
+download from remote object store on restart
+Tools
+iostat -x 1
+fio
+iotop
+dmesg
+application startup logs
+Actions
+local NVMe model cache
+preload models with DaemonSet
+image/model artifact separation
+lazy adapter loading
+warm pools
+readiness gate after model warmup
+parallel load
+GPUDirect Storage where available
+avoid downloading from Hugging Face/S3 during startup
+
+Your crash course has a strong model-loading incident where FIO proved NVMe was healthy, but logs showed the model was being downloaded remotely on every restart. The fix was local NVMe caching and readiness gating.
+
+Interview line:
+
+“Slow model loading is not always disk throughput. It may be remote download, deserialization, CPU staging, GPU transfer, or CUDA Graph capture. I time each stage separately.”
+
+8. Network / RDMA / NCCL problems
+
+Separate three network types:
+
+Service network:
+  HTTP/gRPC between gateway, RAG, feature store, model service
+
+Storage/data network:
+  object store, vector DB, Redis, Kafka, model download
+
+GPU collective network:
+  NCCL, RDMA, RoCE, InfiniBand, NVLink
+Ethernet / TCP issues
+
+Symptoms:
+
+p99 spikes
+retransmits
+TIME_WAIT explosion
+packet drops
+connection pool exhaustion
+Redis/vector DB latency spikes
+
+Tools:
+
+ss -s
+netstat -s
+ethtool -S
+ip -s link
+tcpdump
+iperf3
+
+Actions:
+
+connection pooling
+increase NIC ring buffers
+tune interrupt coalescing
+pin IRQs
+SR-IOV
+AF_XDP for advanced low latency
+avoid overlay for critical traffic
+separate traffic classes
+
+The crash course has a Redis feature-store story where RX drops and NIC ring-buffer overflow caused P99 latency spikes; ss, ethtool, and iperf3 helped isolate it.
+
+RDMA / RoCE issues
+
+Symptoms:
+
+NCCL all-reduce slow
+training/inference multi-GPU stalls
+tail latency during collectives
+PFC/ECN misconfig
+packet drops causing massive slowdown
+
+Tools:
+
+nccl-tests
+ibstat / ibv_devinfo
+rdma link
+ethtool counters
+nvidia-smi topo -m
+NCCL_DEBUG=INFO
+
+Actions:
+
+verify topology
+check GDR/GPUDirect path
+enable correct NCCL env vars
+separate RDMA traffic
+configure PFC/ECN correctly
+validate MTU
+pin NIC/GPU NUMA locality
+NCCL issues
+
+Symptoms:
+
+multi-GPU throughput poor
+one GPU waits
+all-reduce slow
+tensor parallel latency high
+training job hangs
+
+Tools:
+
+all_reduce_perf
+all_gather_perf
+nvidia-smi topo -m
+NCCL_DEBUG=INFO
+Nsight Systems
+
+Actions:
+
+fix topology
+avoid PCIe bottleneck
+use NVLink where available
+correct NIC/GPU affinity
+tune NCCL_ALGO / NCCL_PROTO only after baseline
+separate bad node
+validate fabric before blaming model
+
+Interview line:
+
+“Before blaming Tensor Parallelism or the model, I run NCCL tests to verify the GPU interconnect baseline. If all-reduce bandwidth is below expected, the bottleneck is fabric/topology, not the LLM runtime.”
+
+9. Kubernetes / orchestration issues
+Common issues
+wrong GPU node placement
+no NUMA awareness
+CPU limits causing throttling
+pods sharing noisy nodes
+cold starts during rolling update
+autoscaler too slow for GPU nodes
+KServe/Triton/vLLM readiness too early
+driver/runtime mismatch
+Tools
+kubectl top
+kubectl describe pod/node
+events
+nvidia-device-plugin logs
+DCGM exporter
+Prometheus/Grafana
+Karpenter logs
+Actions
+node pools by GPU type/model size
+warm pools
+taints/tolerations
+pod anti-affinity
+Topology Manager
+CPU Manager static policy
+readiness after model load + warmup
+canary/blue-green
+separate online serving from batch/fine-tuning jobs
+
+Strong line:
+
+“For LLM serving, Kubernetes schedules pods, but the runtime schedules tokens. I make sure Kubernetes handles placement, isolation, rollout, and capacity, while vLLM/SGLang handles request batching and KV-cache scheduling.”
+
+10. Practical incident stories to memorize
+Story A — P99 spike but not GPU issue
+
+Symptom: Fraud hot path p99 jumped from 8ms to 47ms on one node.
+
+Investigation:
+
+htop showed housekeeping core saturated
+ps showed monitoring agents and irqbalance
+perf showed high TLB misses
+numastat showed remote NUMA memory
+VTune confirmed remote DRAM access
+STREAM showed hardware memory bandwidth was healthy
+
+Root cause:
+
+IRQ affinity broken
+HugePages missing after reboot
+memory allocated cross-NUMA
+
+Fix:
+
+disable irqbalance
+pin NIC IRQs to housekeeping cores
+restore HugePages
+bind process CPU/memory to correct NUMA node
+add boot/runtime validation
+
+Lesson:
+
+“A GPU/AI p99 issue can be caused by CPU scheduling, interrupts, TLB misses, or NUMA. I validate the host before blaming the model.”
+
+Story B — LLM decode slow
+
+Symptom: vLLM throughput lower than expected, TPOT high, nvidia-smi looked okay.
+
+Investigation:
+
+runtime metrics showed TPOT high
+Nsight Systems showed kernel launch gaps
+logs showed enforce_eager/CUDA Graphs disabled
+Nsight Compute showed memory-bound paged attention
+KV cache was FP16 instead of FP8
+NCCL/DCGM showed hardware healthy
+
+Fix:
+
+enable CUDA Graphs
+use FP8 KV cache
+enable prefix caching
+enable chunked prefill
+tune max_num_seqs and max_num_batched_tokens
+
+Lesson:
+
+“nvidia-smi utilization is not enough. I use runtime metrics for symptoms, Nsight Systems for timeline gaps, and Nsight Compute for kernel bottlenecks.”
+
+Story C — Model loading slow
+
+Symptom: Pod restart took 5 minutes before model ready.
+
+Investigation:
+
+startup logs timed model weight load
+FIO showed NVMe healthy
+logs showed model downloading remotely
+iostat showed NVMe underutilized after local cache
+
+Fix:
+
+pre-cache model on local NVMe
+verify model in init container
+readiness only after model load + warmup
+use warm pools
+consider GPUDirect Storage for large models
+
+Lesson:
+
+“For AI serving, model readiness means model loaded, KV cache initialized, CUDA Graphs captured, and first inference warmed — not just container started.”
+
+Story D — Shared GPU OOM with BERT models
+
+Symptom: Multiple BERT/ONNX models on one GPU intermittently OOM.
+
+Investigation:
+
+tag request by model/version/tenant/input length/batch size
+run each model alone and in combinations
+DCGM/Nsight show memory spike timing
+PyTorch profiler shows activation memory and padding/sequence-length issue
+
+Fix:
+
+cap max sequence length
+reduce padding with dynamic padding
+bucket by sequence length
+lower max batch size for heavy model
+FP16/BF16 or TensorRT
+separate batching policy
+dedicated GPU/MIG for high-memory model
+add peak-memory canary gate
+
+Lesson:
+
+“Shared-GPU OOM is controlled by peak memory per model, not average GPU memory or model weight size.”
+
+11. Your final interview framework
+
+When asked any troubleshooting question, answer in this pattern:
+
+1. Clarify symptom:
+   Is it latency, throughput, OOM, error rate, cost, or quality?
+
+2. Localize:
+   Which model, tenant, node, GPU, input shape, deployment version?
+
+3. Split latency:
+   queue, preprocessing, runtime, GPU, copy, network, downstream
+
+4. Apply USE/RED:
+   Service health and infrastructure health
+
+5. Choose profiler:
+   PyTorch profiler for model ops
+   Nsight Systems for timeline
+   Nsight Compute for kernels
+   perf/VTune for CPU
+   FIO/STREAM/NCCL for baselines
+
+6. Fix safely:
+   immediate mitigation, root-cause fix, prevention gate
+
+7. Validate:
+   p99, throughput, cost, error rate, quality regression
+12. The one-page mental model
+
+Memorize this:
+
+CPU:
+  tokenization, preprocessing, scheduling, IRQs, NUMA
+  tools: htop, perf, VTune, numastat
+  fixes: pinning, isolation, parallelism, zero-copy
+
+Memory:
+  TLB, HugePages, remote NUMA, pinned memory
+  tools: free, vmstat, perf, numastat
+  fixes: HugePages, NUMA bind, memory pools
+
+GPU:
+  compute, HBM bandwidth, memory capacity, launch overhead
+  tools: DCGM, Nsight Systems, Nsight Compute
+  fixes: batching, quantization, CUDA Graphs, TensorRT, KV tuning
+
+Storage:
+  model load, index load, checkpoint, cold start
+  tools: iostat, FIO
+  fixes: local NVMe, warm pools, readiness gates
+
+Network:
+  TCP, Redis/RAG, RDMA/NCCL
+  tools: ss, ethtool, iperf3, NCCL tests
+  fixes: pooling, ring buffers, SR-IOV, RDMA config, topology
+
+Runtime:
+  TTFT, TPOT, KV cache, batching, prefill/decode
+  tools: vLLM/SGLang/Triton metrics, traces
+  fixes: chunked prefill, prefix cache, quantization, routing
+
+Kubernetes:
+  placement, scaling, rollout, isolation
+  tools: kubectl, events, DCGM, Prometheus
+  fixes: node pools, warm pods, affinity, canary, topology manager
+
+Your preparation target is not to memorize every command. It is to sound like:
+
+“I know how to localize the bottleneck, pick the right tool, prove the cause, make a safe mitigation, and then add prevention so it does not recur.”
