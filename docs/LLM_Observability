@@ -1,0 +1,260 @@
+LLM Observability, Monitoring & Troubleshooting Runbook
+
+LLM Observability, Monitoring & Troubleshooting Runbook
+
+Purpose
+This document provides a unified production runbook and interview preparation guide for AI/LLM platform observability, monitoring, troubleshooting, profiling, and remediation.
+
+Core Philosophy
+Observe → Classify → Isolate → Investigate → Profile → Fix
+
+Layer 1 – Observability Posture (Single Pane of Glass)
+
+Goal
+Detect issues before customers notice them.
+
+Architecture
+User Experience
+    ↓
+Application
+    ↓
+LLM Runtime
+    ↓
+Kubernetes
+    ↓
+GPU/CPU/Memory
+    ↓
+Network
+    ↓
+Storage
+    ↓
+Hardware
+
+Minimal Tool Stack
+- Prometheus + Grafana (single pane of glass)
+- kube-state-metrics
+- node-exporter
+- DCGM Exporter
+- vLLM Metrics Endpoint
+- eBPF / CNI Metrics
+
+Metrics by Layer
+
+User Experience
+- TTFT
+- TPOT
+- P50/P95/P99 latency
+- Requests/sec
+- Tokens/sec
+- Error rate
+
+LLM Runtime
+- Queue length
+- Running requests
+- Waiting requests
+- KV usage
+- KV preemptions
+- Prefix cache hit rate
+- Scheduler metrics
+
+GPU
+- Utilization
+- Memory utilization
+- Power draw
+- Temperature
+- ECC errors
+- NVLink bandwidth
+
+CPU
+- CPU utilization
+- Load average
+- Context switches
+- Run queue depth
+
+Network
+- Throughput
+- Packet loss
+- Retransmits
+- Latency
+
+Storage
+- IOPS
+- Read latency
+- Write latency
+- Model load time
+
+Layer 2 – User Visible Symptoms
+
+Category A – Customer Facing
+- Increased TTFT
+- Increased TPOT
+- P95/P99 latency breach
+- Drop in throughput
+- Request failures
+- Timeouts
+- Quality degradation
+
+Goal
+Determine which subsystem is causing the customer impact.
+
+Layer 3 – Root Cause Isolation
+
+Runtime Indicators
+- High queue length → capacity issue
+- High TTFT → prefill bottleneck
+- High TPOT → decode bottleneck
+- High preemptions → KV pressure
+
+GPU Indicators
+- Low utilization → feeding problem
+- High utilization → compute saturation
+- Memory full → KV pressure
+- ECC errors → hardware issue
+
+CPU Indicators
+- High CPU → tokenization, scheduling, serialization
+
+Network Indicators
+- Retransmissions + latency → network bottleneck
+
+Storage Indicators
+- High IO wait
+- Slow checkpoints
+- Slow model loading
+
+Layer 4 – Deep Production-Safe Investigation
+
+GPU Investigation
+- nvidia-smi
+- dcgmi
+- nvidia-smi topo -m
+
+Check:
+- Thermal throttling
+- Power limits
+- NVLink health
+- PCIe health
+
+NUMA Analysis
+- numastat
+- lscpu
+- hwloc/lstopo
+
+Check:
+- Remote memory accesses
+- Cross-NUMA traffic
+- CPU affinity
+
+Memory Analysis
+- Fragmentation
+- Hugepages
+- Pinned memory
+- KV growth
+
+Prefill vs Decode Analysis
+- Prefill latency
+- Decode latency
+- Chunked prefill efficiency
+- Continuous batching efficiency
+
+Layer 5 – Profiling (Last Resort)
+
+Principle
+Profiling is not the first troubleshooting step.
+Use profiling only when Layers 1–4 fail to identify root cause.
+
+GPU Profiling
+- nsys
+  * Kernel gaps
+  * Timeline analysis
+  * NCCL delays
+  * Memory copy delays
+
+- ncu
+  * Occupancy
+  * Memory throughput
+  * Tensor core utilization
+
+CPU Profiling
+- perf
+  * Hotspots
+  * Context switching
+  * Lock contention
+
+Python Profiling
+- py-spy
+- scalene
+
+Layer 6 – Remediation
+
+Common Root Causes and Fixes
+
+KV Pressure
+- Increase GPU memory
+- Tune paged attention
+- KV offloading
+
+High TTFT
+- Chunked prefill
+- Better batching
+- Prefix caching
+
+CPU Bottleneck
+- CPU affinity
+- More workers
+- Optimize tokenization
+
+GPU Underutilized
+- Increase batch size
+- Improve request coalescing
+
+NUMA Issues
+- NUMA pinning
+- Memory locality optimization
+
+Network Issues
+- RDMA tuning
+- NCCL tuning
+- Packet loss remediation
+
+Kernel Launch Overhead
+- CUDA Graphs
+
+Interview Framework
+
+Step 1: Observe
+Use Grafana dashboards and alerts.
+
+Step 2: Classify
+Determine whether the issue is user-facing or infrastructure-facing.
+
+Step 3: Isolate
+Identify the responsible subsystem: Runtime, GPU, CPU, Network, Storage, or Kubernetes.
+
+Step 4: Investigate
+Use production-safe tools and telemetry.
+
+Step 5: Profile
+Use nsys, ncu, perf, or py-spy only if necessary.
+
+Step 6: Fix
+Apply remediation and validate with latency, throughput, and error-rate metrics.
+
+Final Mental Model
+Layer 1: Observability
+Layer 2: User Symptoms
+Layer 3: Isolation
+Layer 4: Investigation
+Layer 5: Profiling
+Layer 6: Remediation
+
+
+1
+
+Database Client
+Supported by Database Client
+
+
+=====
+
+
