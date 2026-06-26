@@ -1170,4 +1170,78 @@ Leadership
 	Influence
 	Conflicts 
 	Execuative communication
+	==
+
+
+My Ordered List
+	Cat-1 
+		Microsoft
+		CISCO
+		Sandisk
+	Cat-2
+		Socure
+	Cat-3
+		D-Matrix
+
+========================================
+1) LLM & Transformers - Full end to end deployment and troubleshooting of LLM (with fine tuned models) - Must be through with Mental model withput Reference
+	Air gapped and CLoud deployment
+		Deployment Sequence in Cloud (AWS)
+			Step-1 :- Request to Conrol Plane 
+				Pre-Requisite :- user Onboarding tp Control Plane
+			Step-2 :- Request Validation 
+						Valdation
+						ArgoCD Workflow
+			Step-3 :- Capacity allocation
+							Scheduler to check capacity and allocate the new Node Pool 
+							Pre-Warm node pool
+			Step-4 Model weight pulling 
+					NVME loading
+					PreBuild PVC
+			Step-4 Inference Bootstarp with LLM runtime (Kserve)
+					model weight loading
+					TP / PP / EP partitioning
+					KV cache initialization
+					CUDA Graph capture
+					prefix caching warm-up
+					LoRA adapter loading
+					DCGM telemetry sidecar attach
+					LMCache attach (if KV offload enabled)
+			Step-5 Gateway Provisioning + Observability wiring 
+
+	Full troubleshooting and Observability
+		Host + Kuberenets
+			Network + Compute + Memory + Storage
+		LLM Runtimes 
+	Custom CUDA kernels with C++ and Triton 
+	Full GPU Profiling understanding
+========================================================================================
+
+2) Agentic AI and RAG. - Must be through with Mental model withput Reference
+
+========================================================================================
 	
+3) C++ 
+	All basics of C++
+	Advanced C++ 
+		Shared Memory , Memory Arenas and {Smart Pointers} , ZERO COPY 
+		Multi Threading + SIMD
+		Cachline alignmnet 
+		SPSC Queue 
+		Arrow integration + File Handling
+		Through Profiling 
+
+========================================================================================
+
+4) DSA
+========================================================================================
+STAR polishing
+==================
+Architecture
+========================
+DSA [Array , LinkedList, Tree, Stack, Queue , DP , Graph]
+
+
+======================================================
+
+Complete 
