@@ -16,7 +16,8 @@ Primary language: Python. The solutions below are concise interview-ready approa
 ```python
 def two_sum(nums, target):
     seen = {}  # value -> index
-    for i, num in enumerate(nums):
+    for i in range(len(nums)):
+        num = nums[i]
         need = target - num
         if need in seen:
             return [seen[need], i]
@@ -32,12 +33,24 @@ def two_sum(nums, target):
 - Runtime Complexity: Time `O(n)`, Space `O(k)` where `k` is distinct characters
 
 ```python
-from collections import Counter
-
 def is_anagram(s, t):
     if len(s) != len(t):
         return False
-    return Counter(s) == Counter(t)
+    counts = {}
+    # count each character in s
+    for ch in s:
+        if ch in counts:
+            counts[ch] += 1
+        else:
+            counts[ch] = 1
+    # subtract each character in t
+    for ch in t:
+        if ch not in counts:
+            return False
+        counts[ch] -= 1
+        if counts[ch] == 0:
+            del counts[ch]
+    return len(counts) == 0
 ```
 
 ### 3. Group Anagrams (LC 49)
@@ -48,16 +61,23 @@ def is_anagram(s, t):
 - Runtime Complexity: Time `O(total characters)`, Space `O(total characters)`
 
 ```python
-from collections import defaultdict
-
 def group_anagrams(strs):
-    groups = defaultdict(list)
+    groups = {}
     for word in strs:
         count = [0] * 26
         for ch in word:
             count[ord(ch) - ord('a')] += 1
-        groups[tuple(count)].append(word)
-    return list(groups.values())
+        # build a string signature from the counts, e.g. "1#0#2#..."
+        signature = ""
+        for c in count:
+            signature += str(c) + "#"
+        if signature not in groups:
+            groups[signature] = []
+        groups[signature].append(word)
+    result = []
+    for key in groups:
+        result.append(groups[key])
+    return result
 ```
 
 ### 4. Move Zeroes (LC 283)
@@ -86,8 +106,10 @@ def move_zeroes(nums):
 
 ```python
 def max_subarray(nums):
-    best = cur = nums[0]
-    for num in nums[1:]:
+    best = nums[0]
+    cur = nums[0]
+    for i in range(1, len(nums)):
+        num = nums[i]
         cur = max(num, cur + num)
         best = max(best, cur)
     return best
@@ -141,14 +163,17 @@ def max_profit(prices):
 ```python
 def longest_consecutive(nums):
     num_set = set(nums)
-    best = 0
+    max_length = 0
     for num in num_set:
-        if num - 1 not in num_set:  # start of a streak
-            length = 1
-            while num + length in num_set:
-                length += 1
-            best = max(best, length)
-    return best
+        # only start counting from the beginning of a streak
+        if num - 1 not in num_set:
+            cur_num = num
+            cur_length = 1
+            while cur_num + 1 in num_set:
+                cur_num += 1
+                cur_length += 1
+            max_length = max(max_length, cur_length)
+    return max_length
 ```
 
 ## Day 2 - Strings + Sliding Window
@@ -162,15 +187,18 @@ def longest_consecutive(nums):
 
 ```python
 def length_of_longest_substring(s):
-    last_seen = {}
+    seen = set()
     left = 0
-    best = 0
-    for right, ch in enumerate(s):
-        if ch in last_seen and last_seen[ch] >= left:
-            left = last_seen[ch] + 1
-        last_seen[ch] = right
-        best = max(best, right - left + 1)
-    return best
+    max_len = 0
+    for right in range(len(s)):
+        # shrink the window until the current char is not repeated
+        while s[right] in seen:
+            seen.remove(s[left])
+            left += 1
+        seen.add(s[right])
+        cur_len = right - left + 1
+        max_len = max(cur_len, max_len)
+    return max_len
 ```
 
 ### 2. Longest Palindromic Substring (LC 5)
@@ -182,20 +210,29 @@ def length_of_longest_substring(s):
 
 ```python
 def longest_palindrome(s):
-    if not s:
+    if len(s) == 0:
         return ""
-    start, end = 0, 0
+    start = 0
+    end = 0
 
-    def expand(l, r):
-        while l >= 0 and r < len(s) and s[l] == s[r]:
-            l -= 1
-            r += 1
-        return l + 1, r - 1
+    def expand(left, right):
+        while left >= 0 and right < len(s) and s[left] == s[right]:
+            left -= 1
+            right += 1
+        # step back to the last valid palindrome bounds
+        return left + 1, right - 1
 
     for i in range(len(s)):
-        for l, r in (expand(i, i), expand(i, i + 1)):
-            if r - l > end - start:
-                start, end = l, r
+        # odd-length palindrome centered at i
+        l1, r1 = expand(i, i)
+        if r1 - l1 > end - start:
+            start = l1
+            end = r1
+        # even-length palindrome centered between i and i+1
+        l2, r2 = expand(i, i + 1)
+        if r2 - l2 > end - start:
+            start = l2
+            end = r2
     return s[start:end + 1]
 ```
 
@@ -228,17 +265,20 @@ def min_subarray_len(target, nums):
 - Runtime Complexity: Time `O(n)`, Space `O(n)`
 
 ```python
-from collections import defaultdict
-
 def subarray_sum(nums, k):
-    counts = defaultdict(int)
+    counts = {}
     counts[0] = 1
     prefix = 0
     result = 0
     for num in nums:
         prefix += num
-        result += counts[prefix - k]
-        counts[prefix] += 1
+        need = prefix - k
+        if need in counts:
+            result += counts[need]
+        if prefix in counts:
+            counts[prefix] += 1
+        else:
+            counts[prefix] = 1
     return result
 ```
 
@@ -251,14 +291,17 @@ def subarray_sum(nums, k):
 
 ```python
 def longest_common_prefix(strs):
-    if not strs:
+    if len(strs) == 0:
         return ""
-    prefix = strs[0]
-    for word in strs[1:]:
-        while not word.startswith(prefix):
-            prefix = prefix[:-1]
-            if not prefix:
-                return ""
+    prefix = ""
+    first = strs[0]
+    for i in range(len(first)):
+        ch = first[i]
+        # this character must match at position i in every word
+        for word in strs:
+            if i >= len(word) or word[i] != ch:
+                return prefix
+        prefix += ch
     return prefix
 ```
 
@@ -271,15 +314,15 @@ def longest_common_prefix(strs):
 
 ```python
 def merge_alternately(word1, word2):
-    result = []
+    result = ""
     i = 0
     while i < len(word1) or i < len(word2):
         if i < len(word1):
-            result.append(word1[i])
+            result += word1[i]
         if i < len(word2):
-            result.append(word2[i])
+            result += word2[i]
         i += 1
-    return "".join(result)
+    return result
 ```
 
 ### 7. Valid Palindrome (LC 125)
@@ -412,13 +455,16 @@ def find_min(nums):
 - Runtime Complexity: Time `O(n log max(piles))`, Space `O(1)`
 
 ```python
-import math
-
 def min_eating_speed(piles, h):
-    lo, hi = 1, max(piles)
+    lo = 1
+    hi = max(piles)
     while lo < hi:
         speed = (lo + hi) // 2
-        hours = sum(math.ceil(p / speed) for p in piles)
+        # count total hours needed at this eating speed
+        hours = 0
+        for p in piles:
+            # ceiling division without importing math
+            hours += (p + speed - 1) // speed
         if hours <= h:
             hi = speed
         else:
@@ -506,10 +552,12 @@ class MinStack:
 
 ```python
 def daily_temperatures(temperatures):
-    result = [0] * len(temperatures)
+    n = len(temperatures)
+    result = [0] * n
     stack = []  # indices with decreasing temperatures
-    for i, temp in enumerate(temperatures):
-        while stack and temperatures[stack[-1]] < temp:
+    for i in range(n):
+        temp = temperatures[i]
+        while len(stack) > 0 and temperatures[stack[-1]] < temp:
             prev = stack.pop()
             result[prev] = i - prev
         stack.append(i)
@@ -524,25 +572,54 @@ def daily_temperatures(temperatures):
 - Runtime Complexity: Time `O(1)` per get/put, Space `O(capacity)`
 
 ```python
-from collections import OrderedDict
+class Node:
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+        self.prev = None
+        self.next = None
 
 class LRUCache:
     def __init__(self, capacity):
         self.capacity = capacity
-        self.cache = OrderedDict()
+        self.cache = {}  # key -> Node
+        # dummy head and tail so we never handle None edges
+        self.head = Node(0, 0)
+        self.tail = Node(0, 0)
+        self.head.next = self.tail
+        self.tail.prev = self.head
+
+    def _remove(self, node):
+        node.prev.next = node.next
+        node.next.prev = node.prev
+
+    def _add_to_front(self, node):
+        node.next = self.head.next
+        node.prev = self.head
+        self.head.next.prev = node
+        self.head.next = node
 
     def get(self, key):
         if key not in self.cache:
             return -1
-        self.cache.move_to_end(key)
-        return self.cache[key]
+        node = self.cache[key]
+        # move the used node to the front
+        self._remove(node)
+        self._add_to_front(node)
+        return node.value
 
     def put(self, key, value):
         if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = value
+            old = self.cache[key]
+            self._remove(old)
+        node = Node(key, value)
+        self.cache[key] = node
+        self._add_to_front(node)
         if len(self.cache) > self.capacity:
-            self.cache.popitem(last=False)
+            # evict the least-recently-used node (just before tail)
+            lru = self.tail.prev
+            self._remove(lru)
+            del self.cache[lru.key]
 ```
 
 ### 5. LRU + Thread-Safety Follow-up
@@ -554,28 +631,19 @@ class LRUCache:
 
 ```python
 import threading
-from collections import OrderedDict
 
 class ThreadSafeLRU:
     def __init__(self, capacity):
-        self.capacity = capacity
-        self.cache = OrderedDict()
+        self.lru = LRUCache(capacity)  # reuse the DLL-based LRU above
         self.lock = threading.Lock()
 
     def get(self, key):
         with self.lock:
-            if key not in self.cache:
-                return -1
-            self.cache.move_to_end(key)
-            return self.cache[key]
+            return self.lru.get(key)
 
     def put(self, key, value):
         with self.lock:
-            if key in self.cache:
-                self.cache.move_to_end(key)
-            self.cache[key] = value
-            if len(self.cache) > self.capacity:
-                self.cache.popitem(last=False)
+            self.lru.put(key, value)
 
 # For higher throughput: shard into N ThreadSafeLRU instances,
 # routing each key by hash(key) % N so locks rarely contend.
@@ -589,46 +657,89 @@ class ThreadSafeLRU:
 - Runtime Complexity: Time `O(1)` average per get/put, Space `O(capacity)`
 
 ```python
-from collections import defaultdict, OrderedDict
+class DNode:
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+        self.freq = 1
+        self.prev = None
+        self.next = None
+
+class DList:
+    """Doubly linked list; most-recently-used stays at the front."""
+    def __init__(self):
+        self.head = DNode(0, 0)
+        self.tail = DNode(0, 0)
+        self.head.next = self.tail
+        self.tail.prev = self.head
+        self.size = 0
+
+    def add_to_front(self, node):
+        node.next = self.head.next
+        node.prev = self.head
+        self.head.next.prev = node
+        self.head.next = node
+        self.size += 1
+
+    def remove(self, node):
+        node.prev.next = node.next
+        node.next.prev = node.prev
+        self.size -= 1
+
+    def remove_last(self):
+        if self.size == 0:
+            return None
+        last = self.tail.prev
+        self.remove(last)
+        return last
 
 class LFUCache:
     def __init__(self, capacity):
         self.capacity = capacity
-        self.key_to_val = {}
-        self.key_to_freq = {}
-        self.freq_to_keys = defaultdict(OrderedDict)
+        self.key_to_node = {}    # key -> DNode
+        self.freq_to_list = {}   # freq -> DList of nodes at that freq
         self.min_freq = 0
 
-    def _bump(self, key):
-        freq = self.key_to_freq[key]
-        del self.freq_to_keys[freq][key]
-        if not self.freq_to_keys[freq]:
-            del self.freq_to_keys[freq]
+    def _bump(self, node):
+        # move a node from its current freq list to freq+1 list
+        freq = node.freq
+        self.freq_to_list[freq].remove(node)
+        if self.freq_to_list[freq].size == 0:
+            del self.freq_to_list[freq]
             if self.min_freq == freq:
                 self.min_freq += 1
-        self.key_to_freq[key] = freq + 1
-        self.freq_to_keys[freq + 1][key] = None
+        node.freq += 1
+        if node.freq not in self.freq_to_list:
+            self.freq_to_list[node.freq] = DList()
+        self.freq_to_list[node.freq].add_to_front(node)
 
     def get(self, key):
-        if key not in self.key_to_val:
+        if key not in self.key_to_node:
             return -1
-        self._bump(key)
-        return self.key_to_val[key]
+        node = self.key_to_node[key]
+        self._bump(node)
+        return node.value
 
     def put(self, key, value):
         if self.capacity == 0:
             return
-        if key in self.key_to_val:
-            self.key_to_val[key] = value
-            self._bump(key)
+        if key in self.key_to_node:
+            node = self.key_to_node[key]
+            node.value = value
+            self._bump(node)
             return
-        if len(self.key_to_val) >= self.capacity:
-            evict, _ = self.freq_to_keys[self.min_freq].popitem(last=False)
-            del self.key_to_val[evict]
-            del self.key_to_freq[evict]
-        self.key_to_val[key] = value
-        self.key_to_freq[key] = 1
-        self.freq_to_keys[1][key] = None
+        if len(self.key_to_node) >= self.capacity:
+            # evict least-frequently-used, oldest within that freq
+            lru_list = self.freq_to_list[self.min_freq]
+            evict = lru_list.remove_last()
+            del self.key_to_node[evict.key]
+            if lru_list.size == 0:
+                del self.freq_to_list[self.min_freq]
+        node = DNode(key, value)
+        self.key_to_node[key] = node
+        if 1 not in self.freq_to_list:
+            self.freq_to_list[1] = DList()
+        self.freq_to_list[1].add_to_front(node)
         self.min_freq = 1
 ```
 
@@ -653,25 +764,36 @@ class FileSystem:
         node = self.root
         if path == "/":
             return node
-        for part in path.strip("/").split("/"):
-            node = node.children.setdefault(part, Node())
+        parts = path.strip("/").split("/")
+        for part in parts:
+            if part not in node.children:
+                node.children[part] = Node()
+            node = node.children[part]
         return node
 
     def ls(self, path):
         node = self._traverse(path)
         if node.content is not None:  # it's a file
-            return [path.strip("/").split("/")[-1]]
-        return sorted(node.children.keys())
+            parts = path.strip("/").split("/")
+            return [parts[-1]]
+        names = []
+        for name in node.children:
+            names.append(name)
+        names.sort()
+        return names
 
     def mkdir(self, path):
         self._traverse(path)
 
     def addContentToFile(self, filePath, content):
         node = self._traverse(filePath)
-        node.content = (node.content or "") + content
+        if node.content is None:
+            node.content = ""
+        node.content += content
 
     def readContentFromFile(self, filePath):
-        return self._traverse(filePath).content
+        node = self._traverse(filePath)
+        return node.content
 ```
 
 ## Day 5 - Linked List
@@ -706,14 +828,21 @@ def reverse_list(head):
 
 ```python
 def merge_two_lists(list1, list2):
-    dummy = tail = ListNode()
+    dummy = ListNode()
+    tail = dummy
     while list1 and list2:
         if list1.val <= list2.val:
-            tail.next, list1 = list1, list1.next
+            tail.next = list1
+            list1 = list1.next
         else:
-            tail.next, list2 = list2, list2.next
+            tail.next = list2
+            list2 = list2.next
         tail = tail.next
-    tail.next = list1 or list2
+    # attach whatever remains
+    if list1:
+        tail.next = list1
+    else:
+        tail.next = list2
     return dummy.next
 ```
 
@@ -786,7 +915,8 @@ def remove_nth_from_end(head, n):
 
 ```python
 def add_two_numbers(l1, l2):
-    dummy = tail = ListNode()
+    dummy = ListNode()
+    tail = dummy
     carry = 0
     while l1 or l2 or carry:
         total = carry
@@ -796,7 +926,8 @@ def add_two_numbers(l1, l2):
         if l2:
             total += l2.val
             l2 = l2.next
-        carry, digit = divmod(total, 10)
+        carry = total // 10
+        digit = total % 10
         tail.next = ListNode(digit)
         tail = tail.next
     return dummy.next
@@ -814,12 +945,14 @@ import heapq
 
 def merge_k_lists(lists):
     heap = []
-    for i, node in enumerate(lists):
+    for i in range(len(lists)):
+        node = lists[i]
         if node:
             heapq.heappush(heap, (node.val, i, node))
-    dummy = tail = ListNode()
-    while heap:
-        _, i, node = heapq.heappop(heap)
+    dummy = ListNode()
+    tail = dummy
+    while len(heap) > 0:
+        val, i, node = heapq.heappop(heap)
         tail.next = node
         tail = tail.next
         if node.next:
@@ -839,14 +972,23 @@ def copy_random_list(head):
     if not head:
         return None
     mapping = {}
+    # first pass: create a copy for every node
     curr = head
     while curr:
         mapping[curr] = Node(curr.val)
         curr = curr.next
+    # second pass: wire next and random pointers
     curr = head
     while curr:
-        mapping[curr].next = mapping.get(curr.next)
-        mapping[curr].random = mapping.get(curr.random)
+        copy = mapping[curr]
+        if curr.next:
+            copy.next = mapping[curr.next]
+        else:
+            copy.next = None
+        if curr.random:
+            copy.random = mapping[curr.random]
+        else:
+            copy.random = None
         curr = curr.next
     return mapping[head]
 ```
@@ -987,17 +1129,23 @@ def lowest_common_ancestor_bst(root, p, q):
 
 ```python
 def build_tree(preorder, inorder):
-    idx = {val: i for i, val in enumerate(inorder)}
-    self_pre = iter(preorder)
+    # map each value to its index in inorder for O(1) splits
+    idx = {}
+    for i in range(len(inorder)):
+        idx[inorder[i]] = i
+    pre_pos = [0]  # current index into preorder (list so inner func can mutate)
+
     def build(lo, hi):
         if lo > hi:
             return None
-        val = next(self_pre)
+        val = preorder[pre_pos[0]]
+        pre_pos[0] += 1
         node = TreeNode(val)
         mid = idx[val]
         node.left = build(lo, mid - 1)
         node.right = build(mid + 1, hi)
         return node
+
     return build(0, len(inorder) - 1)
 ```
 
@@ -1131,7 +1279,9 @@ class Trie:
     def insert(self, word):
         node = self
         for ch in word:
-            node = node.children.setdefault(ch, Trie())
+            if ch not in node.children:
+                node.children[ch] = Trie()
+            node = node.children[ch]
         node.is_end = True
 
     def _find(self, word):
@@ -1166,7 +1316,9 @@ class WordDictionary:
     def addWord(self, word):
         node = self
         for ch in word:
-            node = node.children.setdefault(ch, WordDictionary())
+            if ch not in node.children:
+                node.children[ch] = WordDictionary()
+            node = node.children[ch]
         node.is_end = True
 
     def search(self, word):
@@ -1175,8 +1327,14 @@ class WordDictionary:
                 return node.is_end
             ch = word[i]
             if ch == '.':
-                return any(dfs(child, i + 1) for child in node.children.values())
-            return ch in node.children and dfs(node.children[ch], i + 1)
+                # wildcard: try every child branch
+                for key in node.children:
+                    if dfs(node.children[key], i + 1):
+                        return True
+                return False
+            if ch not in node.children:
+                return False
+            return dfs(node.children[ch], i + 1)
         return dfs(self, 0)
 ```
 
@@ -1199,7 +1357,10 @@ def num_islands(grid):
         if r < 0 or r >= rows or c < 0 or c >= cols or grid[r][c] != '1':
             return
         grid[r][c] = '0'
-        dfs(r + 1, c); dfs(r - 1, c); dfs(r, c + 1); dfs(r, c - 1)
+        dfs(r + 1, c)
+        dfs(r - 1, c)
+        dfs(r, c + 1)
+        dfs(r, c - 1)
     for r in range(rows):
         for c in range(cols):
             if grid[r][c] == '1':
@@ -1225,7 +1386,10 @@ def flood_fill(image, sr, sc, color):
         if r < 0 or r >= rows or c < 0 or c >= cols or image[r][c] != start:
             return
         image[r][c] = color
-        dfs(r + 1, c); dfs(r - 1, c); dfs(r, c + 1); dfs(r, c - 1)
+        dfs(r + 1, c)
+        dfs(r - 1, c)
+        dfs(r, c + 1)
+        dfs(r, c - 1)
     dfs(sr, sc)
     return image
 ```
@@ -1295,17 +1459,26 @@ def clone_graph(node):
 - Runtime Complexity: Time `O(V+E)`, Space `O(V+E)`
 
 ```python
-from collections import deque, defaultdict
+from collections import deque
 
 def can_finish(num_courses, prerequisites):
-    graph = defaultdict(list)
+    # build adjacency list and indegree counts
+    graph = {}
+    for i in range(num_courses):
+        graph[i] = []
     indeg = [0] * num_courses
-    for course, pre in prerequisites:
+    for pair in prerequisites:
+        course = pair[0]
+        pre = pair[1]
         graph[pre].append(course)
         indeg[course] += 1
-    queue = deque(c for c in range(num_courses) if indeg[c] == 0)
+    # start from every course that has no prerequisites
+    queue = deque()
+    for c in range(num_courses):
+        if indeg[c] == 0:
+            queue.append(c)
     visited = 0
-    while queue:
+    while len(queue) > 0:
         node = queue.popleft()
         visited += 1
         for nxt in graph[node]:
@@ -1323,24 +1496,33 @@ def can_finish(num_courses, prerequisites):
 - Runtime Complexity: Time `O(V+E)`, Space `O(V+E)`
 
 ```python
-from collections import deque, defaultdict
+from collections import deque
 
 def find_order(num_courses, prerequisites):
-    graph = defaultdict(list)
+    graph = {}
+    for i in range(num_courses):
+        graph[i] = []
     indeg = [0] * num_courses
-    for course, pre in prerequisites:
+    for pair in prerequisites:
+        course = pair[0]
+        pre = pair[1]
         graph[pre].append(course)
         indeg[course] += 1
-    queue = deque(c for c in range(num_courses) if indeg[c] == 0)
+    queue = deque()
+    for c in range(num_courses):
+        if indeg[c] == 0:
+            queue.append(c)
     order = []
-    while queue:
+    while len(queue) > 0:
         node = queue.popleft()
         order.append(node)
         for nxt in graph[node]:
             indeg[nxt] -= 1
             if indeg[nxt] == 0:
                 queue.append(nxt)
-    return order if len(order) == num_courses else []
+    if len(order) == num_courses:
+        return order
+    return []
 ```
 
 ### 7. Number of Connected Components (LC 323)
@@ -1361,11 +1543,14 @@ def count_components(n, edges):
         return x
     def union(a, b):
         nonlocal count
-        ra, rb = find(a), find(b)
+        ra = find(a)
+        rb = find(b)
         if ra != rb:
             parent[ra] = rb
             count -= 1
-    for a, b in edges:
+    for edge in edges:
+        a = edge[0]
+        b = edge[1]
         union(a, b)
     return count
 ```
@@ -1427,13 +1612,22 @@ def find_kth_largest(nums, k):
 - Runtime Complexity: Time `O(n)`, Space `O(n)`
 
 ```python
-from collections import Counter
-
 def top_k_frequent(nums, k):
-    counts = Counter(nums)
-    buckets = [[] for _ in range(len(nums) + 1)]
-    for num, freq in counts.items():
+    # count how many times each number appears
+    counts = {}
+    for num in nums:
+        if num in counts:
+            counts[num] += 1
+        else:
+            counts[num] = 1
+    # bucket index = frequency
+    buckets = []
+    for i in range(len(nums) + 1):
+        buckets.append([])
+    for num in counts:
+        freq = counts[num]
         buckets[freq].append(num)
+    # collect from the highest frequency downward
     result = []
     for freq in range(len(buckets) - 1, 0, -1):
         for num in buckets[freq]:
@@ -1481,8 +1675,10 @@ class MedianFinder:
 def merge_intervals(intervals):
     intervals.sort()
     merged = []
-    for start, end in intervals:
-        if merged and start <= merged[-1][1]:
+    for interval in intervals:
+        start = interval[0]
+        end = interval[1]
+        if len(merged) > 0 and start <= merged[-1][1]:
             merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([start, end])
@@ -1525,8 +1721,11 @@ import heapq
 def min_meeting_rooms(intervals):
     intervals.sort()
     heap = []  # active meeting end times
-    for start, end in intervals:
-        if heap and heap[0] <= start:
+    for interval in intervals:
+        start = interval[0]
+        end = interval[1]
+        # a room frees up if its meeting ended by this start time
+        if len(heap) > 0 and heap[0] <= start:
             heapq.heappop(heap)
         heapq.heappush(heap, end)
     return len(heap)
@@ -1540,12 +1739,23 @@ def min_meeting_rooms(intervals):
 - Runtime Complexity: Time `O(T)`, Space `O(1)` because task labels are bounded
 
 ```python
-from collections import Counter
-
 def least_interval(tasks, n):
-    counts = Counter(tasks)
-    max_freq = max(counts.values())
-    max_count = sum(1 for v in counts.values() if v == max_freq)
+    # count how many times each task appears
+    counts = {}
+    for task in tasks:
+        if task in counts:
+            counts[task] += 1
+        else:
+            counts[task] = 1
+    # find the highest frequency
+    max_freq = 0
+    for task in counts:
+        max_freq = max(max_freq, counts[task])
+    # count how many tasks share that highest frequency
+    max_count = 0
+    for task in counts:
+        if counts[task] == max_freq:
+            max_count += 1
     frame = (max_freq - 1) * (n + 1) + max_count
     return max(frame, len(tasks))
 ```
@@ -1584,9 +1794,12 @@ def max_matrix_sum(matrix):
 
 ```python
 def climb_stairs(n):
-    a, b = 1, 1
-    for _ in range(n):
-        a, b = b, a + b
+    a = 1
+    b = 1
+    for i in range(n):
+        temp = a + b
+        a = b
+        b = temp
     return a
 ```
 
@@ -1599,9 +1812,13 @@ def climb_stairs(n):
 
 ```python
 def rob(nums):
-    prev, curr = 0, 0
+    prev = 0
+    curr = 0
     for num in nums:
-        prev, curr = curr, max(curr, prev + num)
+        # either skip this house (curr) or take it (prev + num)
+        temp = max(curr, prev + num)
+        prev = curr
+        curr = temp
     return curr
 ```
 
@@ -1616,11 +1833,17 @@ def rob(nums):
 def rob_circular(nums):
     if len(nums) == 1:
         return nums[0]
+
     def rob_line(houses):
-        prev, curr = 0, 0
+        prev = 0
+        curr = 0
         for num in houses:
-            prev, curr = curr, max(curr, prev + num)
+            temp = max(curr, prev + num)
+            prev = curr
+            curr = temp
         return curr
+
+    # circular: either skip the first house or skip the last house
     return max(rob_line(nums[1:]), rob_line(nums[:-1]))
 ```
 
@@ -1668,7 +1891,11 @@ def unique_paths(m, n):
 ```python
 def longest_common_subsequence(text1, text2):
     m, n = len(text1), len(text2)
-    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    # build an (m+1) x (n+1) grid of zeros
+    dp = []
+    for i in range(m + 1):
+        row = [0] * (n + 1)
+        dp.append(row)
     for i in range(1, m + 1):
         for j in range(1, n + 1):
             if text1[i - 1] == text2[j - 1]:
@@ -1708,10 +1935,10 @@ def word_break(s, word_dict):
 ```python
 def can_jump(nums):
     reach = 0
-    for i, jump in enumerate(nums):
+    for i in range(len(nums)):
         if i > reach:
             return False
-        reach = max(reach, i + jump)
+        reach = max(reach, i + nums[i])
     return True
 ```
 
@@ -1828,17 +2055,15 @@ def generate_parenthesis(n):
     result = []
     def backtrack(path, open_count, close_count):
         if len(path) == 2 * n:
-            result.append(''.join(path))
+            result.append(path)
             return
+        # we can add '(' while we still have opens left
         if open_count < n:
-            path.append('(')
-            backtrack(path, open_count + 1, close_count)
-            path.pop()
+            backtrack(path + '(', open_count + 1, close_count)
+        # we can add ')' only if it has a matching '('
         if close_count < open_count:
-            path.append(')')
-            backtrack(path, open_count, close_count + 1)
-            path.pop()
-    backtrack([], 0, 0)
+            backtrack(path + ')', open_count, close_count + 1)
+    backtrack("", 0, 0)
     return result
 ```
 
@@ -1853,31 +2078,62 @@ def generate_parenthesis(n):
 
 ```python
 import time
-from collections import OrderedDict
+
+class DNodeTTL:
+    def __init__(self, key, value, expire_at):
+        self.key = key
+        self.value = value
+        self.expire_at = expire_at  # None => never expires
+        self.prev = None
+        self.next = None
 
 class LRUCacheTTL:
     """O(1) LRU with optional per-key TTL (lazy expiry on access)."""
     def __init__(self, capacity):
         self.capacity = capacity
-        self.cache = OrderedDict()  # key -> (value, expire_at or None)
+        self.cache = {}  # key -> DNodeTTL
+        self.head = DNodeTTL(0, 0, None)
+        self.tail = DNodeTTL(0, 0, None)
+        self.head.next = self.tail
+        self.tail.prev = self.head
+
+    def _remove(self, node):
+        node.prev.next = node.next
+        node.next.prev = node.prev
+
+    def _add_to_front(self, node):
+        node.next = self.head.next
+        node.prev = self.head
+        self.head.next.prev = node
+        self.head.next = node
 
     def get(self, key):
         if key not in self.cache:
             return -1
-        value, expire_at = self.cache[key]
-        if expire_at is not None and time.time() > expire_at:
+        node = self.cache[key]
+        # lazily drop the entry if it has expired
+        if node.expire_at is not None and time.time() > node.expire_at:
+            self._remove(node)
             del self.cache[key]
             return -1
-        self.cache.move_to_end(key)
-        return value
+        self._remove(node)
+        self._add_to_front(node)
+        return node.value
 
     def put(self, key, value, ttl=None):
-        expire_at = time.time() + ttl if ttl else None
+        expire_at = None
+        if ttl:
+            expire_at = time.time() + ttl
         if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = (value, expire_at)
+            old = self.cache[key]
+            self._remove(old)
+        node = DNodeTTL(key, value, expire_at)
+        self.cache[key] = node
+        self._add_to_front(node)
         if len(self.cache) > self.capacity:
-            self.cache.popitem(last=False)
+            lru = self.tail.prev
+            self._remove(lru)
+            del self.cache[lru.key]
 
 # Thread-safety: guard get/put with a lock (see Day 4 ThreadSafeLRU).
 # Distributed scale: shard by consistent hashing across nodes;
@@ -1892,24 +2148,33 @@ class LRUCacheTTL:
 - Runtime Complexity: Time `O(V+E)`, Space `O(V+E)`
 
 ```python
-from collections import deque, defaultdict
+from collections import deque
 
 def find_order(num_courses, prerequisites):
-    graph = defaultdict(list)
+    graph = {}
+    for i in range(num_courses):
+        graph[i] = []
     indeg = [0] * num_courses
-    for course, pre in prerequisites:
+    for pair in prerequisites:
+        course = pair[0]
+        pre = pair[1]
         graph[pre].append(course)
         indeg[course] += 1
-    queue = deque(c for c in range(num_courses) if indeg[c] == 0)
+    queue = deque()
+    for c in range(num_courses):
+        if indeg[c] == 0:
+            queue.append(c)
     order = []
-    while queue:
+    while len(queue) > 0:
         node = queue.popleft()
         order.append(node)
         for nxt in graph[node]:
             indeg[nxt] -= 1
             if indeg[nxt] == 0:
                 queue.append(nxt)
-    return order if len(order) == num_courses else []  # empty => cycle
+    if len(order) == num_courses:
+        return order
+    return []  # empty => cycle
 ```
 
 <!-- END GENERATED -->
