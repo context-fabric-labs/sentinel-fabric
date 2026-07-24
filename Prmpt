@@ -1,1 +1,714 @@
 
+I am preparing to join Sandisk as a Senior Principal AI Solutions Architect.
+
+For the next 14 days, I want you to act as my:
+
+* AI systems engineering mentor
+* LLM inference and KV-cache mentor
+* HPC-style serving architect
+* HBM, HBF and enterprise-storage mentor
+* AWS laboratory guide
+* Linux, NVMe and performance-engineering mentor
+* Distinguished Engineer career coach
+* Executive communication coach
+* Daily execution coach
+
+I can dedicate approximately 10 hours per day.
+
+My goal is not only to study concepts. I want to build a practical, measurable proof of concept in AWS that gives me hands-on experience with:
+
+* LLM inference systems
+* vLLM
+* PagedAttention
+* KV-cache sizing
+* Prefix caching
+* KV-cache offloading
+* GPU memory management
+* Host DRAM
+* Local NVMe
+* Linux I/O
+* PCIe data movement
+* Model loading
+* GPU idle-time analysis
+* Performance observability
+* Admission control
+* Session affinity
+* Multi-tenant serving
+* Storage and accelerator economics
+
+The two strategic tracks must remain integrated.
+
+Track 1 — Sandisk AI Systems Architecture
+
+I want to build expertise connecting:
+
+* AI workloads
+* Model loading
+* Checkpointing
+* RAG
+* Multi-model serving
+* GPU and accelerator systems
+* GPU-resident memory
+* HBM
+* HBF, or High Bandwidth Flash
+* Host DRAM
+* Local NVMe
+* EBS and object storage
+* Linux block I/O
+* PCIe
+* NUMA
+* SSD behavior
+* NAND and firmware implications
+* Storage-to-GPU data movement
+* GPU utilization
+* Performance, power, capacity and TCO
+
+Keep HBM and HBF distinct.
+
+HBM is high-bandwidth memory closely connected to the GPU or accelerator.
+
+HBF is Sandisk’s emerging high-bandwidth flash concept. Do not describe HBF as a proven replacement for HBM. Treat it as a possible future capacity tier whose latency, bandwidth, endurance, power, runtime integration, fault behavior, packaging and production maturity must be experimentally validated.
+
+Track 2 — Capital One / HPC-Style LLM Serving
+
+I want to develop deep practical credibility in:
+
+* LLM serving at scale
+* Prefill versus decode
+* KV-cache memory calculations
+* PagedAttention
+* Continuous batching
+* Automatic prefix caching
+* CPU KV-cache offloading
+* NVMe KV-cache offloading
+* Cache promotion and demotion
+* Cache admission policies
+* Cache eviction policies
+* Session-aware routing
+* KV-aware routing
+* Token admission
+* Queueing and backpressure
+* Priority lanes
+* Noisy-neighbor control
+* Multi-tenant isolation
+* Tail-latency protection
+* SLO goodput
+* GPU utilization and cost efficiency
+
+Integrated Signature Project
+
+The project name is:
+
+FlashKV Fabric
+
+The project objective is:
+
+Build and benchmark a workload-aware multi-tier KV-cache and AI data-path architecture spanning:
+
+* GPU-resident memory as the hottest tier
+* Host DRAM as the warm tier
+* Local NVMe as a larger but slower cache tier
+* EBS or S3 as the persistent model repository
+* vLLM as the inference runtime
+* LMCache as the initial KV-cache offloading implementation
+* Prometheus, Grafana, DCGM, Linux tools and eBPF for observability
+
+The system should eventually evaluate:
+
+1. GPU-only KV cache
+2. GPU prefix caching
+3. GPU plus CPU DRAM KV offload
+4. GPU plus CPU plus local NVMe KV offload
+5. Token-aware admission
+6. Session affinity
+7. KV-aware routing
+8. Concurrent model loading and KV-cache traffic
+9. Storage QoS and tail latency
+10. HBF workload requirements
+11. Cost per million tokens
+12. Tokens per GPU-hour
+13. GPU idle time
+14. HBM capacity recovered
+15. NVMe bytes written and endurance implications
+
+Primary Cloud Laboratory
+
+Use AWS as the primary platform.
+
+Preferred instance:
+
+* AWS EC2 g6e.2xlarge
+* One NVIDIA L40S GPU
+* Approximately 48 GB GPU memory
+* Local NVMe instance storage
+* EBS persistent storage
+* Ubuntu 22.04 AWS Deep Learning AMI
+
+Use raw EC2 rather than SageMaker because I need operating-system-level access to:
+
+* NVMe devices
+* Filesystems
+* Linux I/O
+* PCIe topology
+* GPU telemetry
+* Docker
+* vLLM
+* LMCache
+* fio
+* nvme-cli
+* iostat
+* numactl
+* lspci
+* eBPF tools
+
+Important technical precision:
+
+The NVIDIA L40S uses GDDR6 rather than physical HBM. For this laboratory, refer to it as the GPU-resident hot-memory tier. Do not falsely describe L40S memory as HBM. Explain that the methodology still prepares us to reason about HBM, HBF, DRAM and NVMe hierarchies.
+
+Budget
+
+The total two-week budget ceiling is $1,500.
+
+Do not try to consume the full budget.
+
+Target completing the project for less than $1,000.
+
+Require:
+
+* AWS budget alerts
+* Tagged resources
+* Manual shutdown after each session
+* Persistent storage for code and results
+* Clear warnings that local instance NVMe is ephemeral
+* Careful verification before formatting any block device
+
+What I Need Now
+
+Generate a detailed Day 1 execution document.
+
+Title it:
+
+Day 1 — Build the GPU–KV–Storage Laboratory
+
+Assume 10 hours of total dedication, including reasonable breaks.
+
+The document must be practical and implementation-oriented rather than mainly theoretical.
+
+Day 1 Objectives
+
+By the end of Day 1, I should have:
+
+1. AWS cost controls configured
+2. A project Git repository
+3. A running AWS GPU instance
+4. Local NVMe and EBS correctly identified
+5. Local NVMe safely formatted and mounted
+6. GPU, CPU, NUMA, PCIe and storage topology captured
+7. Python and vLLM environment installed
+8. LMCache installed for later use, but not enabled in the baseline
+9. A working vLLM server
+10. A 7B instruction model loaded
+11. Prefix caching explicitly disabled
+12. A clean GPU-only serving baseline
+13. A KV-cache sizing calculator
+14. A context-length and concurrency matrix
+15. Initial TTFT and end-to-end latency measurements
+16. GPU and I/O telemetry
+17. A hardware topology artifact
+18. A GPU-memory and KV-capacity artifact
+19. Five hypotheses for Day 2
+20. The GPU instance stopped after results are saved
+
+Required Structure
+
+Organize the Day 1 document into the following sections.
+
+1. Day 1 mission
+
+Explain:
+
+* Why the baseline must be established before optimization
+* Why we should not enable prefix caching or LMCache immediately
+* Why the physical data path must be understood first
+* How Day 1 connects Sandisk storage architecture with HPC-style LLM serving
+
+2. Target architecture
+
+Include an ASCII architecture diagram showing:
+
+* Hugging Face or model repository
+* EBS
+* Local NVMe
+* Linux filesystem and page cache
+* CPU
+* Host DRAM
+* PCIe
+* GPU-resident memory
+* vLLM
+* Prefill
+* Decode
+* KV cache
+
+3. Ten-hour schedule
+
+Create a detailed schedule totaling approximately 10 hours.
+
+Include:
+
+* Morning meditation and sankalpa
+* AWS setup
+* Repository setup
+* EC2 provisioning
+* Storage identification
+* Topology investigation
+* KV-cache study
+* Coding
+* vLLM installation
+* Model serving
+* Benchmarking
+* Artifact writing
+* Review and shutdown
+
+Include breaks and a meal break.
+
+4. Morning personality practice
+
+Include:
+
+* 15 to 20 minutes meditation
+* Five-minute sankalpa
+* One most-important karma for the day
+* A reminder to pursue evidence before conclusion
+* A reminder not to try to prove expertise prematurely
+
+Use a sankalpa similar to:
+
+“Today I will establish what the system actually is before deciding how it should be optimized.”
+
+5. AWS cost controls
+
+Provide step-by-step instructions for:
+
+* Creating a $1,500 AWS cost budget
+* Alerts at approximately $150, $375, $750, $1,125 and $1,350
+* Resource tags
+* Quota request for G-family instances
+* SSH security limited to my public IP
+* Avoiding public exposure of the vLLM port
+* Using SSH port forwarding
+
+Explain that AWS budget alerts do not automatically stop resources.
+
+6. Repository structure
+
+Provide shell commands to create a repository named:
+
+flashkv-fabric
+
+Create directories such as:
+
+* infra
+* scripts
+* benchmarks/model_loading
+* benchmarks/kv_cache
+* benchmarks/storage
+* observability
+* results/day01
+* architecture
+* docs
+
+Create:
+
+* README.md
+* .gitignore
+* Initial Git commit
+
+The README should describe the HBM or GPU-memory, DRAM and NVMe hierarchy and the main project questions.
+
+7. EC2 configuration
+
+Recommend:
+
+* us-west-2 unless availability or price suggests otherwise
+* g6e.2xlarge
+* On-Demand for the first day
+* Current AWS Deep Learning Base GPU AMI with Ubuntu 22.04
+* Approximately 250 GB gp3 root EBS
+* Local NVMe instance storage
+* No direct public exposure of port 8000
+
+Explain why Spot should not be used for the first baseline.
+
+8. Linux tooling
+
+Provide commands to install:
+
+* nvme-cli
+* fio
+* sysstat
+* numactl
+* pciutils
+* jq
+* git
+* curl
+* wget
+* htop
+* xfsprogs
+* tree
+
+9. Hardware topology capture
+
+Provide commands to capture:
+
+* date
+* OS
+* uname
+* lscpu
+* numactl –hardware
+* nvidia-smi
+* nvidia-smi topo -m
+* lspci -tv
+* lsblk
+* nvme list
+* df
+* free
+
+Save the combined output to:
+
+results/day01/system-topology.txt
+
+10. Safe EBS and local NVMe identification
+
+Explain that both EBS and local instance storage may appear as NVMe devices.
+
+Provide commands using:
+
+* lsblk
+* nvme list
+* nvme id-ctrl
+
+Explain how to recognize:
+
+* Amazon Elastic Block Store
+* Amazon EC2 NVMe Instance Storage
+
+Include a prominent warning not to assume a device name and not to format a device until verified.
+
+11. Mounting local NVMe
+
+After verification, provide commands to:
+
+* Assign the verified device to an environment variable
+* Format it using XFS
+* Mount it at /mnt/nvme
+* Use noatime and nodiratime
+* Change ownership to ubuntu
+* Create directories for models, Hugging Face cache, KV cache and results
+
+Warn that the command destroys data.
+
+Explain that local instance storage is ephemeral and final results must be copied to EBS or S3.
+
+12. KV-cache mental model
+
+Explain clearly:
+
+* Prefill
+* Decode
+* Keys and values
+* Why KV cache grows with tokens and concurrency
+* Why decode continuously reads and extends KV state
+* Difference between model weights and KV cache
+* Difference between PagedAttention and prefix caching
+* Why GQA reduces KV-cache size relative to full multi-head attention
+
+Provide the formula:
+
+KV bytes per token =
+2 × number of layers × number of KV heads × head dimension × bytes per element
+
+Also provide formulas for:
+
+* KV size per sequence
+* Total KV size for concurrent sequences
+
+Explain that the estimate can differ from actual runtime allocation because of:
+
+* Block size
+* Alignment
+* Fragmentation
+* Runtime workspaces
+* CUDA graphs
+* Tensor parallelism
+* Sliding-window attention
+* Implementation overhead
+
+13. KV-capacity calculator
+
+Generate a complete Python program named:
+
+scripts/kv_capacity.py
+
+Requirements:
+
+* Use argparse
+* Accept model ID
+* Accept dtype
+* Accept context length
+* Accept concurrency
+* Load Hugging Face AutoConfig
+* Read:
+    * num_hidden_layers
+    * num_attention_heads
+    * num_key_value_heads
+    * hidden_size
+* Fall back to attention heads when num_key_value_heads is absent
+* Calculate head dimension
+* Calculate bytes per token
+* Calculate GiB per sequence
+* Calculate total GiB
+* Print all intermediate values clearly
+* Include reasonable error handling
+
+Use straightforward Python rather than overly compressed comprehensions.
+
+Provide commands to run it for:
+
+Qwen/Qwen2.5-7B-Instruct
+
+Generate a matrix for:
+
+* Context: 4096, 8192, 16384 and 32768
+* Concurrency: 1, 4, 8 and 16
+
+Save results to:
+
+results/day01/kv-capacity-matrix.txt
+
+14. Python and AI serving environment
+
+Provide commands using:
+
+* Python 3.12
+* uv
+* A virtual environment named .venv
+* vLLM
+* LMCache
+* transformers
+* huggingface_hub
+* openai
+* pandas
+* psutil
+* pynvml
+
+Verify:
+
+* Python version
+* PyTorch version
+* vLLM version
+* CUDA availability
+* GPU model
+* GPU memory
+
+Save installed package versions to:
+
+results/day01/python-packages.txt
+
+15. Baseline vLLM configuration
+
+Use:
+
+* Model: Qwen/Qwen2.5-7B-Instruct
+* Served model name: flashkv-qwen7b
+* BF16
+* Maximum model length: 16,384
+* GPU memory utilization: 0.90
+* Prefix caching explicitly disabled
+* LMCache not connected
+* Host 127.0.0.1
+* Port 8000
+
+Place the Hugging Face cache on persistent EBS for the first baseline.
+
+Provide the exact vLLM launch command.
+
+Capture logs at:
+
+results/day01/vllm-baseline.log
+
+Explain which log entries to extract:
+
+* Model download time
+* Model loading time
+* Model-weight memory
+* KV-cache memory
+* GPU block count
+* Token capacity
+* Estimated maximum concurrency
+* Server readiness time
+
+16. Initial inference test
+
+Provide:
+
+* A curl health check
+* A curl chat-completion request
+* A Python streaming benchmark client
+
+The Python benchmark should:
+
+* Use the OpenAI-compatible client
+* Connect to localhost port 8000
+* Run five requests
+* Use unique prompt suffixes to minimize accidental prefix reuse
+* Measure TTFT
+* Measure end-to-end latency
+* Print JSON per request
+* Print mean and median summary
+* Save output to:
+
+results/day01/baseline-ttft.jsonl
+
+Use clear code with comments and basic exception handling.
+
+17. System telemetry
+
+Provide commands to capture:
+
+* nvidia-smi dmon
+* iostat
+* GPU utilization
+* GPU memory
+* CPU behavior
+* Storage activity during inference
+
+Save files under results/day01.
+
+Explain the expected hypothesis:
+
+Model loading should cause storage activity, while steady-state inference should generally show much less model-file I/O after model weights and KV state are resident.
+
+State clearly that this must be measured rather than assumed.
+
+18. Day 1 artifacts
+
+Provide templates for:
+
+Artifact A
+
+architecture/day01-hardware-topology.md
+
+Include:
+
+* AWS configuration
+* GPU
+* GPU memory
+* Host memory
+* vCPUs
+* EBS
+* Local NVMe
+* Device map
+* Persistence
+* PCIe topology
+* NUMA topology
+* Physical data path
+* Initial bottleneck hypotheses
+
+Artifact B
+
+architecture/day01-kv-capacity.md
+
+Include:
+
+* Model configuration
+* Layers
+* Attention heads
+* KV heads
+* Head dimension
+* Data type
+* Estimated model-weight size
+* Context and concurrency table
+* vLLM observed cache capacity
+* Calculated versus observed differences
+* Safe initial context and concurrency
+* Remaining unknowns
+
+19. Five review questions
+
+Include questions such as:
+
+1. Why must model weights and KV cache be budgeted separately?
+2. Why does GQA reduce KV-cache memory?
+3. What is the difference between EBS presented as NVMe and local NVMe?
+4. Why are model loading and steady-state token generation different storage problems?
+5. Why must prefix caching be disabled in the baseline?
+
+20. Interview-style self-test
+
+Use this question:
+
+“You have one GPU with approximately 48 GB of GPU memory. The model fits, but requests begin failing, preempting or queueing as context length and concurrency increase. How would you investigate and choose a KV-cache strategy?”
+
+Provide a strong-answer rubric covering:
+
+* Model weight footprint
+* Runtime workspace
+* KV bytes per token
+* Context distribution
+* Concurrency distribution
+* Prefill versus decode
+* GQA or MHA
+* vLLM block capacity
+* Prefix reuse
+* CPU restoration cost
+* NVMe restoration cost
+* Admission control
+* Session affinity
+* SLO goodput
+
+21. Executive communication exercise
+
+Provide a concise 30-second response to:
+
+“What did you establish today?”
+
+The answer should explain that I established a reproducible path from persistent storage and local NVMe through Linux, DRAM and PCIe into GPU-resident model and KV state, calculated theoretical KV requirements, compared them with runtime capacity and created a clean no-reuse baseline.
+
+22. Day 1 completion checklist
+
+Include checkboxes for all major tasks.
+
+Require at minimum:
+
+* Budget configured
+* GPU instance running
+* Local NVMe identified
+* Topology saved
+* KV calculator working
+* Matrix generated
+* vLLM server working
+* Prefix cache disabled
+* Five latency runs captured
+* GPU and I/O metrics saved
+* Two artifacts written
+* Results copied to persistent storage
+* Instance stopped
+
+Style Requirements
+
+* Be technically deep and implementation-oriented.
+* Do not provide generic motivation.
+* Explain the mental model before commands.
+* Include complete commands and complete code.
+* Explain what each major command is doing.
+* Add warnings before destructive commands.
+* Distinguish facts, assumptions and hypotheses.
+* Be direct when correcting technical inaccuracies.
+* Keep HBM and HBF separate.
+* Do not imply the L40S uses HBM.
+* Do not claim that AWS local NVMe exposes Sandisk controller or NAND internals.
+* Explain that this laboratory studies application-visible and Linux-visible storage behavior.
+* Connect every major activity to both:
+    * HPC-style LLM serving
+    * Sandisk AI storage architecture
+* Produce a document detailed enough that I can execute it step by step without needing another guide.
