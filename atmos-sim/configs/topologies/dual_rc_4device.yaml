@@ -1,0 +1,103 @@
+# 4-device topology: 2 root complexes, 2 switches, 4 ATMOS E3.S devices
+# Demonstrates cross-RC P2P transfer path
+name: dual_rc_4device
+description: >
+  Two root complexes, each with a PCIe switch hosting 2 ATMOS devices.
+  Cross-RC transfers require host interconnect traversal.
+  Useful for studying multi-socket scaling and P2P limitations.
+
+root_complexs:
+  - name: CPU0_RC0
+    aggregate_bandwidth_bytes_sec: 64000000000
+    host_memory_bandwidth_bytes_sec: 100000000000
+  - name: CPU1_RC1
+    aggregate_bandwidth_bytes_sec: 64000000000
+    host_memory_bandwidth_bytes_sec: 100000000000
+
+inter_rc_link:
+  generation: 4
+  lane_count: 16
+  latency_ns: 500
+  description: Host interconnect between sockets
+
+switches:
+  - name: Switch_A
+    port_count: 8
+    switch_latency_ns: 200
+    rc: CPU0_RC0
+    uplink:
+      generation: 4
+      lane_count: 16
+      latency_ns: 100
+  - name: Switch_B
+    port_count: 8
+    switch_latency_ns: 200
+    rc: CPU1_RC1
+    uplink:
+      generation: 4
+      lane_count: 16
+      latency_ns: 100
+
+devices:
+  - name: ATMOS_0
+    index: 0
+    switch: Switch_A
+    link:
+      generation: 4
+      lane_count: 8
+      latency_ns: 100
+  - name: ATMOS_1
+    index: 1
+    switch: Switch_A
+    link:
+      generation: 4
+      lane_count: 8
+      latency_ns: 100
+  - name: ATMOS_2
+    index: 2
+    switch: Switch_B
+    link:
+      generation: 4
+      lane_count: 8
+      latency_ns: 100
+  - name: ATMOS_3
+    index: 3
+    switch: Switch_B
+    link:
+      generation: 4
+      lane_count: 8
+      latency_ns: 100
+
+# All devices share the same ATMOS module configuration
+default_module:
+  npu:
+    peak_flops: 500000000000
+    tensor_engine_count: 4
+    vector_engine_count: 4
+    execution_slots: 8
+    local_sram_bytes: 268435456
+    command_queue_depth: 64
+  hbf:
+    channel_count: 8
+    capacity_bytes: 137438953472
+    bandwidth_per_channel_bytes_sec: 14000000000
+    max_outstanding: 64
+    protocol_overhead_ns: 500
+  lpddr:
+    channel_count: 4
+    capacity_bytes: 34359738368
+    bandwidth_per_channel_bytes_sec: 6000000000
+    max_outstanding: 32
+    read_write_turnaround_ns: 15
+  dma:
+    descriptor_queue_depth: 64
+    max_outstanding: 16
+    channel_count: 2
+    setup_overhead_ns: 200
+    bandwidth_bytes_sec: 32000000000
+  dma_engine_count: 2
+  pcie:
+    generation: 4
+    lane_count: 8
+    max_outstanding: 32
+    credit_limit: 256

@@ -1,0 +1,56 @@
+# Single ATMOS device — simplest topology for baseline measurements
+name: single_device
+description: >
+  Single ATMOS device behind one switch and root complex.
+  No contention, useful for baseline calibration.
+
+root_complex:
+  name: RC0
+  aggregate_bandwidth_bytes_sec: 64000000000
+  host_memory_bandwidth_bytes_sec: 100000000000
+
+switch:
+  name: SW0
+  port_count: 4
+  switch_latency_ns: 200
+
+devices:
+  - name: ATMOS_0
+    index: 0
+    link:
+      generation: 4
+      lane_count: 16  # Wide link, no sharing
+      latency_ns: 100
+    module:
+      name: Module_0
+      npu:
+        peak_flops: 500000000000
+        tensor_engine_count: 4
+        vector_engine_count: 4
+        execution_slots: 8
+        local_sram_bytes: 268435456
+        command_queue_depth: 64
+      hbf:
+        channel_count: 8
+        capacity_bytes: 137438953472
+        bandwidth_per_channel_bytes_sec: 14000000000
+        max_outstanding: 64
+        protocol_overhead_ns: 500
+      lpddr:
+        channel_count: 4
+        capacity_bytes: 34359738368
+        bandwidth_per_channel_bytes_sec: 6000000000
+        max_outstanding: 32
+        read_write_turnaround_ns: 15
+      dma:
+        descriptor_queue_depth: 64
+        max_outstanding: 16
+        channel_count: 2
+        setup_overhead_ns: 200
+        bandwidth_bytes_sec: 32000000000
+      dma_engine_count: 2
+      pcie:
+        generation: 4
+        lane_count: 16
+        max_outstanding: 32
+        credit_limit: 256
