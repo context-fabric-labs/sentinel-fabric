@@ -42,7 +42,98 @@ The emulator should be explicit about confidence. A result based on assumed band
 
 ---
 
-## 3. Proposed System
+## 3. Architecture Overview
+
+The emulator has two cooperating layers — **TokenSim** as the serving/scheduling intelligence, and the **C++ discrete-event data plane** as the hardware simulation underneath. TokenSim is not a side integration; it is the default way to represent token-serving behavior.
+
+```
+                              ATMOS Digital Twin
+                                       |
+                    ┌──────────────────┴──────────────────┐
+                    │                                      │
+            Rust Control /                       C++ Simulation
+            Scenario Plane                          Data Plane
+                    │                                      │
+        ┌───────────┼───────────┐              ┌──────────┼──────────┐
+        │           │           │              │          │          │
+   Scenario     TokenSim    Topology       DES Core   Virtual    OEM
+   Config      Serving      Profile       Event      ATMOS     Topology
+               Layer                    Engine       Device     Model
+        │           │           │              │          │          │
+        │     ┌─────┴─────┐     │         ┌────┴────┐  ┌──┴──┐  ┌───┴───┐
+        │     │           │     │         │         │  │     │  │       │
+        │  Batch      KV Cache  │      Event    Resource NPU  HBF   PCIe
+        │  Sched.     Manager   │      Queue    Pools   /LPDDR Switches
+        │     │           │     │         │         │  │ DMA │  │  RC   │
+        │  Token       Latency  │      SimClock  Dependency Endpoint
+        │  State       Model    │                   Tracker
+        │     │           │     │
+        │     └─────┬─────┘     │
+        │           │           │
+        └───────────┼───────────┘
+                    │
+         Workload Normalizer
+         (TokenSim → TimedRequest)
+                    │
+            ModelGraph / SimIR
+                    │
+         ┌──────────┼──────────┐
+         │          │          │
+     Transformer  MoE       Search /
+     Compiler    Compiler    Reranking
+         │          │          │
+         └──────────┼──────────┘
+                    │
+              Metrics + Traces
+              Stall Attribution
+              Calibration Ledger
+                    │
+         ┌──────────┼──────────┐
+         │          │          │
+     Fit/No-Fit   Sensitivity  Side-by-Side
+     Reports      Analysis     vs RTX/DGX
+```
+
+### How Data Flows
+
+1. **Scenario config** defines the experiment: model, workload, hardware profile, topology, scheduling policy, calibration sources.
+2. **TokenSim** consumes the config and produces realistic token-level events — request arrivals, batching decisions, prefill/decode phase markers, KV pressure signals, and completion traces.
+3. **Workload normalizer** converts TokenSim events into deterministic `TimedRequest` streams and phase markers for the C++ data plane.
+4. **ModelGraph compiler** (Transformer, MoE, Search/Reranking) compiles model profiles into SimIR operation DAGs with dependency edges.
+5. **C++ DES engine** processes events in deterministic virtual time — acquiring resources, scheduling completions, recording stalls, and tracking utilization.
+6. **Virtual ATMOS device** models NPU compute, HBF/LPDDR memory, DMA engines, and PCIe endpoints as finite-capacity resources.
+7. **Topology model** models root complexes, switches, E3.S bays, shared uplinks, and peer-to-peer paths.
+8. **Metrics and stall attribution** explain what happened: TTFT, TPOT, throughput, utilization, queue depth, bytes moved, and stall-reason breakdown.
+9. **Calibration ledger** tracks parameter confidence as assumptions are replaced with measured hardware data.
+
+### Language Split
+
+| Layer | Language | Responsibility |
+|-------|----------|---------------|
+| **Scenario orchestration** | Rust | Configuration, REST/gRPC API, experiment management, workload ingestion, topology ingestion, result database, visualization, parameter sweeps |
+| **TokenSim serving layer** | C++17 (embedded) | Batching, scheduling policies, KV cache management, token state machines, TTFT/TPOT metrics |
+| **Simulation engine** | C++17 | Deterministic discrete-event engine, virtual hardware, queues, resource arbitration, model execution, memory transactions, DMA, PCIe topology |
+
+### Reuse from Existing Sentinel
+
+| Component | Reuse |
+|-----------|-------|
+| `Backend` trait | ATMOS simulation as a new backend variant |
+| `PodScorer` | Extend with HBF headroom, NPU utilization, module transfer latency |
+| `SelectionPolicy` | Add HBF residency as hard filter; tier-migration cost as soft penalty |
+| `KvPressureEstimator` | Model ATMOS LPDDR working-set pressure separately |
+| `AdmissionController` | Per-module + per-card aggregate inflight tracking |
+| `RequestShape` | Add HBF-resident model size, context length, tier access pattern |
+| `SessionMap` + HRW | Session→module affinity for KV cache locality |
+| `ITransport` interface | ATMOS transport for HBF→LPDDR→NPU pipeline |
+| `BufferDescriptor` + `MemoryKind` | Extend with HBF, LPDDR, NPU_SRAM variants |
+| `KvPageTable` | Map KV pages across HBF and LPDDR tiers |
+| `CompletionQueue` | Track tier-migration operations |
+| `Result<T>` error model | Unified error handling |
+
+---
+
+## 4. Proposed System
 
 The system has two cooperating planes:
 
@@ -70,7 +161,7 @@ TokenSim is not a side integration. It is the default way to represent token-ser
 
 ---
 
-## 4. Component Roles
+## 5. Component Roles
 
 | Component | Role | How it works under the hood |
 |-----------|------|-----------------------------|
@@ -86,7 +177,7 @@ TokenSim is not a side integration. It is the default way to represent token-ser
 
 ---
 
-## 5. C++ Simulation Data Plane
+## 7. C++ Simulation Data Plane
 
 The C++ data plane is responsible for speed, determinism, and hardware-like resource accounting. It does not generate semantic model outputs. It answers: given this workload and this hardware profile, when can each operation run, what does it wait for, and which resources limit throughput?
 
@@ -169,7 +260,7 @@ This is the key modeling choice: the simulator does not pretend to be real silic
 
 ---
 
-## 6. Virtual ATMOS Hardware Model
+## 8. Virtual ATMOS Hardware Model
 
 ATMOS is modeled as one or more modules. Each module contains persistent HBF capacity, active LPDDR memory, NPU compute, local SRAM, DMA engines, and a host endpoint.
 
@@ -264,7 +355,7 @@ This is essential because a device-level result is not enough. A workload can lo
 
 ---
 
-## 7. TokenSim as the Serving Contract
+## 9. TokenSim as the Serving Contract
 
 TokenSim is part of the base architecture because ATMOS value depends on serving dynamics, not just isolated operator timing. Search and MoE workloads both create time-varying request pressure, batch composition, memory reuse, and queueing behavior.
 
@@ -300,7 +391,7 @@ This split keeps the serving model honest and the hardware model explainable. To
 
 ---
 
-## 8. Partial Silicon and Bring-Up Strategy
+## 10. Partial Silicon and Bring-Up Strategy
 
 The emulator should become more valuable as hardware arrives in pieces. It must support replacing individual assumptions with measured components without waiting for the full device.
 
@@ -361,7 +452,7 @@ When full silicon is available, the emulator becomes a regression and planning h
 
 ---
 
-## 9. Current Priority Use Cases
+## 11. Current Priority Use Cases
 
 The initial use cases should be narrow enough to produce credible evidence and broad enough to guide product direction.
 
@@ -421,7 +512,7 @@ Changing which expert a token selects is not the same as reloading expert weight
 
 ---
 
-## 10. Fidelity Ladder
+## 12. Fidelity Ladder
 
 | Level | Name | What it models | Primary use |
 |-------|------|----------------|-------------|
@@ -434,7 +525,7 @@ Changing which expert a token selects is not the same as reloading expert weight
 
 ---
 
-## 11. Outputs and Success Criteria
+## 13. Outputs and Success Criteria
 
 ### MVP Outputs
 
@@ -463,7 +554,7 @@ Changing which expert a token selects is not the same as reloading expert weight
 
 ---
 
-## 12. Target Platform
+## 14. Target Platform
 
 Development should start on macOS and Linux because the emulator is CPU-bound and does not require CUDA. Large sweeps and CI should run on Linux.
 
@@ -479,7 +570,7 @@ No GPU is required for the emulator itself. GPU systems remain useful as measure
 
 ---
 
-## 13. End-to-End Evaluation Framework
+## 15. End-to-End Evaluation Framework
 
 The proposal should be treated as more than an ATMOS-only simulator. The larger goal is an end-to-end evaluation suite that can run the same workload, trace, topology, and reporting flow against multiple execution targets:
 
@@ -560,7 +651,7 @@ This framing turns the workstream into a reusable product and architecture evalu
 
 ---
 
-## 14. Six-to-Eight Week Implementation Plan
+## 16. Six-to-Eight Week Implementation Plan
 
 The implementation plan targets a complete end-to-end emulator and evaluation suite in 6-8 weeks. The goal is not only to build simulator components, but to produce repeatable reports that can compare simulated ATMOS, partial ATMOS hardware, and AI lab accelerator baselines under a common workload contract.
 
