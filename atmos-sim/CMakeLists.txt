@@ -39,6 +39,7 @@ add_library(atmos_sim STATIC
     src/model_graph/model_graph.cpp
     src/model_graph/transformer_compiler.cpp
     src/model_graph/request_generator.cpp
+    src/model_graph/tokensim_adapter.cpp
     src/metrics/metrics_collector.cpp
     src/metrics/trace_recorder.cpp
     src/metrics/stall_attribution.cpp

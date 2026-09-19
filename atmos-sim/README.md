@@ -63,7 +63,7 @@ atmos-sim/
 │   ├── sim_core/          # DES engine, events, resources
 │   ├── virtual_devices/   # NPU, HBF, LPDDR, DMA, PCIe
 │   ├── topology/          # OEM topology graph
-│   ├── model_graph/       # Workload representation
+│   ├── model_graph/       # Workload representation, Transformer compiler, TokenSim adapter
 │   ├── metrics/           # Measurement + traces
 │   └── calibration/       # Parameter store + sensitivity
 ├── src/

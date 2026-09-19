@@ -3,6 +3,7 @@
 #include "atmos_sim/model_graph/model_graph.h"
 #include "atmos_sim/model_graph/transformer_compiler.h"
 #include "atmos_sim/model_graph/request_generator.h"
+#include "atmos_sim/model_graph/tokensim_adapter.h"
 
 using namespace atmos_sim;
 
@@ -186,4 +187,52 @@ TEST(RequestGeneratorTest, BurstPattern) {
         if (req.arrival_time == 0) ++burst_count;
     }
     EXPECT_EQ(burst_count, 10);
+}
+
+// ==================== TokenSim Adapter Tests ====================
+
+TEST(TokenSimAdapterTest, ConvertsRequestArrivalsToTimedWorkload) {
+    TokenSimAdapterConfig config;
+    config.default_shape.prompt_tokens = 128;
+    config.default_shape.max_output_tokens = 32;
+    config.default_shape.model_name = "default-model";
+    TokenSimAdapter adapter(config);
+
+    std::vector<TokenSimEvent> events = {
+        {2, ms_to_sim(5), TokenSimEventType::REQUEST_ARRIVED, 256, 64, 1, "llama-8b"},
+        {2, ms_to_sim(6), TokenSimEventType::DECODE_TOKEN_READY, 0, 0, 0, ""},
+        {1, ms_to_sim(1), TokenSimEventType::REQUEST_ARRIVED, 0, 0, 0, ""},
+    };
+
+    auto workload = adapter.to_workload(events);
+
+    ASSERT_EQ(workload.size(), 2u);
+    EXPECT_EQ(workload[0].request_id, 1u);
+    EXPECT_EQ(workload[0].arrival_time, ms_to_sim(1));
+    EXPECT_EQ(workload[0].shape.prompt_tokens, 128u);
+    EXPECT_EQ(workload[0].shape.max_output_tokens, 32u);
+    EXPECT_EQ(workload[0].shape.model_name, "default-model");
+
+    EXPECT_EQ(workload[1].request_id, 2u);
+    EXPECT_EQ(workload[1].arrival_time, ms_to_sim(5));
+    EXPECT_EQ(workload[1].shape.prompt_tokens, 256u);
+    EXPECT_EQ(workload[1].shape.max_output_tokens, 64u);
+    EXPECT_EQ(workload[1].shape.priority, 1u);
+    EXPECT_EQ(workload[1].shape.model_name, "llama-8b");
+}
+
+TEST(TokenSimAdapterTest, OrdersSameTimestampByRequestId) {
+    TokenSimAdapter adapter;
+    std::vector<TokenSimEvent> events = {
+        {3, ms_to_sim(1), TokenSimEventType::REQUEST_ARRIVED, 0, 0, 0, ""},
+        {1, ms_to_sim(1), TokenSimEventType::REQUEST_ARRIVED, 0, 0, 0, ""},
+        {2, ms_to_sim(1), TokenSimEventType::REQUEST_ARRIVED, 0, 0, 0, ""},
+    };
+
+    auto workload = adapter.to_workload(events);
+
+    ASSERT_EQ(workload.size(), 3u);
+    EXPECT_EQ(workload[0].request_id, 1u);
+    EXPECT_EQ(workload[1].request_id, 2u);
+    EXPECT_EQ(workload[2].request_id, 3u);
 }

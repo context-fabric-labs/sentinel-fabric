@@ -1,6 +1,7 @@
 #include "atmos_sim/model_graph/model_graph.h"
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace atmos_sim {
 

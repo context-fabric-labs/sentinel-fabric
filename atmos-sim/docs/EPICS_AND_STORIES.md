@@ -246,3 +246,40 @@
 - Cargo for Rust
 - GitHub Actions CI
 - Unit test execution in CI
+
+---
+
+## Epic 8: TokenSim Integration + Serving Trace Fidelity
+
+**Goal:** Leverage TokenSim as an optional serving/workload front end while keeping ATMOS hardware timing in the deterministic DES engine
+**Duration:** Week 8-9
+
+### Story 8.1: TokenSim Trace Adapter
+- `TokenSimEvent` representation for request arrivals, prefill markers, decode token markers, and completion events
+- `TokenSimAdapter` conversion into deterministic `TimedRequest` workloads
+- Default request-shape handling when TokenSim traces omit prompt/output/model metadata
+- Unit tests: event filtering, ordering, default handling
+
+### Story 8.2: TokenSim Trace Contract
+- JSONL or protobuf schema for TokenSim exports
+- Required fields: request id, timestamp, event type, prompt tokens, output tokens, model id, priority
+- Optional fields: batch id, scheduler queue, KV residency hints, phase marker, cancellation status
+- Unit tests: schema validation and malformed trace rejection
+
+### Story 8.3: Serving Policy Replay
+- Replay TokenSim batching and prefill/decode decisions into ATMOS simulation scenarios
+- Compare TokenSim scheduling decisions against native ATMOS policies under identical topologies
+- Preserve deterministic replay with seed, trace hash, simulator commit, and TokenSim version
+- Unit tests: repeatable replay and policy-difference attribution
+
+### Story 8.4: TokenSim-to-Hardware Attribution
+- Map TokenSim phase markers to ATMOS stall reasons: WAIT_INPUT, WAIT_HBF, WAIT_LPDDR, WAIT_DMA, WAIT_PCIE, WAIT_COMPUTE, WAIT_SCHEDULER
+- Report serving-policy delay separately from hardware-resource delay
+- Produce fit/no-fit analysis for native synthetic workloads and TokenSim traces
+- Unit tests: attribution split and aggregate metric correctness
+
+### Story 8.5: TokenSim Calibration Harness
+- Run paired experiments: native generator vs TokenSim trace vs future partner backend
+- Store trace lineage, TokenSim version, parameter source, and confidence class
+- Sensitivity analysis for scheduler assumptions and request-shape distributions
+- Unit tests: manifest generation and trace lineage preservation
