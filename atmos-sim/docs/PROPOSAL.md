@@ -7,7 +7,38 @@
 
 ---
 
-## 1. Executive Summary
+## 1. Why This Proposal Is Necessary
+
+ATMOS decisions are being made right now — form factor, HBF capacity, LPDDR sizing, NPU balance, PCIe/CXL lane width, and OEM topology — without a system-level way to test any of them. Every one of these decisions gets harder and more expensive to change the later it is caught. A memory-tier size chosen in a spreadsheet today becomes a BOM commitment in a quarter and a fixed silicon constraint after tape-out. This proposal exists to move that evidence earlier, while it is still cheap to be wrong.
+
+### 1.1 The Scale We Are Actually Building For
+
+Sandisk's target deployment is not one device on one bench. It is hundreds of E3.S devices, attached either through OEM chassis bays or as ATMOS PCIe add-in cards, spread across multiple OEM server families, each running a different mix of dense and MoE models for different tenants. No single physical device, no static spreadsheet, and no vendor RTL testbench can predict how that fleet behaves. Only a system-level, swappable-backend simulator can, and it needs to exist before we commit to the hardware that fleet will run on.
+
+### 1.2 Why We Must Have This Now
+
+| Reason | What happens without it |
+|---|---|
+| Silicon and OEM platforms arrive in pieces (HBF, NPU, PCIe/CXL, full silicon) on different schedules | Product and architecture decisions stall waiting for the last piece, or get made blind on the pieces that have not arrived yet |
+| Hundreds of E3.S devices across multiple OEMs is the target, not one bench unit | We discover fleet-scale bottlenecks (shared uplinks, control-plane limits, weight-distribution stalls) only after hardware is racked and committed |
+| Dense and MoE workloads stress HBF, LPDDR, NPU, and topology very differently | We size memory and compute for the wrong workload mix and find out during OEM qualification, not before it |
+| NVIDIA and AMD accelerators are already being measured in the AI lab today | ATMOS is compared against competitors using anecdote and marketing slides instead of matched, evidence-based reports |
+| Physical POC iteration is slow, expensive, and hardware-constrained | Every architecture question costs a lab cycle instead of a simulation run, and only a handful of configurations ever get tested |
+| Assumptions used for sizing decisions are rarely labeled by confidence | Executives cannot tell the difference between a guess and a measured result when approving a design |
+
+### 1.3 What We Get By Approving This
+
+- A single workload and reporting contract that works before silicon, during partial bring-up, after full silicon, and at fleet scale in production — the investment is not thrown away at each hardware milestone.
+- The ability to test hundreds-of-device, multi-OEM, mixed dense/MoE fleet scenarios in software, long before that many physical devices could ever be racked.
+- Evidence-labeled results, so a management decision can distinguish an assumed range from a measured, partner-modeled, or silicon-calibrated number.
+- A direct, apples-to-apples comparison against NVIDIA RTX/DGX and AMD systems already in the AI lab, using the same traces and the same report format.
+- A pre-silicon way to catch an under-sized memory tier, an oversubscribed PCIe topology, or a starved NPU before it becomes a fixed cost in silicon or a failed OEM qualification.
+
+This is not a research nice-to-have. It is the only practical way to make hundreds-of-device, multi-OEM ATMOS decisions with evidence instead of guesswork, on the timeline the business actually has.
+
+---
+
+## 2. Executive Summary
 
 ATMOS needs a practical digital twin: a deterministic software emulator that models how token-serving workloads consume NPU compute, HBF model capacity, LPDDR working memory, DMA engines, PCIe/CXL links, and OEM server topology. The emulator should be useful before silicon, during bring-up, and after silicon by replacing assumptions with measured component behavior as hardware becomes available.
 
@@ -25,7 +56,7 @@ The first value is not a customer-facing performance claim. The first value is a
 
 ---
 
-## 2. Product Problem
+## 3. Product Problem
 
 ATMOS is expected to combine persistent model capacity, local neural compute, active memory, and a host interface in a modular inference device. Before complete silicon exists, product and engineering teams still need to make decisions about form factor, memory size, NPU capability, firmware queues, host interface, OEM topology, and workload fit.
 
@@ -42,7 +73,7 @@ The emulator should be explicit about confidence. A result based on assumed band
 
 ---
 
-## 3. Architecture Overview
+## 4. Architecture Overview
 
 The emulator has two cooperating layers — **TokenSim** as the serving/scheduling intelligence, and the **C++ discrete-event data plane** as the hardware simulation underneath. TokenSim is not a side integration; it is the default way to represent token-serving behavior.
 
@@ -108,32 +139,32 @@ The emulator has two cooperating layers — **TokenSim** as the serving/scheduli
 
 ### Language Split
 
-| Layer | Language | Responsibility |
-|-------|----------|---------------|
-| **Scenario orchestration** | Rust | Configuration, REST/gRPC API, experiment management, workload ingestion, topology ingestion, result database, visualization, parameter sweeps |
-| **TokenSim serving layer** | C++17 (embedded) | Batching, scheduling policies, KV cache management, token state machines, TTFT/TPOT metrics |
-| **Simulation engine** | C++17 | Deterministic discrete-event engine, virtual hardware, queues, resource arbitration, model execution, memory transactions, DMA, PCIe topology |
+| Layer                            | Language         | Responsibility                                                                                                                                |
+| -------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Scenario orchestration** | Rust             | Configuration, REST/gRPC API, experiment management, workload ingestion, topology ingestion, result database, visualization, parameter sweeps |
+| **TokenSim serving layer** | C++17 (embedded) | Batching, scheduling policies, KV cache management, token state machines, TTFT/TPOT metrics                                                   |
+| **Simulation engine**      | C++17            | Deterministic discrete-event engine, virtual hardware, queues, resource arbitration, model execution, memory transactions, DMA, PCIe topology |
 
 ### Reuse from Existing Sentinel
 
-| Component | Reuse |
-|-----------|-------|
-| `Backend` trait | ATMOS simulation as a new backend variant |
-| `PodScorer` | Extend with HBF headroom, NPU utilization, module transfer latency |
-| `SelectionPolicy` | Add HBF residency as hard filter; tier-migration cost as soft penalty |
-| `KvPressureEstimator` | Model ATMOS LPDDR working-set pressure separately |
-| `AdmissionController` | Per-module + per-card aggregate inflight tracking |
-| `RequestShape` | Add HBF-resident model size, context length, tier access pattern |
-| `SessionMap` + HRW | Session→module affinity for KV cache locality |
-| `ITransport` interface | ATMOS transport for HBF→LPDDR→NPU pipeline |
-| `BufferDescriptor` + `MemoryKind` | Extend with HBF, LPDDR, NPU_SRAM variants |
-| `KvPageTable` | Map KV pages across HBF and LPDDR tiers |
-| `CompletionQueue` | Track tier-migration operations |
-| `Result<T>` error model | Unified error handling |
+| Component                             | Reuse                                                                 |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `Backend` trait                     | ATMOS simulation as a new backend variant                             |
+| `PodScorer`                         | Extend with HBF headroom, NPU utilization, module transfer latency    |
+| `SelectionPolicy`                   | Add HBF residency as hard filter; tier-migration cost as soft penalty |
+| `KvPressureEstimator`               | Model ATMOS LPDDR working-set pressure separately                     |
+| `AdmissionController`               | Per-module + per-card aggregate inflight tracking                     |
+| `RequestShape`                      | Add HBF-resident model size, context length, tier access pattern      |
+| `SessionMap` + HRW                  | Session→module affinity for KV cache locality                        |
+| `ITransport` interface              | ATMOS transport for HBF→LPDDR→NPU pipeline                          |
+| `BufferDescriptor` + `MemoryKind` | Extend with HBF, LPDDR, NPU_SRAM variants                             |
+| `KvPageTable`                       | Map KV pages across HBF and LPDDR tiers                               |
+| `CompletionQueue`                   | Track tier-migration operations                                       |
+| `Result<T>` error model             | Unified error handling                                                |
 
 ---
 
-## 4. Proposed System
+## 5. Proposed System
 
 The system has two cooperating planes:
 
@@ -161,19 +192,19 @@ TokenSim is not a side integration. It is the default way to represent token-ser
 
 ---
 
-## 5. Component Roles
+## 6. Component Roles
 
-| Component | Role | How it works under the hood |
-|-----------|------|-----------------------------|
-| Scenario config | Defines what experiment is being run | Versioned YAML/JSON captures model, workload, hardware profile, topology, placement policy, seed, fidelity level, and calibration sources. |
-| TokenSim serving layer | Produces realistic token-serving pressure | Simulates or replays request arrivals, batching, queueing, prefill/decode boundaries, token generation cadence, priorities, cancellations, and KV pressure. |
-| Workload normalizer | Converts serving events into simulator inputs | Converts TokenSim events into deterministic `TimedRequest` streams and phase markers, preserving request id, timestamp, prompt length, output limit, model id, priority, and trace lineage. |
-| ModelGraph / SimIR | Represents model execution as a dependency graph | Compiles model profiles into operations such as RMSNorm, QKV projection, attention, KV read/write, MLP, residual, expert dispatch, expert compute, combine, embedding, pooling, and reranking score. |
-| C++ simulation data plane | Runs fast deterministic hardware simulation | Uses integer nanosecond virtual time, a priority event store, dependency tracking, finite resources, and event handlers that acquire resources, calculate service times, schedule completions, and record stalls. |
-| Virtual ATMOS device | Models device-local hardware resources | Represents NPU queues, tensor/vector engines, local SRAM, HBF channels, LPDDR channels, DMA descriptors, PCIe endpoint state, and per-module capacity limits. |
-| Topology model | Models server and OEM interconnect effects | Represents root complexes, PCIe switches, E3.S bays, shared uplinks, peer-to-peer paths, link width, generation, queue depth, latency, and arbitration. |
-| Metrics and trace recorder | Explains what happened | Records request latency, TTFT, TPOT, throughput, utilization, queue depth, bytes moved, phase time, stall reasons, and timestamped event traces. |
-| Calibration ledger | Tracks evidence quality | Stores parameter source, owner, date, confidence class, measured range, allowed use, and replacement history as assumptions become measured values. |
+| Component                  | Role                                             | How it works under the hood                                                                                                                                                                                       |
+| -------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scenario config            | Defines what experiment is being run             | Versioned YAML/JSON captures model, workload, hardware profile, topology, placement policy, seed, fidelity level, and calibration sources.                                                                        |
+| TokenSim serving layer     | Produces realistic token-serving pressure        | Simulates or replays request arrivals, batching, queueing, prefill/decode boundaries, token generation cadence, priorities, cancellations, and KV pressure.                                                       |
+| Workload normalizer        | Converts serving events into simulator inputs    | Converts TokenSim events into deterministic`TimedRequest` streams and phase markers, preserving request id, timestamp, prompt length, output limit, model id, priority, and trace lineage.                      |
+| ModelGraph / SimIR         | Represents model execution as a dependency graph | Compiles model profiles into operations such as RMSNorm, QKV projection, attention, KV read/write, MLP, residual, expert dispatch, expert compute, combine, embedding, pooling, and reranking score.              |
+| C++ simulation data plane  | Runs fast deterministic hardware simulation      | Uses integer nanosecond virtual time, a priority event store, dependency tracking, finite resources, and event handlers that acquire resources, calculate service times, schedule completions, and record stalls. |
+| Virtual ATMOS device       | Models device-local hardware resources           | Represents NPU queues, tensor/vector engines, local SRAM, HBF channels, LPDDR channels, DMA descriptors, PCIe endpoint state, and per-module capacity limits.                                                     |
+| Topology model             | Models server and OEM interconnect effects       | Represents root complexes, PCIe switches, E3.S bays, shared uplinks, peer-to-peer paths, link width, generation, queue depth, latency, and arbitration.                                                           |
+| Metrics and trace recorder | Explains what happened                           | Records request latency, TTFT, TPOT, throughput, utilization, queue depth, bytes moved, phase time, stall reasons, and timestamped event traces.                                                                  |
+| Calibration ledger         | Tracks evidence quality                          | Stores parameter source, owner, date, confidence class, measured range, allowed use, and replacement history as assumptions become measured values.                                                               |
 
 ---
 
@@ -514,14 +545,14 @@ Changing which expert a token selects is not the same as reloading expert weight
 
 ## 12. Fidelity Ladder
 
-| Level | Name | What it models | Primary use |
-|-------|------|----------------|-------------|
-| L0 | Capacity math | Weights, KV, activations, HBF capacity, LPDDR capacity, PCIe bandwidth bounds | Fast fit/no-fit and sanity checks |
-| L1 | Analytical timing | FLOPs, bandwidth, protocol delay, simple overlap, queue capacity | Early sensitivity and architecture thresholds |
-| L2 | Discrete-event system | TokenSim traces, request phases, queues, dependencies, NPU/HBF/LPDDR/DMA/PCIe resources | MVP target for bottleneck discovery |
-| L3 | Calibrated component model | Measured HBF, LPDDR, PCIe, DMA, NPU tables, firmware queue behavior | Partial-silicon and lab calibration |
-| L4 | Partner/RTL/FPGA backend | Higher-fidelity block or command timing behind the same workload contract | Differential validation before full silicon |
-| L5 | Silicon-calibrated twin | Measured device behavior and production software stack | Qualified prediction envelope and regression planning |
+| Level | Name                       | What it models                                                                          | Primary use                                           |
+| ----- | -------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| L0    | Capacity math              | Weights, KV, activations, HBF capacity, LPDDR capacity, PCIe bandwidth bounds           | Fast fit/no-fit and sanity checks                     |
+| L1    | Analytical timing          | FLOPs, bandwidth, protocol delay, simple overlap, queue capacity                        | Early sensitivity and architecture thresholds         |
+| L2    | Discrete-event system      | TokenSim traces, request phases, queues, dependencies, NPU/HBF/LPDDR/DMA/PCIe resources | MVP target for bottleneck discovery                   |
+| L3    | Calibrated component model | Measured HBF, LPDDR, PCIe, DMA, NPU tables, firmware queue behavior                     | Partial-silicon and lab calibration                   |
+| L4    | Partner/RTL/FPGA backend   | Higher-fidelity block or command timing behind the same workload contract               | Differential validation before full silicon           |
+| L5    | Silicon-calibrated twin    | Measured device behavior and production software stack                                  | Qualified prediction envelope and regression planning |
 
 ---
 
@@ -615,14 +646,14 @@ Each backend should implement the same logical contract:
 
 This lets the same Search or MoE workload run in several modes:
 
-| Mode | Backend | Purpose |
-|------|---------|---------|
-| Pre-silicon | ATMOS digital twin | Estimate fit, bottlenecks, and design sensitivity before hardware. |
-| Partial hardware | ATMOS component-calibrated twin | Replace assumptions with measured HBF, NPU, DMA, LPDDR, or PCIe behavior as pieces arrive. |
-| Full hardware | ATMOS silicon | Validate predictions, calibrate the model, and qualify the tested envelope. |
-| Competitive baseline | NVIDIA RTX / DGX | Compare against known GPU paths in the AI lab under the same traces and reports. |
-| Competitive baseline | AMD accelerator | Compare against alternative accelerator architecture when available. |
-| System baseline | CPU / NVMe / CXL | Separate storage, memory, and host-staging effects from accelerator effects. |
+| Mode                 | Backend                         | Purpose                                                                                    |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| Pre-silicon          | ATMOS digital twin              | Estimate fit, bottlenecks, and design sensitivity before hardware.                         |
+| Partial hardware     | ATMOS component-calibrated twin | Replace assumptions with measured HBF, NPU, DMA, LPDDR, or PCIe behavior as pieces arrive. |
+| Full hardware        | ATMOS silicon                   | Validate predictions, calibrate the model, and qualify the tested envelope.                |
+| Competitive baseline | NVIDIA RTX / DGX                | Compare against known GPU paths in the AI lab under the same traces and reports.           |
+| Competitive baseline | AMD accelerator                 | Compare against alternative accelerator architecture when available.                       |
+| System baseline      | CPU / NVMe / CXL                | Separate storage, memory, and host-staging effects from accelerator effects.               |
 
 ### 13.2 AI Lab Integration
 
@@ -730,3 +761,158 @@ The workstream is complete when the team can:
 - Swap backend profiles without changing workload definitions.
 - Replace an assumed component with measured partial-silicon data and regenerate the report.
 - Provide an executive summary and technical appendix for each run.
+
+---
+
+## 17. Lab Setup and At-Scale Testing Strategy
+
+Building the simulator is not the end goal. The end goal is being able to answer, with evidence, how ATMOS behaves once Sandisk is running hundreds of E3.S devices, attached either through OEM chassis bays or as ATMOS PCIe add-in cards, spread across multiple OEM server families, each carrying its own mix of dense and MoE models. This section defines how we practically leverage the simulator to get there, and what the physical lab looks like alongside it. It also has to cover every candidate server architecture from Section 18 (full-length card, direct-attached E3.S, E3.S + switch AIC, OEM-integrated switched E3.S, hybrid node, and rack-scale pool), not just one assumed packaging.
+
+### 17.1 The Deployment Shape We Must Validate For
+
+- Hundreds of E3.S devices, not a handful.
+- All six architecture patterns from Section 18 in scope, not just one: full-length card, direct-attached E3.S, E3.S behind a separate switch AIC, OEM-integrated switched E3.S, hybrid nodes, and rack-scale pools.
+- Multiple OEM server families in parallel, each owning its own group of E3.S devices, its own bay count, its own PCIe/CXL lane budget, and its own shared-uplink behavior.
+- A mixed workload fleet: some devices serving dense models, others serving MoE, often on the same OEM group, sometimes on the same device pool.
+- Multiple tenants and priority classes sharing the same physical fleet.
+
+No lab can rack enough pre-silicon hardware to physically cover this matrix. The strategy has to combine a real, representative physical lab with a calibrated fleet-scale digital twin.
+
+### 17.2 Three-Tier Lab Model
+
+```mermaid
+flowchart TD
+    A[Tier A: OEM Bench] --> D[Calibration Loop]
+    B[Tier B: Multi-OEM Rack] --> D
+    D --> C[Tier C: Fleet Digital Twin]
+    C --> E[Top Sensitivity / Risk Configs]
+    E --> A
+    E --> B
+    C --> F[Fleet Readiness Report]
+```
+
+| Tier | What it is | Device count | Purpose |
+|---|---|---|---|
+| Tier A — OEM Bench | One OEM server, populated with as many real or prototype E3.S bays and ATMOS PCIe cards as available | 1-8 devices per OEM | Validate per-OEM topology assumptions, bay/PCIe behavior, single-node serving; the fixture where architectures A (full card), B (direct-attach), and C (switch AIC) get their first physical measurement |
+| Tier B — Multi-OEM Rack | Two or more OEM server families side by side, shared top-of-rack network, mixed dense/MoE workloads | 8-32 devices across 2-3 OEMs | Validate cross-node, cross-OEM, and shared-fabric behavior; the fixture where architecture E (hybrid node) and the network layer for architecture F (rack pool) get validated |
+| Tier C — Fleet Digital Twin | Pure software: the ATMOS simulator running every OEM topology profile at full target scale | Hundreds to thousands, simulated | Explore the actual production scale, sweep device count, OEM mix, model mix, and architecture pattern (A-F) far beyond what the physical lab can hold |
+
+The tiers are not independent. Tier A and Tier B produce measured results that calibrate Tier C. Tier C then tells us which configurations in the hundreds-of-device space carry the most risk, and those specific configurations get reproduced at reduced scale in Tier A/B to confirm the simulator is still tracking reality. Architecture D (OEM-integrated switched E3.S) only enters Tier A once a partner OEM commits to co-design; until then it is evaluated purely in Tier C using the same topology-profile mechanism described in Section 18.1.
+
+### 17.3 OEM Topology Profile Registry
+
+Every OEM family Sandisk works with — and every OEM added later — is captured as one versioned topology profile, used identically by the physical lab and the simulator:
+
+- Bay count and E3.S versus ATMOS-PCIe-card slot mix.
+- PCIe/CXL generation, lane width per slot, and switch hierarchy.
+- Shared-uplink and oversubscription behavior.
+- Power and thermal caps per bay/slot.
+- Firmware, BMC, and reset/management assumptions.
+
+This registry is what makes the multi-OEM fleet testable at all: a topology profile authored once from Tier A/B measurements can be replayed at Tier C for a fleet of any size, without re-deriving OEM-specific behavior by hand each time.
+
+### 17.4 Fleet Test Matrix
+
+Tier C sweeps the dimensions that a physical lab cannot afford to sweep exhaustively:
+
+| Dimension | Example values |
+|---|---|
+| Device count | 1, 4, 8, 16, 32, 64, 128, 256, 512+ |
+| Architecture pattern (Section 18) | A. Full-length card, B. Direct-attached E3.S, C. E3.S + switch AIC, D. OEM-integrated switched E3.S, E. Hybrid node, F. Rack-scale pool |
+| OEM mix | Single-OEM fleet, two-OEM split, three-plus-OEM split |
+| Model mix | Dense-only, MoE-only, 70/30 dense/MoE, 50/50 dense/MoE |
+| Workload class | Search/reranking pools, MoE serving pools, mixed per-OEM pools |
+| Tenancy | Single-tenant isolated pools, multi-tenant shared pools with priority classes |
+| Fault condition | Baseline, single-device failure, single-link failure, degraded-bay condition, degraded switch/card condition |
+
+The purpose of this matrix is to find where fleet-level bottlenecks emerge — shared uplinks, control-plane scheduling limits, weight-distribution stalls when many devices load models at once — that never show up on a single device or a single OEM bench. Sweeping architecture pattern alongside device count and model mix is what turns Section 18's comparison table from a handful of spot checks into a full sensitivity map per architecture.
+
+### 17.5 Physical Lab Composition
+
+- **Reference OEM servers:** at least two distinct chassis families representative of the target OEM base, each with a documented, supported bay/slot configuration.
+- **Devices under test:** E3.S bays populated with whatever is available at each stage — prototype boards, FPGA/emulation stand-ins pre-silicon, partial-silicon modules, and eventually qualified ATMOS silicon — plus ATMOS PCIe add-in cards where that attach mode is supported.
+- **Architecture fixtures:** a full-length ATMOS accelerator card and slot (architecture A), direct-attached bays with no switch in the path (architecture B), and a separate PCIe switch AIC with cabling to front bays (architecture C) so all three can be measured side by side on the same reference server; an OEM-integrated switched sample (architecture D) is added once a partner OEM commits to co-design.
+- **Network fabric:** top-of-rack switch and NICs matching the shared-uplink and cross-node paths the topology profiles need to validate, including the rack-pool network layer that architecture F (Section 18.1) depends on.
+- **Control plane:** the scenario runner and TokenSim serving layer running live against the physical devices, not just against the simulator, so the same workload contract drives both.
+- **Model distribution:** a real weight/model-provisioning path exercised at Tier B scale, since loading models onto dozens of devices at once is itself a fleet-scale problem worth measuring.
+- **Telemetry:** the same metrics schema used by the simulator (TTFT, TPOT, throughput, utilization, queue depth, stall attribution), collected from real devices so Tier A/B results can be compared line-for-line against Tier C predictions.
+
+### 17.6 Practical Workflow
+
+1. Define or update the OEM topology profile and model-mix scenario for the fleet configuration in question.
+2. Run the full-scale scenario in Tier C (hundreds of devices, target OEM mix, target dense/MoE mix).
+3. Identify the highest-sensitivity and highest-risk configurations from the Tier C sweep — the ones where small parameter changes move the result the most.
+4. Reproduce only those specific configurations at reduced scale in Tier A/B, on real or partial hardware.
+5. Compare predicted versus measured results and update the calibration ledger.
+6. Re-run Tier C with the updated calibration and regenerate the fleet readiness report.
+
+This loop means the physical lab never needs to hold hundreds of devices. It only needs to hold enough devices, across enough OEMs, to keep the simulator honest at the configurations that matter most.
+
+### 17.7 Continuous Regression at Scale
+
+- Run the full fleet test matrix in Tier C on a scheduled basis (nightly or weekly) across every registered OEM topology profile, architecture pattern (A-F), and model mix.
+- Run a small, fixed set of Tier A/B physical spot-checks on a slower cadence (for example, quarterly, or whenever new hardware arrives) against the highest-value configurations.
+- Track prediction error over time per OEM profile, per architecture pattern, per workload class, and per device count, and feed that history back into the calibration ledger.
+- Treat a growing gap between Tier C predictions and Tier A/B measurements as a signal that a topology profile or hardware model needs to be revisited before it is trusted for the next fleet-sizing decision.
+
+---
+
+## 18. Covering the ATMOS E3.S Server Architecture Options
+
+The ATMOS E3.S Server Architecture Options proposal defines six candidate ways to package and connect ATMOS in a server: (A) the full-length ATMOS accelerator card, (B) a direct-attached E3.S device pool, (C) an E3.S pool behind a separate PCIe switch add-in card, (D) an OEM-integrated switched E3.S platform, (E) a hybrid node combining an E3.S pool with a full-length card, and (F) a multi-node/rack-scale ATMOS service. The emulator does not need a separate model per architecture — it needs to represent each one as a configuration of the same topology graph, then run the identical workload contract through each configuration to turn the document's qualitative pros/cons table into a measured comparison.
+
+### 18.1 Do We Have to Accommodate All Six Plans?
+
+Yes, but not as six different simulators. The topology graph already used throughout this proposal — root complexes, PCIe switches, links, and endpoints connected in an arbitrary graph — is general enough to express five of the six architectures directly as topology profiles. Only one architecture introduces a genuinely new modeling concern.
+
+| Architecture | Coverage today | What the topology profile looks like |
+|---|---|---|
+| A. Full-length ATMOS card | Covered | One switch node with a wide host-facing link and eight endpoint nodes behind it, using tight intra-card link latency/bandwidth to represent the on-card switch fabric. |
+| B. Direct-attached E3.S pool | Covered | Endpoint nodes connected straight to root-complex nodes, no switch node in the path, one link per bay. |
+| C. E3.S pool + separate PCIe switch AIC | Covered | Exactly the switch/root-complex/endpoint pattern already used by the existing example topologies, with the switch uplink modeled as the shared, potentially oversubscribed link. |
+| D. OEM-integrated switched E3.S | Covered as a topology profile | Same graph shape as C, but authored as a qualified, versioned OEM topology profile (Section 17.3) with OEM-specific lane maps, switch hierarchy, and population rules instead of a generic switch card. |
+| E. Hybrid node | Covered | Two subgraphs under one set of root complexes: a full-card subgraph (as in A) and a direct/switched E3.S subgraph (as in B or C), with the placement/routing policy deciding which device class serves which request. |
+| F. Multi-node/rack-scale service | Partial gap | Needs a network-fabric layer above PCIe — NICs, top-of-rack switches, cross-node latency/bandwidth, and failure/rebuild behavior — which the current topology graph does not yet model. |
+
+So the answer is: the emulator already has to accommodate five of the six plans, because they are all instances of the same PCIe topology graph with different parameters. Architecture F is the one real gap, and it is additive, not a redesign: it needs a thin network-topology layer (node types for NIC and top-of-rack switch, a cross-node link type with its own latency/bandwidth/oversubscription model, and simple failure/rebuild event handling) sitting above the existing PCIe graph. That layer belongs in Epic 3 alongside the existing topology work, not as a new simulator.
+
+### 18.2 How the Emulator Turns the Document's Table Into Measured Pros/Cons
+
+The architecture options document produces a qualitative decision matrix (service unit, serviceability, communication locality, host lane pressure, large-model fit, P2P potential, and so on) built from engineering judgment. The emulator's job is to run the same workload suite through each architecture's topology profile and produce the numeric version of that same table, using the metrics schema already defined for every other comparison in this proposal.
+
+```mermaid
+flowchart TD
+    A[Architecture Options A-F] --> B[One Topology Profile per Architecture]
+    C[Common Workload Suite: Dense + MoE + Search] --> D[Same Scenario Run per Architecture]
+    B --> D
+    D --> E[Common Metrics Schema]
+    E --> F[Quantified Pros/Cons per Architecture]
+    F --> G[Side-by-Side Comparison Report]
+```
+
+For each architecture profile, the same run produces:
+
+- **Throughput and latency:** TTFT, TPOT, tokens/second, and request p50/p95/p99 under identical arrival and batching behavior from TokenSim.
+- **Communication cost:** bytes moved across each link class (device-to-switch, switch-to-root-complex, device-to-device peer path), and how much of that traffic is host-routed versus kept local.
+- **Contention behavior:** shared-uplink utilization and oversubscription ratio, queue depth at switches and root complexes, and the point at which added devices stop producing proportional throughput.
+- **Failure/service impact:** for architectures where a switch, card, or node is a shared component, the modeled blast radius when that component is degraded or unavailable.
+- **Fit by workload class:** whether a large dense/MoE model versus an independent Search/reranking pool behaves better under each architecture, using the same dense/MoE/Search workload mixes defined in Section 11 and Section 17.4.
+
+### 18.3 Concrete Comparison Output
+
+The practical deliverable is one comparison table per workload class, generated directly from simulator runs rather than authored by hand:
+
+| Metric | A. Full card | B. Direct E3.S | C. E3.S + switch AIC | D. OEM-integrated | E. Hybrid | F. Rack pool |
+|---|---|---|---|---|---|---|
+| TTFT / TPOT at target load | measured | measured | measured | measured | measured | measured (once Section 18.1's network layer exists) |
+| Sustainable requests/sec before SLO miss | measured | measured | measured | measured | measured | measured |
+| Shared-uplink utilization at saturation | n/a (internal switch) | n/a (no switch) | measured | measured | measured | measured |
+| Host-routed vs local bytes | measured | measured | measured | measured | measured | measured |
+| Throughput lost per added device beyond knee point | measured | measured | measured | measured | measured | measured |
+| Degraded-component blast radius | modeled | modeled | modeled | modeled | modeled | modeled |
+
+This is the same fit/no-fit and sensitivity output already produced elsewhere in this proposal (Section 12, Section 13, Section 15) — the architecture options document simply becomes one more dimension that gets swept, alongside device count, OEM mix, and model mix, using the Tier C fleet digital twin from Section 17 before any of these architectures are built or racked.
+
+### 18.4 What the Emulator Cannot Settle by Itself
+
+The simulator quantifies communication, contention, and throughput trade-offs, but it does not replace the qualification work the architecture options document also calls for: mechanical fit, power/thermal validation under sustained compute, firmware/BMC lifecycle, RMA and service-model decisions, and OEM support commercials. Those remain physical-lab and program decisions (Tier A/B in Section 17), informed by, but not answered by, the simulated comparison.
