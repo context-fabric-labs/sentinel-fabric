@@ -212,7 +212,7 @@ TokenSim is not a side integration. It is the default way to represent token-ser
 
 The C++ data plane is responsible for speed, determinism, and hardware-like resource accounting. It does not generate semantic model outputs. It answers: given this workload and this hardware profile, when can each operation run, what does it wait for, and which resources limit throughput?
 
-### 5.1 Data Plane Inputs
+### 7.1 Data Plane Inputs
 
 The data plane consumes normalized simulation inputs:
 
@@ -222,7 +222,7 @@ The data plane consumes normalized simulation inputs:
 - Hardware profile: NPU peak throughput, engine counts, SRAM size, HBF capacity/bandwidth/channels, LPDDR capacity/bandwidth/channels, DMA bandwidth, queue depths, outstanding limits.
 - Topology profile: PCIe/CXL generation, lane count, switches, root complexes, shared uplinks, peer path rules, host memory path, NUMA placement.
 
-### 5.2 DES Event Store
+### 7.2 DES Event Store
 
 The DES event store is a deterministic priority queue. Each event has:
 
@@ -245,7 +245,7 @@ flowchart LR
 
 The event store is deterministic because it uses integer time, deterministic ordering, and a fixed sequence counter. There is no dependency on wall-clock time, OS scheduling, thread timing, or floating-point accumulation for event order.
 
-### 5.3 Event Processing Loop
+### 7.3 Event Processing Loop
 
 At runtime, the data plane repeatedly performs this loop:
 
@@ -272,7 +272,7 @@ REQUEST_ARRIVED
   -> REQUEST_COMPLETED
 ```
 
-### 5.4 Resource Model
+### 7.4 Resource Model
 
 Every hardware block is modeled as a finite resource. A resource has capacity, occupancy, state, queue depth, service time, and utilization tracking.
 
@@ -308,7 +308,7 @@ flowchart TB
     M0 --> P0[PCIe/CXL Endpoint]
 ```
 
-### 6.1 Virtual NPU
+### 8.1 Virtual NPU
 
 The Virtual NPU models neural compute as finite execution capacity:
 
@@ -321,7 +321,7 @@ The Virtual NPU models neural compute as finite execution capacity:
 
 For each compute operation, the simulator calculates an estimated service time from FLOPs, compute class, precision, configured peak throughput, and future calibration factors. The operation cannot start until dependencies are satisfied and required NPU resources are available. If tensor engines are full, the operation waits in `WAIT_COMPUTE`. If SRAM is insufficient, it waits in `WAIT_SRAM` or triggers a tiling/spill path depending on the fidelity level.
 
-### 6.2 HBF Controller
+### 8.2 HBF Controller
 
 The HBF controller models persistent model capacity and high-bandwidth read-mostly access:
 
@@ -334,7 +334,7 @@ The HBF controller models persistent model capacity and high-bandwidth read-most
 
 HBF is where the emulator tests whether capacity-side benefits survive real access behavior. A model may fit in HBF but still bottleneck on channel pressure, controller queues, or DMA into active memory.
 
-### 6.3 LPDDR Controller
+### 8.3 LPDDR Controller
 
 LPDDR models active writable memory:
 
@@ -346,7 +346,7 @@ LPDDR models active writable memory:
 
 LPDDR differs from HBF because it is smaller, more active, and sensitive to read/write direction changes and refresh overhead. Decode-heavy workloads can stress LPDDR even when HBF capacity is sufficient.
 
-### 6.4 DMA Engines
+### 8.4 DMA Engines
 
 DMA engines model movement between memory tiers and endpoints:
 
@@ -358,7 +358,7 @@ DMA engines model movement between memory tiers and endpoints:
 
 Each transfer consumes descriptor queue entries, outstanding slots, channels, setup overhead, and bandwidth. This lets the emulator expose cases where compute is available but data movement cannot feed it fast enough.
 
-### 6.5 PCIe/CXL Endpoint and OEM Topology
+### 8.5 PCIe/CXL Endpoint and OEM Topology
 
 The endpoint and topology model represent the server around the device:
 
@@ -441,7 +441,7 @@ flowchart TD
     H --> I[Qualified Prediction Envelope]
 ```
 
-### 8.1 If HBF Arrives Before NPU
+### 10.1 If HBF Arrives Before NPU
 
 The emulator can use measured HBF bandwidth, latency, queue depth, access granularity, endurance constraints, and controller behavior while keeping NPU timing analytical or partner-modeled. This supports early decisions about:
 
@@ -451,7 +451,7 @@ The emulator can use measured HBF bandwidth, latency, queue depth, access granul
 - DMA staging requirements from HBF into active memory.
 - Whether HBF bandwidth or access granularity is sufficient for the target workloads.
 
-### 8.2 If NPU Timing Arrives Before HBF
+### 10.2 If NPU Timing Arrives Before HBF
 
 The emulator can consume measured or partner-modeled NPU operator timing while HBF remains an assumed or synthetic tier. This supports early decisions about:
 
@@ -461,7 +461,7 @@ The emulator can consume measured or partner-modeled NPU operator timing while H
 - Compute efficiency by operator class.
 - Whether compute is likely to outrun memory movement.
 
-### 8.3 If PCIe/OEM Platform Arrives First
+### 10.3 If PCIe/OEM Platform Arrives First
 
 The emulator can use measured host topology, link bandwidth, peer-to-peer behavior, NUMA effects, and shared-uplink contention while keeping device internals virtual. This supports early decisions about:
 
@@ -471,7 +471,7 @@ The emulator can use measured host topology, link bandwidth, peer-to-peer behavi
 - Host staging cost.
 - Multi-device scaling limits.
 
-### 8.4 After Full Silicon
+### 10.4 After Full Silicon
 
 When full silicon is available, the emulator becomes a regression and planning harness:
 
@@ -487,7 +487,7 @@ When full silicon is available, the emulator becomes a regression and planning h
 
 The initial use cases should be narrow enough to produce credible evidence and broad enough to guide product direction.
 
-### 9.1 Search, Embedding, and Neural Reranking
+### 11.1 Search, Embedding, and Neural Reranking
 
 The Search track is based on the ATMOS E3.S product/workstream framing: independent neural services and medium-size model serving in a modular E3-class device.
 
@@ -515,7 +515,7 @@ Why ATMOS may fit:
 - Persistent local model capacity can reduce cold-load and model-switch costs.
 - A modular E3.S deployment model can map naturally to per-service or per-tenant inference pools.
 
-### 9.2 MoE Serving and HBF Evaluation
+### 11.2 MoE Serving and HBF Evaluation
 
 The MoE track is based on the HBF/OEM/LLM evaluation framing: high-concurrency serving with varied context sizes, expert placement, KV reuse, and topology sensitivity.
 
@@ -634,7 +634,7 @@ flowchart TD
     K --> L[Comparison Reports]
 ```
 
-### 13.1 Swappable Backend Contract
+### 15.1 Swappable Backend Contract
 
 Each backend should implement the same logical contract:
 
@@ -655,7 +655,7 @@ This lets the same Search or MoE workload run in several modes:
 | Competitive baseline | AMD accelerator                 | Compare against alternative accelerator architecture when available.                       |
 | System baseline      | CPU / NVMe / CXL                | Separate storage, memory, and host-staging effects from accelerator effects.               |
 
-### 13.2 AI Lab Integration
+### 15.2 AI Lab Integration
 
 The AI lab can provide measured control runs for RTX and DGX systems while ATMOS remains simulated or partially available. This is valuable because management can see the same workload reported across both proposed and existing platforms.
 
@@ -669,7 +669,7 @@ The lab integration should capture:
 
 The comparison should not claim that simulated ATMOS results are measured hardware results. Reports must label every result by evidence class. The value is that all systems are evaluated through one workload harness, one metrics schema, and one report format.
 
-### 13.3 Why This Matters
+### 15.3 Why This Matters
 
 This framing turns the workstream into a reusable product and architecture evaluation platform:
 
