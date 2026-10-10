@@ -1,0 +1,1685 @@
+
+You said:
+But i couldnt see the list od comapnes which wiol qualify
+Copilot said:
+You are right. The previous deck and Word document identified customer segments, but did not include a named-account qualification list. That is a gap, especially because management will want to see whether credible buyers already demonstrate the workload and purchasing behavior ATMOS is targeting.
+
+The companies below should be positioned as publicly evidenced account candidates and market archetypes, not as confirmed Sandisk prospects. Final qualification requires customer interviews, workload data, infrastructure ownership, budget timing, and proof that ATMOS can remove cost or enable a funded capability.
+
+Recommended named-company shortlist
+Tier 1: Strongest design-partner candidates
+Company / organization	Primary ATMOS use case	Why the company qualifies	Likely ATMOS entry point
+Nasdaq	Retrieval and neural reranking	Nasdaq publicly describes an AI platform focused on embedding, retrieval, accuracy, response time, and operating cost. NVIDIA reports 30% faster responses and 30% accuracy improvement from Nasdaq’s retrieval work.
+nvidia
+High-capacity retrieval and reranking service for regulatory, market, surveillance, and internal knowledge data
+EPRI	Air-gapped knowledge assistant	EPRI runs Power Chat locally for utility research and explicitly requires data sovereignty, controlled environments, and air-gap capability. NVIDIA reports a 120B-class model and large document cache running locally.
+nvidia
+ATMOS D8 knowledge appliance for utility documents, operating procedures, research, evidence retrieval, and citations
+Amdocs	Telecom knowledge and operational retrieval	Amdocs uses NVIDIA DGX Cloud, NIM, AI Enterprise, RAG, and domain agents for customer care, sales, billing, and network operations. Amdocs reports token reductions of up to 60% in preprocessing and 40% in inference for some telecom RAG use cases.
+nvidia
+Regional ATMOS retrieval, ticket similarity, network runbook, and customer-care knowledge services
+Pinterest	Recommendation tables and semantic feature serving	Pinterest operates visual discovery and recommendation at enormous scale. NVIDIA reports 640 million users, more than 80 billion monthly searches, 16 billion boards, and a 14,000-GPU fleet serving multimodal discovery and reranking.
+nvidia
++1
+Large persistent visual embeddings, long-tail feature tables, local candidate generation, and offline or auxiliary reranking
+Tractian	Edge semantic archive and similarity search	Tractian processes sensor data from 200,000 industrial machines and runs 500 million daily inference requests across specialized agents. The platform targets industrial maintenance and failure investigation.
+nvidia
+Historical sensor-feature archive, similar-failure retrieval, maintenance evidence, and industrial agent memory
+Edison Scientific	Intelligent document processing	Edison Scientific’s Kosmos system searches scientific papers, clinical trials, and patents. NVIDIA states that the literature agent searches more than 175 million documents and supports over 50,000 scientists.
+nvidia
++1
+Persistent scientific-document features, retrieval, reranking, cited evidence, and batch parsing/extraction
+These six organizations provide the strongest combination of:
+
+A publicly recognized workload
+A large persistent neural-data footprint
+Existing AI infrastructure spending
+Measurable quality and service outcomes
+A potential ATMOS capacity or data-locality advantage
+Company candidates by ATMOS use case
+Use case 1: Rich enterprise retrieval and neural reranking
+Strong named candidates
+Nasdaq
+
+Financial, regulatory, surveillance, product, and internal knowledge data
+Explicit focus on embedding, retrieval efficiency, accuracy, and cost
+Strongest named financial-services archetype for ATMOS retrieval/reranking
+nvidia
+Amdocs
+
+Telecom customer-care, billing, sales, and network-operation knowledge
+Existing domain-specific RAG and agent platform
+Potential deploy-through partner for telecom operators rather than only an end customer
+nvidia
+AT&T
+
+Publicly identified by NVIDIA as using AI Enterprise, NeMo, NIM, and RAPIDS for telecom AI agents
+Potential workload involves operational knowledge, customer-care retrieval, and enterprise agent accuracy
+nvidia
+Lowe’s
+
+Large product catalog and associate knowledge problem
+Operates more than 1,750 stores and provides associates with an AI-powered product-knowledge companion
+Strong retrieval and catalog-reranking archetype, though ATMOS would not replace Lowe’s vision or digital-twin systems
+nvidia
++1
+EPRI
+
+Utility research assistant and controlled local documentation
+Suitable for rich retrieval over technical reports, grid studies, operating procedures, and regulatory evidence
+nvidia
+Additional vertical accounts to investigate
+Bloomberg
+S&P Global
+Thomson Reuters
+LexisNexis
+RELX
+FactSet
+Moody’s
+Verizon
+T-Mobile
+Ericsson
+Nokia
+Schneider Electric
+Siemens
+Honeywell
+These are hypothesis accounts, not yet publicly validated ATMOS prospects. Qualification should focus on corpus size, current reranking infrastructure, GPU cost, and retrieval-quality requirements.
+
+Use case 2: Recommendation and feature-table serving
+Strong named candidates
+Pinterest
+
+Best direct reference
+Visual embeddings, recommendation, search, shopping, ads, safety, and multimodal reranking
+Public scale demonstrates a real capacity and feature-serving challenge
+nvidia
++2
+Lowe’s
+
+Product discovery, project recommendations, compatibility guidance, store inventory, and more than 50,000 in-store items
+Mylow and Mylow Companion demonstrate value from product knowledge and recommendation at scale
+nvidia
++1
+Amdocs and its telecom customers
+
+Subscriber features, service recommendations, next-best actions, retention, billing, and sales
+Amdocs could be both a software partner and route to telecom accounts
+nvidia
+Media and streaming organizations
+
+Large user/item histories, content embeddings, and long-tail catalogs
+Pinterest is already a public archetype for visual and commercial recommendation infrastructure.
+nvidia
+Additional accounts to investigate
+Walmart
+Target
+The Home Depot
+eBay
+Etsy
+Wayfair
+Best Buy
+Instacart
+Spotify
+Netflix
+Disney
+Comcast
+Paramount
+Booking Holdings
+Expedia
+Critical qualification question
+ATMOS only qualifies if the customer has:
+
+
+
+Large persistent feature tables
++
+expensive GPU/DRAM hierarchy
++
+bounded gather or candidate-scoring operations
++
+moderate update frequency
++
+compact candidate output
+A company having a recommendation system is not enough. Sandisk must prove that the priced bottleneck is feature-table capacity or movement rather than dense ranking compute.
+
+Use case 3: Batch intelligent document processing
+Strong named candidates
+Edison Scientific
+
+Scientific papers, patents, clinical-trial documents, charts, figures, and cited evidence
+More than 175 million searchable documents make this a highly relevant capacity case.
+nvidia
++1
+DocuSign
+
+NVIDIA identifies DocuSign among organizations turning documents into business intelligence
+Obvious workload includes agreement extraction, clause analysis, comparison, search, and evidence lineage.
+nvidia
++1
+Justt
+
+NVIDIA identifies Justt in document-intelligence workflows
+Potential fit includes dispute, claim, transaction, and supporting-document evidence processing.
+nvidia
++1
+Nasdaq
+
+Regulatory filings, financial reports, surveillance evidence, policy documents, and product data
+Existing emphasis on retrieval accuracy and cost makes document processing a logical adjacent workload.
+Lowe’s
+
+Contractor notes, quotes, product lists, supplier materials, policies, and store operating documents
+Lowe’s has also publicly discussed AI-assisted document digitization and AI-based associate knowledge.
+nvidia
++1
+Additional accounts to investigate
+JPMorgan Chase
+Bank of America
+Wells Fargo
+Citi
+Capital One
+Goldman Sachs
+Morgan Stanley
+State Farm
+Allianz
+AXA
+Liberty Mutual
+Progressive
+Thomson Reuters
+RELX
+KPMG
+Deloitte
+PwC
+EY
+Siemens
+Bosch
+Honeywell
+For these accounts, the business buyer may be claims operations, compliance, audit, legal, procurement, quality, or research rather than the central AI infrastructure organization.
+
+Use case 4: Air-gapped enterprise knowledge and policy assistant
+Strong named candidates
+EPRI
+
+Most directly aligned candidate
+Already operates an air-gap-capable local document research assistant
+Represents utilities, grid operators, engineering teams, and critical-infrastructure knowledge users.
+nvidia
+Palantir
+
+NVIDIA and Palantir announced deployment of Nemotron models in air-gapped environments for U.S. government agencies and critical-infrastructure operators
+Potential software/integration partner rather than only a customer.
+nvidia
+U.S. government agencies
+
+Air-gapped, mission-specific, sovereign AI is an explicitly identified requirement
+Potential entry points include policy research, maintenance documentation, procurement, logistics, public services, and infrastructure operations, subject to procurement and security qualification.
+nvidia
+Critical-infrastructure operators
+
+NVIDIA’s Palantir announcement explicitly identifies critical infrastructure alongside public agencies
+This includes energy, transportation, finance, communications, water, and government environments.
+nvidia
+Amdocs and telecom operators
+
+Telecom operators often require regional data control and local network-operation knowledge
+Amdocs already provides domain agents and AI-factory integration.
+nvidia
+Additional accounts to investigate
+National laboratories
+Electric utilities
+Nuclear operators
+Water authorities
+Rail and transit operators
+Airports
+Defense contractors
+Aerospace manufacturers
+Government systems integrators
+Oil and gas operators
+Mining companies
+This use case has a high willingness-to-pay potential, but also the highest security-certification and lifecycle burden.
+
+Use case 5: Edge semantic archive and similarity search
+Strong named candidates
+Tractian
+
+Processes industrial-sensor data across 200,000 machines and 1,500 manufacturers
+Ideal archetype for similar-failure retrieval, historical feature search, and maintenance-agent memory.
+nvidia
+CYRAN AI Solutions
+
+Processes large satellite scenes locally in sovereign and air-gapped environments
+ATMOS would not replace JPEG 2000 decode or GPU vision, but could serve historical scene features, semantic archives, and similarity search.
+nvidia
+Pinterest
+
+Uses precomputed visual representations, visual search, multimodal reranking, safety, and content understanding
+Pinterest reported much faster serving when reusing precomputed representations rather than processing raw images repeatedly.
+nvidia
++1
+Lowe’s
+
+Product, store, inventory, catalog, image, digital-twin, and associate knowledge data
+Potential use is archival and product-feature search, not real-time computer vision or Omniverse replacement.
+nvidia
++1
+EPRI and utility operators
+
+Large engineering, maintenance, weather, asset, and operational-information repositories
+Local processing and data sovereignty are already demonstrated priorities.
+nvidia
+Additional accounts to investigate
+Siemens
+Schneider Electric
+Honeywell
+Rockwell Automation
+GE Vernova
+Caterpillar
+John Deere
+Bosch
+Foxconn
+TSMC
+Applied Materials
+Lam Research
+KLA
+Toyota
+Hyundai
+BMW
+Shell
+Chevron
+ExxonMobil
+Rio Tinto
+BHP
+For these companies, ATMOS should be positioned as the historical neural-data and evidence tier, not the live control, simulation, or computer-vision engine.
+
+Account qualification model
+The named organizations should be scored before appearing as an actionable sales list.
+
+Qualification dimensions
+Dimension	Qualification question	Weight
+Neural-data capacity	Does the workload require at least 250 GB of reusable vectors, features, document representations, or model artifacts?	20%
+Data reuse	Are the same representations accessed repeatedly rather than processed only once?	15%
+Locality or sovereignty	Must data remain on-premises, regional, disconnected, or under customer control?	15%
+Priced bottleneck	Can the customer identify a GPU, DRAM, cloud, network, or labor cost to remove?	20%
+Latency fit	Can the service tolerate ATMOS’s measured p95/p99 without harming the workflow?	10%
+Operator fit	Can qualified ATMOS kernels execute the required gather, scoring, rerank, top-k or extraction operations?	10%
+Budget and timing	Is an expansion, refresh, cloud renewal, or operational initiative funded within 12–24 months?	10%
+Account categories
+Category A: Design partner
+Score of at least 75
+Customer provides data distribution and workload traces
+Customer agrees to matched benchmark
+A real cost block or funded capability is identified
+Technical and business sponsors exist
+Category B: Lighthouse prospect
+Score of 60–74
+Strong public evidence and strategic fit
+Needs discovery and sizing before POC commitment
+Category C: Market archetype
+Score below 60 or insufficient information
+Useful for market validation, but should not appear as sales-qualified
+Recommended initial outreach list
+I would narrow the first design-partner effort to ten organizations:
+
+EPRI
+Nasdaq
+Amdocs
+Pinterest
+Tractian
+Edison Scientific
+Lowe’s
+DocuSign
+Palantir
+CYRAN AI Solutions
+Why these ten
+They provide coverage across all five use cases:
+
+
+
+Retrieval / reranking:
+Nasdaq, Amdocs, EPRI
+ 
+Recommendation / feature serving:
+Pinterest, Lowe’s, Amdocs
+ 
+Document intelligence:
+Edison Scientific, DocuSign, Nasdaq
+ 
+Air-gapped knowledge:
+EPRI, Palantir, CYRAN
+ 
+Edge semantic archive:
+Tractian, CYRAN, Pinterest, Lowe’s
+How this should appear in the presentation
+The main deck should include one concise slide titled:
+
+“Named Account Candidates and Public Workload Evidence”
+The slide should show:
+
+Design-partner shortlist: EPRI, Nasdaq, Amdocs, Pinterest, Tractian
+Solution partners / route to market: Palantir, DocuSign, OEMs, enterprise AI software vendors
+Lighthouse archetypes: Lowe’s, Edison Scientific, CYRAN
+Qualification statement: “Public evidence demonstrates workload relevance. No company is represented as a committed Sandisk customer.”
+The detailed Word document should include:
+
+Named-company matrix
+Public evidence for each company
+Proposed ATMOS entry point
+Buyer persona
+Qualification questions
+Design-partner scorecard
+Outreach sequence
+Explicit distinction between customer, partner, and market archetype
+Bottom line
+The missing list should not simply be a collection of well-known companies. It should show:
+
+Which organization has which workload, what ATMOS component would address it, what cost or capability might be improved, and what evidence is still needed before calling the account qualified.
+
+The strongest initial named accounts are EPRI, Nasdaq, Amdocs, Pinterest, Tractian, Edison Scientific, Lowe’s, DocuSign, Palantir, and CYRAN AI Solutions.
+
+
+Reasoning completed in 1 step
+
+
+
+
+
+
+
+Sources
+Favicon typeFavicon typeFavicon type
+You said:
+I need mapping of SNDISK ATMOS E3S offerings with customer and us case . Then i need to know how Turnkey solution with ATMOS intelligance we are building should slove the real word problem.Then that problem and solution mapping
+Copilot said:
+You need a single, traceable storyline that connects ATMOS hardware configuration → target customer → operational problem → turnkey application → measurable outcome. The earlier material separated these topics, which made it difficult to see why a particular customer would buy a particular ATMOS configuration.
+
+The proposal should now follow this chain:
+
+
+
+Customer and real-world problem
+        ↓
+Qualified ATMOS use case
+        ↓
+ATMOS turnkey solution profile
+        ↓
+Required hardware configuration
+        ↓
+Customer workflow
+        ↓
+Measurable business value
+        ↓
+Competitive benchmark and purchase decision
+1. Proposed Sandisk ATMOS E3.S offering portfolio
+Offering A: ATMOS Intelligence Edge 4
+
+
+4 ATMOS E3.S devices
+512 GB nominal distributed HBF
+Approximately 400 GB application study allocation
+One four-device P2P domain
+Compact pedestal or short-depth rack appliance
+Intended customer
+One department
+One secure site
+One engineering or research group
+Air-gapped or intermittently connected operation
+Approximately 25–100 concurrent users
+Small-to-medium private knowledge collection
+Best use cases
+Local policy and procedure assistant
+Engineering-document assistant
+Research-paper retrieval
+Contract and compliance search
+Small semantic archive
+Departmental embedding and reranking
+Secure offline RAG
+Not intended for
+Dense large-model training
+High-concurrency dense LLM decode
+Real-time computer vision
+Robotics control
+Full NVIDIA workstation replacement
+Offering B: ATMOS Intelligence Departmental 8
+
+
+8 ATMOS E3.S devices
+1.024 TB nominal distributed HBF
+Approximately 800 GB application study allocation
+Two independent four-device P2P domains
+2U, 3U, or departmental pedestal appliance
+Intended customer
+Departmental private-AI service
+Factory or utility site
+Telecom regional operation
+Legal, compliance, or document-processing group
+Approximately 100–1,000 users
+Hundreds of gigabytes of reusable neural representations
+Best use cases
+Rich retrieval and neural reranking
+Batch intelligent document processing
+Enterprise Knowledge Agent
+Edge semantic archive
+Technical-manual and service-case retrieval
+Scientific-document intelligence
+Initial commercial role
+This should be the first serious product and POC configuration because the 8-device system can demonstrate:
+
+Capacity advantage
+Two P2P fault domains
+Multi-tenant service
+Enterprise lifecycle
+Retrieval and document workflows
+Manageable OEM and thermal scope
+Offering C: ATMOS Intelligence Enterprise 16
+
+
+16 ATMOS E3.S devices
+2.048 TB nominal distributed HBF
+Approximately 1.6 TB application study allocation
+Four four-device P2P domains
+Enterprise 2U or 4U appliance
+Intended customer
+Enterprise shared AI service
+Large regional or national knowledge platform
+Financial-services retrieval
+Telecom network and customer-care knowledge
+Large recommendation or feature-table service
+Multi-department document processing
+Large industrial semantic archive
+Best use cases
+Recommendation tables and feature serving
+Large-corpus retrieval and reranking
+High-volume document intelligence
+Multi-tenant private knowledge services
+Large edge-generated feature archives
+Multiple index and model generations
+Commercial role
+The E16 should become the standard production system if the D8 proves:
+
+Quality
+Useful bandwidth
+p99 latency
+Accepted throughput
+Availability
+Cost per accepted service unit
+Offering D: ATMOS Intelligence Scale 24
+
+
+24 ATMOS E3.S devices
+3.072 TB nominal distributed HBF
+Approximately 2.4 TB application study allocation
+Six four-device P2P domains
+Enterprise 4U or specially qualified 2U/3U appliance
+Intended customer
+Hyperscale or very large enterprise feature service
+Large recommendation infrastructure
+National or multi-region document and evidence platform
+Very large industrial or geospatial semantic archive
+Neural-data sidecar beside existing GPU infrastructure
+Best use cases
+Multi-terabyte recommendation feature tables
+Long-tail item and user embeddings
+Very large multi-vector retrieval
+Large index generations with active and rollback copies
+Multi-site semantic archives
+Cold MoE expert capacity as a later research path
+Important gate
+E24 should not be productized before E16 proves:
+
+Random-read behavior
+Switch-domain scaling
+Sustainable cooling
+Fleet economics
+Failure reserve
+Customer demand for more than 1.6 TB of qualified application capacity
+2. Offering-to-customer-to-use-case mapping
+ATMOS offering	Primary customer type	Core problem	Best initial use case	Customer outcome
+Edge 4	Government office, utility team, engineering group, research lab	Sensitive knowledge cannot leave the site	Air-gapped Knowledge Agent	Local cited answers without cloud dependency
+Departmental 8	Factory, telecom region, legal/compliance team, scientific organization	Large documents and features are difficult to search and process	Retrieval, reranking and document intelligence	Faster evidence discovery and lower cost per accepted case
+Enterprise 16	Bank, telecom operator, retailer, large manufacturer	Neural tables and enterprise corpora exceed economical GPU memory	Recommendation features, large RAG, batch IDP	Lower infrastructure cost and more resident information
+Scale 24	Internet-scale service, national platform, hyperscaler, large industrial group	Multi-terabyte neural datasets require too many GPU/DRAM nodes	Feature-table and semantic-archive serving	Consolidation and reduced data movement
+ATMOS Sidecar	Existing NVIDIA/AMD AI customer	GPUs are consumed by retrieval, embedding or long-tail data services	Retrieval/reranking sidecar	Preserve GPUs for dense generation and compute-heavy models
+3. Customer and real-world problem mapping
+The following organizations are public workload examples and potential account archetypes, not confirmed Sandisk customers.
+
+3.1 Nasdaq: financial retrieval and evidence intelligence
+Publicly evidenced problem
+Nasdaq built an AI platform focused on embedding and retrieval efficiency, improved search, operating cost, and user experience. NVIDIA reports 30% faster response time and a 30% improvement in chatbot and conversational-interface accuracy.
+nvidia
+
+Real-world problem
+Financial organizations must search:
+
+Regulatory filings
+Market-surveillance evidence
+Policies
+Research
+Product documentation
+Financial-crime documentation
+Customer and transaction investigations
+The main problem is not merely token generation. The problem is finding the correct evidence quickly and consistently across a large regulated corpus.
+
+Proposed ATMOS offering
+
+
+ATMOS Intelligence Enterprise 16
++
+Financial Evidence Intelligence Solution Pack
+ATMOS Intelligence components
+Financial connector pack
+Hybrid sparse and vector retrieval
+Multi-vector document representations
+Neural reranker
+Entity and metadata filters
+ACL-first evidence retrieval
+Table and filing extraction
+Cited answer service
+Investigation evidence bundles
+Immutable audit trail
+Customer workflow
+
+
+Analyst asks a research or investigation question
+        ↓
+Identity and entitlement are verified
+        ↓
+Sparse and vector search create a shortlist
+        ↓
+ATMOS reranks filings, policies and evidence
+        ↓
+Top evidence is returned with source identity
+        ↓
+LLM creates a cited answer or analyst summary
+        ↓
+Evidence, scores, generation and user action are audited
+Value metric
+Cost per million qualified retrieval queries
+Evidence-finding time
+Citation precision
+Investigator cases completed
+p95/p99 retrieval latency
+GPU capacity avoided
+Why ATMOS might win
+The advantage would come from maintaining richer financial-document representations and multiple index generations in persistent HBF while returning only compact evidence.
+
+ATMOS does not win merely because the system has more capacity. ATMOS must demonstrate either:
+
+Lower cost per accepted query
+Better retrieval quality at comparable cost
+Fewer GPU/DRAM nodes
+Faster investigator workflow
+3.2 EPRI and utilities: air-gapped engineering knowledge
+Publicly evidenced problem
+EPRI developed Power Chat as a secure local document research assistant for utility organizations. NVIDIA states that the workload runs entirely in controlled environments, supports air-gap deployment, and keeps documents, context, and generated responses inside the firewall.
+nvidia
+
+Real-world problem
+Utility engineers must search:
+
+Grid studies
+Operating procedures
+Equipment manuals
+Maintenance history
+Regulatory filings
+Interconnection studies
+Safety documentation
+Environmental reports
+Research archives
+Much of this material cannot be sent to a public AI service.
+
+Proposed ATMOS offering
+
+
+ATMOS Intelligence Edge 4
+or
+ATMOS Intelligence Departmental 8
+ 
++
+Critical Infrastructure Knowledge Solution Pack
+ATMOS Intelligence components
+Air-gapped deployment profile
+Controlled file and document connectors
+Offline ModelPack and index updates
+Engineering-document parser
+Hybrid retrieval
+Reranking
+Citation and source-version enforcement
+Local generator or retrieval-only mode
+Signed update bundles
+Rollback
+Audit and policy controls
+Customer workflow
+
+
+Engineer selects an asset, procedure or project
+        ↓
+ATMOS applies identity and document-access policy
+        ↓
+Relevant procedures, studies and historical evidence are retrieved
+        ↓
+ATMOS reranks evidence according to engineering context
+        ↓
+The system produces a cited answer or evidence package
+        ↓
+Engineer validates and approves the result
+Value metric
+Engineering research time
+Correct document-version rate
+Citation precision
+Questions resolved without escalation
+Cost per 10,000 accepted answers
+Number of collections resident locally
+Cloud and data-egress cost avoided
+Offline service availability
+Why ATMOS might win
+ATMOS could keep several engineering collections, historical index generations, and specialized representations locally without consuming premium GPU memory.
+
+The comparison is not only with NVIDIA. It must also include:
+
+CPU-only private RAG
+DGX Spark or Dell GB10
+HPE Private Cloud AI
+Nutanix GPT-in-a-Box
+Traditional enterprise search
+3.3 Amdocs and telecom operators: network and customer-care intelligence
+Publicly evidenced problem
+Amdocs uses NVIDIA DGX Cloud, NVIDIA AI Enterprise, NVIDIA NIM, and telecom-specific RAG and agents across customer care, sales, billing, and network operations. Amdocs reports token reductions of up to 60% for preprocessing and up to 40% for inference in certain telecom RAG workloads.
+nvidia
+
+Real-world problem
+Telecom operators manage:
+
+Network alarms
+Incident histories
+Equipment manuals
+Configuration records
+Trouble tickets
+Customer-care transcripts
+Billing disputes
+Service catalogs
+Field-maintenance procedures
+Operations teams repeatedly search large, relatively stable repositories under time pressure.
+
+Proposed ATMOS offering
+
+
+ATMOS Intelligence Departmental 8
+at regional sites
+ 
+or
+ 
+ATMOS Intelligence Enterprise 16
+at central network-operation centers
+ 
++
+Telecom Operations Intelligence Solution Pack
+ATMOS Intelligence components
+Alarm, incident and ticket connectors
+Equipment and network-document ingestion
+Similar-ticket retrieval
+Runbook retrieval
+Reranking by equipment, region and event
+Customer-care knowledge index
+Read-only network inventory tools
+Bounded agent planning
+Regional offline continuity
+Central lifecycle and fleet management
+Customer workflow
+
+
+Network alarm or service ticket arrives
+        ↓
+ATMOS retrieves similar incidents and equipment context
+        ↓
+Runbooks and recent configuration changes are reranked
+        ↓
+The agent summarizes likely cause and recommended actions
+        ↓
+Operator approves the action or escalates
+        ↓
+Outcome is recorded for future retrieval
+Value metric
+Mean time to resolution
+Ticket-handling time
+First-contact resolution
+Reopened ticket rate
+Cost per completed ticket
+Number of regional workloads served
+Tokens and external API calls avoided
+Operational data remaining within region
+Why ATMOS might win
+Telecom can exploit:
+
+Large incident and equipment archives
+Repetitive retrieval
+Regional data locality
+Bounded results
+Multi-site deployment
+The strongest route may be a partnership with Amdocs or another telecom software provider rather than direct replacement of the entire telecom AI platform.
+
+3.4 Pinterest and large digital services: recommendation features
+Publicly evidenced problem
+Pinterest operates visual discovery and recommendation at immense scale. NVIDIA reports more than 640 million monthly users, 80 billion monthly searches, 16 billion boards, and a 14,000-GPU fleet supporting visual discovery, multimodal reranking, content safety and signal generation.
+nvidia
++1
+
+Real-world problem
+Large recommendation services must manage:
+
+User embeddings
+Item embeddings
+Session features
+Historical signals
+Content-safety features
+Visual representations
+Candidate generation
+Ranking features
+Long-tail catalogs
+These structures can exceed GPU memory and create expensive GPU/host-memory hierarchies.
+
+Proposed ATMOS offering
+
+
+ATMOS Intelligence Scale 24
+or rack of E16 nodes
+ 
++
+High-Capacity Feature Serving Solution
+ATMOS Intelligence components
+Key-sharded feature tables
+Sparse gather
+Pooling
+Dot products
+Candidate scoring
+Local top-k
+Table-generation lifecycle
+Update-log replication
+P2P result merge
+Integration with the existing GPU advanced ranker
+Customer workflow
+
+
+Recommendation request arrives
+        ↓
+User, item and context keys are generated
+        ↓
+ATMOS devices retrieve local table rows
+        ↓
+Local scoring and candidate generation execute
+        ↓
+Compact candidate set is merged
+        ↓
+Existing GPU ranker performs compute-intensive final ranking
+Value metric
+Cost per million recommendation requests
+Feature rows per second
+p99 lookup latency
+HBM/DRAM nodes avoided
+Power per billion feature lookups
+Update freshness
+Candidate Recall@k
+GPU memory released for advanced ranking
+Why ATMOS might win
+ATMOS is not proposed as a replacement for Pinterest’s full 14,000-GPU inference estate. ATMOS would target the high-capacity, memory-intensive feature and candidate portion.
+
+A successful result would demonstrate:
+
+Fewer host-memory servers
+Lower power per lookup
+Equal candidate quality
+Competitive freshness
+Lower complete cost per accepted recommendation request
+3.5 Tractian and industrial operators: semantic maintenance archive
+Publicly evidenced problem
+Tractian processes sensor data from approximately 200,000 industrial machines across 1,500 manufacturers and runs 500 million inference requests daily across 50 specialized agents. The system supports predictive maintenance and failure prevention.
+nvidia
+
+Real-world problem
+Industrial maintenance teams need to correlate:
+
+Sensor-event features
+Vibration signatures
+Maintenance history
+Machine manuals
+Previous failures
+Work orders
+Technician observations
+Spare parts
+Corrective actions
+Live sensor processing may remain on GPUs or dedicated edge systems. Historical search and evidence retrieval are separate problems well suited to ATMOS.
+
+Proposed ATMOS offering
+
+
+ATMOS Intelligence Departmental 8
+at a large factory
+ 
+or
+ 
+ATMOS Intelligence Enterprise 16
+at a regional industrial center
+ 
++
+Industrial Maintenance Intelligence Solution Pack
+ATMOS Intelligence components
+Sensor-feature archive
+Failure-event embeddings
+Similarity search
+Equipment and asset metadata
+Maintenance-document retrieval
+Similar-failure reranking
+Spare-parts recommendation
+Technician feedback ingestion
+Local service during WAN outages
+Source and action audit
+Customer workflow
+
+
+An anomaly is detected by the existing monitoring system
+        ↓
+The anomaly’s feature signature is sent to ATMOS
+        ↓
+ATMOS searches historical signatures and maintenance cases
+        ↓
+Relevant manuals, work orders and failures are reranked
+        ↓
+The agent presents likely causes and supporting evidence
+        ↓
+Technician approves the recommended inspection or repair
+Value metric
+Mean time to diagnose
+Similar-failure retrieval accuracy
+Maintenance case resolution time
+Unplanned downtime avoided
+Data-egress reduction
+Cost per million semantic searches
+Number of sites operating during WAN outage
+Why ATMOS might win
+This workflow has the preferred ATMOS pattern:
+
+
+
+Large local historical repository
++
+bounded query
++
+high local feature-read volume
++
+compact result set
+ATMOS should not claim to replace real-time sensor fusion, FFT processing, robotics control or safety systems.
+
+3.6 Edison Scientific: large-scale scientific-document intelligence
+Publicly evidenced problem
+Edison Scientific operates Kosmos, a multi-agent scientific research system. NVIDIA states that the system searches more than 175 million scientific papers, clinical trials and patents and supports more than 50,000 scientists.
+nvidia
++1
+
+Proposed ATMOS offering
+
+
+ATMOS Intelligence Enterprise 16
+or Scale 24
+ 
++
+Scientific Literature Intelligence Solution Pack
+Problem solved
+Very large paper and patent corpus
+Rich page, table, chart and image representations
+Repeated retrieval against stable documents
+Cited scientific answers
+Batch ingestion and index generation
+Multiple model and representation generations
+ATMOS Intelligence workflow
+
+
+New literature is ingested
+        ↓
+Page, table and figure features are created
+        ↓
+Features and indexes are deployed as a signed generation
+        ↓
+Research query is decomposed
+        ↓
+Relevant literature is retrieved and reranked
+        ↓
+Evidence is compared across papers and patents
+        ↓
+A cited research summary is produced
+Value metric
+Cost per million literature queries
+Researchers supported per appliance
+Citation precision
+Literature coverage
+Time to evidence
+Cost of storing several rich representation generations
+Index rebuild time
+4. Consolidated problem-to-solution-to-customer map
+Real-world problem	ATMOS turnkey solution	ATMOS offering	Customer examples	Primary KPI
+Large regulated corpus is expensive to retrieve and rerank	Financial Evidence Intelligence	E16	Nasdaq, financial institutions, regulators	Cost/query and evidence time
+Critical documents cannot leave the site	Critical Infrastructure Knowledge	W4/D8	EPRI, utilities, government	Accepted answer cost and citation precision
+Telecom tickets and network knowledge are fragmented	Telecom Operations Intelligence	D8/E16	Amdocs, telecom operators	Time to resolution
+Recommendation tables exceed economical accelerator memory	High-Capacity Feature Serving	E16/E24	Pinterest, retailers, media platforms	Cost/recommendation request
+Historical industrial signals are difficult to search	Industrial Maintenance Intelligence	D8/E16	Tractian, manufacturers	Diagnosis time and downtime
+Massive scientific corpus needs rich semantics and citations	Scientific Literature Intelligence	E16/E24	Edison Scientific, pharma, research organizations	Time to evidence and cost/query
+Product knowledge is spread across catalog and store systems	Product and Associate Intelligence	D8/E16	Lowe’s and large retailers	Task resolution and recommendation quality
+Contracts and agreements require extraction and comparison	Agreement Intelligence	D8/E16	DocuSign, legal and audit organizations	Cost per accepted document
+Sovereign mission data requires disconnected operation	Sovereign Knowledge Appliance	W4/D8	Palantir ecosystem, public agencies	Offline availability and ACL correctness
+Large geospatial features must remain local	Edge Geospatial Archive	D8/E16	CYRAN AI and geospatial organizations	Egress avoided and search p95
+5. What “ATMOS Intelligence” should mean
+ATMOS Intelligence should not be positioned as a vague AI software layer. It should be a packaged solution framework with five concrete capabilities.
+
+5.1 Understand the customer’s data
+Connectors
+Parsing
+OCR integration
+Feature and embedding creation
+Metadata extraction
+ACL preservation
+Lineage
+Index building
+5.2 Keep reusable neural data resident
+Vector and multi-vector representations
+Document features
+Recommendation tables
+Event signatures
+Model packs
+Active and rollback generations
+HBF placement and sharding
+5.3 Execute data-reduction operations near HBF
+Gather
+Pooling
+Dot products
+Similarity
+MaxSim
+Reranking
+Classification
+Top-k
+Aggregation
+Lightweight extraction
+5.4 Deliver a governed service
+OpenAI-compatible APIs where appropriate
+Retrieval, reranking and document APIs
+User interface
+Identity
+Tenancy
+Queues
+Quotas
+Audit
+Observability
+Failure and recovery
+5.5 Manage complete lifecycle
+Signed ModelPacks
+Signed index generations
+Compatibility manifests
+Staging
+Validation
+Canary
+Atomic promotion
+Rollback
+Offline updates
+Device replacement
+Rebuild from source data
+6. Suggested management slide sequence
+The presentation should now be rearranged as follows:
+
+Slide 1: Customer problems, not hardware
+Show five real-world problems:
+
+Retrieval quality and cost
+Feature-table capacity
+Document-processing expense
+Sovereign knowledge access
+Edge semantic data gravity
+Slide 2: ATMOS offers mapped to problems
+
+
+W4 → secure team knowledge
+D8 → departmental retrieval and documents
+E16 → enterprise neural-data services
+E24 → multi-terabyte feature and archive workloads
+Slide 3: Named customer evidence
+Use:
+
+EPRI
+Nasdaq
+Amdocs
+Pinterest
+Tractian
+Edison Scientific
+Lowe’s
+DocuSign
+Palantir
+CYRAN AI Solutions
+Include the disclaimer:
+
+Public evidence demonstrates workload relevance. No organization is represented as a committed Sandisk customer or qualified prospect.
+
+Slides 4–8: One problem-solution map per core use case
+Each slide should show:
+
+
+
+Customer today
+→ Priced bottleneck
+→ ATMOS Intelligence workflow
+→ Required ATMOS SKU
+→ Matched competitor
+→ Pass criterion
+Slide 9: Shared turnkey product
+Show how the same software and hardware foundation supports all five profiles.
+
+Slide 10: Design-partner qualification plan
+Include:
+
+Target company
+Workload to request
+Data required
+Benchmark required
+Business sponsor
+Technical sponsor
+Cost block to identify
+Decision date
+7. Recommended account qualification questions
+For each potential customer, ask:
+
+How large is the reusable vector, feature, document, or model dataset?
+What percentage is repeatedly accessed?
+What is the current system architecture?
+Which component is the bottleneck?
+How many GPU, CPU, and DRAM nodes are used?
+What is the actual p95 and p99 requirement?
+What is the quality metric?
+How frequently are the features updated?
+What infrastructure or service cost can be removed?
+Is the customer buying or renewing infrastructure in the next 12–24 months?
+Can the customer provide a representative dataset and demand trace?
+Will the customer participate in a matched benchmark?
+Does the customer need on-premises, sovereign, or disconnected operation?
+Who owns the business outcome?
+What result would cause the customer to purchase?
+Bottom line
+The proposal should no longer present ATMOS as:
+
+A high-capacity E3.S AI appliance looking for workloads.
+
+It should present ATMOS as:
+
+A family of turnkey neural-data solutions that solve defined customer problems by keeping large reusable representations resident near bounded compute and returning compact, governed results.
+
+The clearest mapping is:
+
+
+
+ATMOS Edge 4
+→ Local sovereign knowledge
+ 
+ATMOS Departmental 8
+→ Retrieval, documents and edge semantic archives
+ 
+ATMOS Enterprise 16
+→ Enterprise retrieval, document processing and feature serving
+ 
+ATMOS Scale 24
+→ Multi-terabyte recommendation and neural-data infrastructure
+The strongest publicly evidenced customer archetypes are:
+
+Nasdaq for enterprise retrieval
+EPRI for air-gapped knowledge
+Amdocs for telecom operations
+Pinterest for recommendation and feature serving
+Tractian for industrial semantic archives
+Edison Scientific for large-scale document intelligence
+These mappings should become the central structure of the next PPT and Word-document revision.
+
+
+Reasoning completed in 1 step
+
+
+
+
+
+
+
+Sources
+Favicon typeFavicon typeFavicon type
+You said:
+I would like to further filyer it down, i want thos who might currently be using or must be using frrom publoc source. with NVDIA solution they must be having some issue which we can solve  with ATMOS intelligence . HOW
+Copilot said:
+Yes. The list should be filtered much more aggressively. We should retain only organizations for which public sources establish all three of these facts:
+
+The organization is using an NVIDIA platform or software.
+The organization has publicly disclosed a specific workload or bottleneck.
+The disclosed bottleneck plausibly aligns with ATMOS capacity, data locality, retrieval, document processing, or edge persistence.
+Even then, we must not say the organization will buy ATMOS or that ATMOS will solve the issue. The defensible language is:
+
+Public evidence establishes the workload and current pain point. ATMOS has a testable opportunity to address a bounded part of that workload. Customer qualification requires a matched benchmark and discovery conversation.
+
+Filtered shortlist
+I recommend focusing on these six publicly evidenced organizations:
+
+Priority	Publicly evidenced organization	Current NVIDIA usage	Publicly stated issue	ATMOS opportunity
+1	Nasdaq	NeMo Retriever, NIM, NVIDIA AI Enterprise	Slow embedding, indexing, operational cost, accuracy pressure	Retrieval and neural reranking tier
+2	Docusign	NVIDIA Triton on Azure GPUs	Throughput optimization and infrastructure expense	Batch agreement intelligence
+3	EPRI	DGX Spark, DGX Station, Earth-2	Data sovereignty, air-gap, large local model/document working set	Local knowledge and retrieval appliance
+4	ThinkDeep AI / French public sector	H100/H200, AI Enterprise, NIM, NeMo Retriever	More than 100M documents/year, legal citations, confidentiality	Sovereign document-processing and retrieval tier
+5	Amdocs	DGX Cloud, AI Enterprise, NIM, Nemotron	Telecom RAG preprocessing and inference token cost	Regional retrieval, preprocessing and knowledge tier
+6	Tractian	GB300, H200, H100, DGX Spark and CUDA	Huge historical sensor estate, inference cost, manual diagnosis	Industrial semantic archive and agent memory
+I would put Pinterest in a strategic research tier, not in the first customer shortlist. Public evidence confirms enormous recommendation and multimodal workloads, but the workloads are highly real-time and compute-intensive. NVIDIA reports a 14,000-GPU fleet, 80 billion monthly searches and substantial latency improvements, so ATMOS would need an extremely narrow feature-serving wedge rather than a general replacement proposition.
+nvidia
+
+1. Nasdaq: strongest retrieval and reranking candidate
+What public sources establish
+Nasdaq uses NVIDIA NeMo Retriever, NVIDIA NIM and NVIDIA AI Enterprise for an AI platform focused on embedding and retrieval efficiency. The public case study says the initial platform encountered slow processing, operational-cost pressure, slow embedding operations, slow indexing and a need for higher accuracy as usage increased. NVIDIA reports 30% faster responses and a 30% accuracy improvement after optimization.
+nvidia
+
+This is unusually valuable evidence because the public source identifies both:
+
+The implemented NVIDIA solution
+The underlying retrieval, indexing, cost and accuracy issues
+What ATMOS should not try to replace
+ATMOS should not propose replacing the entire Nasdaq AI platform or the LLM generation tier.
+
+The targeted wedge should be:
+
+
+
+Existing Nasdaq AI platform
+        │
+        ├─ Existing LLM and real-time GPU services
+        │
+        └─ ATMOS retrieval and reranking tier
+             ├─ Rich document representations
+             ├─ Financial and regulatory embeddings
+             ├─ Multiple index generations
+             ├─ Bounded candidate scoring
+             └─ Compact evidence output
+How ATMOS Intelligence would address the problem
+Problem
+Large financial, regulatory and surveillance corpora require repeated embedding lookup, retrieval, reranking and evidence assembly. Maintaining richer representations in GPU memory can consume premium accelerator capacity, while CPU or storage tiers may require more movement.
+
+ATMOS mechanism
+Keep large financial-document representations persistently resident in HBF.
+Use CPU or an existing search system to generate an initial candidate set.
+Send only candidate IDs and query features to ATMOS.
+Perform gather, exact similarity, neural reranking and top-k locally.
+Return only compact evidence to the existing LLM tier.
+Keep the existing NVIDIA generation and latency-sensitive services unchanged.
+Proposed Sandisk product
+
+
+ATMOS Intelligence Enterprise 16
++
+Financial Evidence Intelligence Solution Pack
+What must be benchmarked
+Metric	ATMOS gate
+Retrieval quality	Equal or improved NDCG/Recall
+Retrieval p99	Within customer requirement
+Indexing	Better or equivalent refresh window
+Economics	At least 25% lower cost per accepted query
+GPU impact	Measurable GPU memory or node capacity released
+Governance	Same entitlement, evidence and audit behavior
+Why this is the best first account archetype
+The public pain matches ATMOS directly:
+
+
+
+Slow embeddings/indexing
++
+operating-cost pressure
++
+accuracy requirement
++
+large reusable corpus
+This should be the first named account on the management slide.
+nvidia
+
+2. Docusign: strongest document-intelligence candidate
+What public sources establish
+Docusign uses NVIDIA Triton Inference Server with NVIDIA GPUs on Microsoft Azure for Intelligent Agreement Management. The public case study explicitly states that Docusign faced challenges optimizing throughput and managing infrastructure expenses. The platform extracts parties, terms, conditions, start and end dates, and other agreement metadata.
+nvidia
+
+The case study also says Docusign moved models from on-premises CPU servers to NVIDIA GPUs on Azure and used Triton as a unified inference server to reduce framework-specific deployment effort.
+nvidia
+
+ATMOS opportunity
+This is not a generic chat workload. It is a recurring batch and transactional document-processing problem involving:
+
+Agreement parsing
+Classification
+Metadata extraction
+Clause retrieval
+Contract comparison
+Agreement search
+Structured output
+Human review
+How ATMOS Intelligence would address the problem
+
+
+Agreement enters processing queue
+        ↓
+CPU/parser extracts document structure
+        ↓
+ATMOS stores reusable page, clause and agreement features
+        ↓
+ATMOS performs classification, retrieval and bounded extraction
+        ↓
+Exception or low-confidence cases reach NVIDIA GPU/VLM
+        ↓
+Structured agreement data enters Docusign workflow
+The best design is not to replace all NVIDIA inference. Instead:
+
+ATMOS handles high-volume, bounded, reusable document operations.
+NVIDIA GPUs remain available for complex multimodal pages, unsupported operators and high-compute generation.
+The customer pays for GPU execution only where GPU execution is materially valuable.
+Proposed Sandisk product
+
+
+ATMOS Intelligence Enterprise 16
++
+Agreement Intelligence Solution Pack
+Product content
+Agreement ingestion API
+Page and clause representation store
+Contract classifier
+Clause and field extraction
+Agreement similarity
+Version comparison
+Reranking
+Confidence policy
+Human-review queue
+Source lineage
+Model and extraction-schema lifecycle
+Value test
+The value denominator should be:
+
+Cost per accepted agreement
+Cost per accepted agreement
+An accepted agreement must:
+
+Complete within the target window
+Meet field and clause accuracy
+Preserve page and source lineage
+Meet tenant-isolation requirements
+Avoid unapproved manual rework
+Commercial gate
+ATMOS qualifies only if a matched test shows:
+
+At least 25% lower cost per accepted agreement
+Equivalent or better extraction accuracy
+Required throughput and batch window
+At least 20% lower reviewer time
+Reduced GPU capacity or cloud-GPU expense
+This is a credible test because throughput and infrastructure expense are publicly disclosed problems, not inferred problems.
+nvidia
+
+3. EPRI: strongest air-gapped appliance candidate
+What public sources establish
+EPRI uses NVIDIA DGX Spark, Dell Pro Max with GB10, NVIDIA DGX Station and NVIDIA Earth-2. EPRI developed Power Chat, a secure utility-document research assistant that runs inside controlled environments and supports air-gapped operation.
+nvidia
+
+The public case study identifies the core issue directly: deploying advanced AI locally without sacrificing performance, data sovereignty or compliance. The source says source documents, contextual information and generated responses must remain inside the firewall.
+nvidia
+
+The same source reports that Power Chat runs a 120-billion-parameter open model on one deskside system at 35 tokens per second for one researcher and 150 aggregate tokens per second across 10 users.
+nvidia
+
+Important interpretation
+DGX Spark appears to be performing well for this workload. ATMOS cannot enter with a vague “more capacity” argument.
+
+The ATMOS question is narrower:
+
+Can ATMOS provide a lower-cost, more storage-oriented appliance for the document catalog, retrieval, versioning and evidence layer, while retaining a smaller GPU or existing generation endpoint?
+
+How ATMOS Intelligence would solve the bounded problem
+
+
+Utility document repositories
+        ↓
+ATMOS ingestion, ACL and version control
+        ↓
+HBF-resident embeddings and richer document representations
+        ↓
+Hybrid retrieval and neural reranking
+        ↓
+Cited utility evidence
+        ↓
+Existing DGX Spark, external LLM or certified ATMOS generator
+Proposed product
+
+
+ATMOS Intelligence Departmental 8
++
+Critical Infrastructure Knowledge Solution Pack
+ATMOS differentiation to test
+More resident utility collections
+Multiple active and rollback index generations
+Lower acquisition or three-year service cost
+Offline software and ModelPack updates
+Local document and retrieval service shared by several users
+Ability to use retrieval-only mode with the customer’s existing generation system
+What not to claim
+ATMOS should not claim replacement of:
+
+NVIDIA Earth-2
+Weather simulation
+GPU model development
+Fine-tuning
+The demonstrated 120B generation path
+Compute-intensive forecasting
+The ATMOS wedge is the persistent knowledge and retrieval tier.
+
+Purchase gate
+ATMOS is relevant only if EPRI or a utility can identify one of these:
+
+The DGX purchase is being driven substantially by document and catalog capacity.
+Multiple DGX systems are required mainly to hold collections rather than to generate tokens.
+A lower-cost shared retrieval appliance can serve several generation endpoints.
+The customer needs more document/index capacity than the current deskside system economically supports.
+Without one of those findings, DGX Spark remains the stronger solution.
+
+4. ThinkDeep AI and the French public sector: strongest sovereign document-scale candidate
+What public sources establish
+ThinkDeep AI developed the DeepBrain multi-agent platform for the French public sector, including the Ministry of Economy and Finance and Ministry of Defense. The platform uses NVIDIA H100 and H200 GPUs, NVIDIA AI Enterprise, NVIDIA NIM, NVIDIA NeMo Retriever and Nemotron models.
+nvidia
+
+The French administration handles more than 100 million documents annually and requires rapid responses, correct legal citations, confidentiality, security and compliance with the European AI Act. DeepBrain processes data from PDFs, scanned images, schemas and videos.
+nvidia
+
+Publicly established pain
+The problem is not an alleged NVIDIA weakness. The public problem is:
+
+Huge document volume
+Many formats
+Legal-reference accuracy
+Sensitive government data
+Real-time information processing
+Strong data confidentiality and compliance
+ATMOS opportunity
+ATMOS should target the persistent document and retrieval workload, not replace the H100/H200 agent and generation platform.
+
+
+
+DeepBrain / existing agent platform
+        │
+        ├─ NVIDIA GPU tier
+        │    ├─ Complex multimodal reasoning
+        │    ├─ Generation
+        │    └─ Agent orchestration
+        │
+        └─ ATMOS sovereign document tier
+             ├─ Document representations
+             ├─ Legal and policy indexes
+             ├─ Neural reranking
+             ├─ Citation evidence
+             ├─ Historical generations
+             └─ Secure local processing
+Proposed product
+
+
+ATMOS Intelligence Enterprise 16 or Scale 24
++
+Sovereign Public-Service Intelligence Solution Pack
+Why ATMOS may add value
+At more than 100 million documents annually, document-derived representations and index generations can become large enough to create a real capacity problem.
+nvidia
+
+ATMOS may provide:
+
+More resident document features per node
+Lower-cost index and representation capacity
+Local evidence scoring
+Offline or sovereign lifecycle
+Separation of document processing from premium GPU reasoning
+Expansion independent of GPU refresh cycles
+Test required
+Cost per accepted document
+Cost per cited public-service answer
+Ingestion and index-refresh window
+Legal citation accuracy
+ACL and data-sovereignty compliance
+H100/H200 capacity released
+Complete fleet cost
+This could become a powerful design-partner opportunity, but likely through ThinkDeep AI or a public-sector integrator rather than a direct hardware-only sale.
+
+5. Amdocs: strong partner-led telecom opportunity
+What public sources establish
+Amdocs uses NVIDIA DGX Cloud, NVIDIA AI Enterprise, NVIDIA NIM and Nemotron models for telecom agents spanning customer care, sales, billing and network operations.
+nvidia
+
+The public source says telecom RAG optimizations reduced token consumption by as much as 60% in preprocessing and by up to 40% in inference while maintaining accuracy, depending on workload and volume.
+nvidia
+
+What this tells us
+Amdocs has already identified cost per token and preprocessing cost as meaningful economic variables.
+
+It does not prove that Amdocs has an unsolved NVIDIA problem. It proves that the workload is cost-sensitive and that preprocessing/retrieval efficiency materially affects economics.
+
+ATMOS opportunity
+ATMOS could handle the large, repetitive knowledge operations around:
+
+Network tickets
+Equipment documentation
+Service catalogs
+Customer-care histories
+Billing rules
+Incident evidence
+Runbooks
+Similar cases
+The NVIDIA tier would continue to handle:
+
+Complex agent reasoning
+Generation
+Fine-tuned telecom models
+Multistep orchestration
+Strict interactive workloads
+Proposed deployment
+
+
+Central NVIDIA AI factory
+        │
+        ├─ Reasoning and generation
+        │
+        └─ Regional ATMOS D8/E16 appliances
+             ├─ Ticket and incident retrieval
+             ├─ Equipment/runbook knowledge
+             ├─ Preprocessing
+             ├─ Neural reranking
+             └─ Local continuity
+Proposed Sandisk package
+
+
+ATMOS Intelligence Departmental 8
+or Enterprise 16
+ 
++
+Telecom Operations Intelligence Solution Pack
+Real-world business problem solved
+
+
+Alarm or ticket
+     ↓
+Retrieve similar incidents and relevant network context
+     ↓
+Rerank runbooks and configuration evidence
+     ↓
+Return compact evidence to Amdocs agent
+     ↓
+Agent recommends next action
+     ↓
+Operator approves or escalates
+Value metrics
+Preprocessing cost per ticket
+Retrieval tokens sent to the LLM
+Mean time to resolution
+First-contact resolution
+GPU utilization released
+Cost per completed customer-care interaction
+Regional data movement avoided
+Best commercial approach
+Treat Amdocs primarily as a solution and channel partner candidate, because Amdocs can integrate ATMOS into telecom AI offerings. A direct attempt to replace its NVIDIA platform would be strategically weak.
+
+6. Tractian: strong industrial neural-data opportunity, but not an NVIDIA replacement
+What public sources establish
+Tractian uses a mixture of NVIDIA GB300 NVL72, H200 and H100 systems, along with CUDA and DGX Spark. The platform processes sensor information from 200,000 industrial machines across 1,500 manufacturers and runs 500 million inference requests daily through 50 specialized agents.
+nvidia
+
+The public case study reports 50% lower inference latency, 15% lower inference cost and 35% lower model-training time using NVIDIA infrastructure. It also says maintenance teams historically had to interpret vibration spectra manually and cross-reference technical documentation under time pressure.
+nvidia
+
+Interpretation
+The NVIDIA platform is producing strong measured value. ATMOS should not propose replacement of:
+
+Real-time FFT
+Live sensor processing
+Training
+Foundation-model inference
+Strict low-latency agent execution
+The ATMOS opportunity is the historical semantic memory layer.
+
+How ATMOS Intelligence would complement the system
+
+
+Existing Tractian sensor and NVIDIA inference tier
+        ↓
+Anomaly signature and equipment identity
+        ↓
+ATMOS industrial semantic archive
+        ├─ Historical signal embeddings
+        ├─ Previous failures
+        ├─ Work orders
+        ├─ Manuals
+        ├─ Technician notes
+        └─ Repair outcomes
+        ↓
+Top similar failures and evidence
+        ↓
+Existing Tractian agent
+Proposed product
+
+
+ATMOS Intelligence Departmental 8
++
+Industrial Maintenance Memory Solution Pack
+Customer problem solved
+ATMOS would help answer:
+
+Has this signal pattern appeared before?
+Which prior failure had the closest signature?
+Which repair resolved the previous case?
+Which manual and procedure apply to this machine?
+Which parts were replaced?
+What action was successful under similar operating conditions?
+ATMOS value test
+Similar-failure Recall@k
+Diagnosis time
+Data egress
+Historical cases resident at the site
+Cost per million similarity queries
+WAN-outage continuity
+Existing NVIDIA inference capacity released
+Maintenance-agent answer quality
+This is a valid ATMOS opportunity because the workload is large, historical, reusable and produces compact results. It is a complement to NVIDIA, not a replacement.
+
+Accounts I would remove from the first shortlist
+Pinterest
+Keep as a strategic market archetype, not an initial design partner.
+
+Pinterest operates a 14,000-GPU environment with real-time multimodal inference, 80 billion monthly searches and strong latency-sensitive requirements. NVIDIA reports that its models now run at less than 8% of previous AI transaction costs and that the assistant processes 25 times more visual context per request.
+nvidia
+
+ATMOS might one day support cold embeddings or long-tail feature capacity, but the first commercial benchmark would be extremely demanding.
+
+Lowe’s
+Keep as a vertical archetype rather than first design partner.
+
+Lowe’s uses NVIDIA GPUs and RTX workstations across product knowledge, computer vision, digital twins and generative AI. The public evidence mixes workloads that ATMOS could address with workloads ATMOS cannot address, including simulation, 3D and real-time vision.
+nvidia
+
+CYRAN AI Solutions
+Keep as an edge archetype.
+
+The disclosed bottleneck is JPEG 2000 decoding of large satellite scenes. DGX Spark reduced decode time for a 26 GB scene from more than five minutes to just over two minutes. That is a GPU decode workload, not the current ATMOS design center.
+nvidia
+
+ATMOS could support the derived semantic archive after feature extraction, but that is not the publicly stated bottleneck.
+
+Palantir
+Treat as an ecosystem or integration partner, not an end-customer target.
+
+Public sources establish Palantir deployment of NVIDIA Nemotron in air-gapped environments for government agencies. They do not establish that Palantir has a capacity or cost problem ATMOS can solve.
+nvidia
+
+Final filtered account tiers
+Tier A: Workload and pain publicly established
+Account	Public NVIDIA solution	Public pain point	ATMOS wedge	Recommended relationship
+Nasdaq	NeMo Retriever, NIM, AI Enterprise	Slow embedding/indexing, cost and accuracy	Retrieval/reranking	Direct design partner
+Docusign	Triton on Azure NVIDIA GPUs	Throughput and infrastructure expense	Batch agreement intelligence	Direct design partner
+EPRI	DGX Spark, DGX Station	Sovereignty, air-gap and local capacity	Knowledge/retrieval appliance	Direct design partner
+ThinkDeep AI / French administration	H100/H200, NIM, NeMo	Over 100M documents, citations, security	Sovereign document tier	Solution partner
+Amdocs	DGX Cloud, NIM, AI Enterprise	Preprocessing and inference cost	Telecom retrieval tier	Channel/solution partner
+Tractian	GB300/H200/H100, CUDA	Massive historic sensor data and manual diagnosis	Industrial semantic memory	Direct or OEM partner
+Tier B: Strong workload, but no publicly established ATMOS-aligned pain
+Pinterest
+Lowe’s
+Palantir
+CYRAN AI Solutions
+Amazon
+Instacart
+These should be studied, not represented as near-term qualified accounts.
+
+How to approach these companies
+Do not lead with:
+
+“ATMOS has more HBF than NVIDIA.”
+
+Lead with:
+
+“Your public NVIDIA case study identifies a workload bottleneck in retrieval, document throughput, local sovereignty, preprocessing cost or historical-data access. We would like to benchmark whether an ATMOS neural-data tier can remove cost from that bounded stage while preserving your NVIDIA investment.”
+
+Discovery questions
+Which workload stage currently consumes the most GPU memory?
+Which stage has the lowest GPU utilization?
+How much reusable neural data must remain warm?
+What is the read pattern: sequential, candidate-based or random?
+How much of the GPU bill belongs to retrieval, preprocessing or feature lookup?
+Which workload can be separated from generation or training?
+What p95 and p99 must the separated stage meet?
+Is there a discrete GPU, cloud or DRAM capacity block that can be eliminated?
+How large are active and rollback index generations?
+Can the customer provide a workload replay and relevance or quality ground truth?
+The strongest first three engagements
+My recommendation is:
+
+1. Nasdaq
+Test rich retrieval and neural reranking.
+
+2. Docusign
+Test batch agreement extraction, retrieval and agreement similarity.
+
+3. EPRI
+Test air-gapped document retrieval and cited knowledge, with generation optional.
+
+These three cover:
+
+Retrieval economics
+Document throughput
+Sovereign appliance operation
+They also avoid beginning with the hardest ATMOS problems, such as dense generation, real-time vision, training or GPU-fabric integration.
+
+Bottom line
+The correct filtered story is:
+
+These are not companies that “must have an NVIDIA problem.” These are companies whose public NVIDIA case studies disclose a workload and bottleneck that ATMOS can test against.
+
+The most defensible targets are:
+
+Nasdaq: slow embedding/indexing and retrieval economics
+Docusign: inference throughput and infrastructure expense
+EPRI: local sovereign knowledge and air-gap requirements
+ThinkDeep/French public sector: 100M-document sovereign processing
+Amdocs: telecom preprocessing and inference cost
+Tractian: very large historical industrial-data retrieval
+For each, ATMOS should complement the current NVIDIA system first by removing the capacity-heavy, repetitive, data-local portion. Only after a matched benchmark proves accepted-service economics should Sandisk discuss replacement.
+
+
+Reasoning completed in 1 step
